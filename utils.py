@@ -1,6 +1,14 @@
 import numpy as np
 import networkx as nx
 
+def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
+    perturbed_net = network.copy()
+    perturbed_net[i, j] = value
+    if not is_directed:
+        perturbed_net[j, i] = value
+
+    return perturbed_net
+
 def connectivity_matrix_to_G(W: np.ndarray, directed=False):
     """
     Convert a connectivity matrix to a graph object.
@@ -46,7 +54,7 @@ def get_random_nondiagonal_matrix_entry(n: int):
     return (i, j)
 
 class NetworkStatistics():
-    def __init__(self, metric_names=[], custom_metrics={}):
+    def __init__(self, metric_names=[], custom_metrics={}, directed=False):
         """
         Initialize a NetworkStatistics object with a set of metrics to be calculated.
         
@@ -66,9 +74,14 @@ class NetworkStatistics():
                 
             For example - 
                 {"sqrt_of_edges": lambda G: G.number_of_edges() ** 0.5}
+        
+        directed : bool
+            Indicate whether the graph is directed or not.
 
         """
         self._SUPPORTED_METRICS = ["num_edges", "num_triangles"]
+
+        self._is_directed = directed
 
         self.metric_names = metric_names
         self._validate_predefined_metrics()
@@ -85,6 +98,9 @@ class NetworkStatistics():
             if metric_name not in self._SUPPORTED_METRICS:
                 raise ValueError(f"Metric {metric_name} is not supported.")
 
+            if metric_name == "num_triangles" and self._is_directed:
+                raise ValueError("The 'num_triangles' metric is not supported for directed graphs.")
+
     def _validate_custom_metrics(self):
         for metric_name, stat_func in self.custom_metrics:
             if not callable(stat_func):
@@ -97,7 +113,7 @@ class NetworkStatistics():
             if metric_name == "num_edges":
                 func = lambda G: len(G.edges())
             elif metric_name == "num_triangles":
-                func = lambda G: sum(nx.triangles(G).values()) / len(G.nodes())
+                func = lambda G: sum(nx.triangles(G).values()) // len(G.nodes())
 
             self.statistics_functions[metric_name] = func
     
@@ -112,7 +128,7 @@ class NetworkStatistics():
         """
         return len(self.statistics_functions)
     
-    def calculate_statistics(self, W: np.ndarray, directed=False, verbose=False):
+    def calculate_statistics(self, W: np.ndarray, verbose=False):
         """
         Calculate the statistics of a graph. 
         This is equivalent to calculating what is known in the ERGM literature as g(y) for a given graph y.
@@ -127,12 +143,8 @@ class NetworkStatistics():
         stats : np.ndarray or dict 
             An array of statistics, represented as a numpy array of values, or a dict if verbose=True
         """
-        G = connectivity_matrix_to_G(W, directed=directed)
+        G = connectivity_matrix_to_G(W, directed=self._is_directed)
         
-        if G.is_directed():
-            if "num_triangles" in self.metric_names:
-                raise ValueError("The 'num_triangles' metric is not supported for directed graphs.")
-
         stats = {name: func(G) for name, func in self.statistics_functions.items()}
         if verbose:
             return stats

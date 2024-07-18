@@ -93,11 +93,29 @@ class TestERGM(unittest.TestCase):
         self.assertEqual(probability, expected_probability)
     
     def test_sample_network(self):
-        ergm = ERGM(self.n_nodes, self.net_stats)
-        ergm.fit(precalculated_thetas=self.thetas, precalculated_normalization_factor=self.K)
+        n_nodes = 6
+        net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"], directed=False)      
 
-        sampled_net = ergm.sample_network(steps=1)
+        ergm = ERGM(n_nodes, net_stats, is_directed=False)
+
+        thetas = [-np.log(2), np.log(3)]
+        K = 129 / 8
+
+        ergm.fit(precalculated_thetas=thetas)
+
+        sampled_net = ergm.sample_network(steps=30)
         print(sampled_net)
 
-        
-        
+    def test_sample_network_directed(self):
+        n_nodes = 6
+        net_stats = NetworkStatistics(metric_names=["num_edges"], directed=True)      
+
+        ergm = ERGM(n_nodes, net_stats, is_directed=True)
+
+        thetas = [-np.log(2)]
+        K = 129 / 8
+
+        ergm.fit(precalculated_thetas=thetas)
+
+        sampled_net = ergm.sample_network(steps=30)
+        print(sampled_net)

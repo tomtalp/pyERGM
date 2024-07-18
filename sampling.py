@@ -9,61 +9,51 @@ class Sampler():
         pass
 
 class Gibbs(Sampler):
-    def __init__(self, network_stats_calculator):
+    def __init__(self, network_stats_calculator, is_directed):
         super().__init__()
 
         self.network_stats_calculator = network_stats_calculator
+        self.is_directed = is_directed
     
     def _calculate_diff_statistics(self, y_plus, y_minus):
         stats1 = self.network_stats_calculator.calculate_statistics(y_plus)
         stats2 = self.network_stats_calculator.calculate_statistics(y_minus)
-        print(f"stats1: {stats1}, stats2: {stats2}")
+        
         diff_stats = stats1 - stats2
 
         return diff_stats
-
-    def sample(self, seed_network, n_iter=500):
+    
+    def sample(self, seed_network, parameters, n_iter=500):
         n = seed_network.shape[0]
 
-        network = seed_network.copy()
+        current_network = seed_network.copy()
 
         for i in range(n_iter):
-            print(f"iter {i}")
+            # print(f"iter {i}")
+
             random_entry = get_random_nondiagonal_matrix_entry(n)
             
-            network[random_entry] = 1
-            network[random_entry[::-1]] = 1
+            candidate_a = perturb_network_by_overriding_edge(current_network, 1, random_entry[0], random_entry[1], self.is_directed)
+            candidate_b = perturb_network_by_overriding_edge(current_network, 0, random_entry[0], random_entry[1], self.is_directed)
 
-            perturbed_net = network.copy()
-            perturbed_net[random_entry] = 0
-            perturbed_net[random_entry[::-1]] = 0
+            # print("candidate_a")
+            # print(candidate_a)
+            # print("candidate_b")
+            # print(candidate_b)
 
-            print("network")
-            print(network)
-            print("perturbed_net")
-            print(perturbed_net)
+            diff_stats = self._calculate_diff_statistics(candidate_a, candidate_b)
+            # print("DIFF STATS - ")
+            # print(diff_stats)
 
-            diff_stats = self._calculate_diff_statistics(network, perturbed_net)
-            print("DIFF STATS - ")
-            print(diff_stats)
-            
+            weighted_diff = np.dot(diff_stats, parameters)
+            # print(f"weighted_diff: {weighted_diff}")
 
+            acceptante_proba = min(1, np.exp(weighted_diff))
+            # print(f"acceptance proba: {acceptante_proba}")
 
+            if np.random.rand() < acceptante_proba:
+                current_network = candidate_a.copy()
+            else:
+                current_network = candidate_b.copy()
         
-        
-
-
-# # class MCMC():
-# #     def __init__(self, G, model):
-# #         self.G = G
-# #         self.model = model
-
-# #     def sample(self, n_iter):
-# #         for i in range(n_iter):
-# #             # Propose a new graph
-# #             G_proposed = self.propose()
-# #             # Calculate the acceptance probability
-# #             acceptance_prob = self.calculate_acceptance_prob(G_proposed)
-# #             # Accept or reject the proposal
-# #             if acceptance_prob > np.random.rand():
-# #                 self.G = G_proposed
+        return current_network
