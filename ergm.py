@@ -1,6 +1,9 @@
 import numpy as np
 import networkx as nx
-from utils import connectivity_matrix_to_G
+import sampling
+
+from utils import *
+
 
 class ERGM():
     """
@@ -10,30 +13,17 @@ class ERGM():
     
     ## TODO - Thetas are currently set to 1 while in dev. We need to fit them!
     """
-    def __init__(self, n_nodes):
+    def __init__(self, n_nodes, network_statistics: NetworkStatistics):
         self._n_nodes = n_nodes
-        self._theta = []
+        self._thetas = None
         self._feature_functions = []
         self._normalization_factor = None ## TODO - Partition function is first calculated in fit. What should we initialize it to be?
-    
-    def register_feature_function(self, feature_function, theta):
-        """
-        ## TODO - 
-            1. When do we call this? At init? 
-            2. When are thetas set? Do we register features without setting thetas first?
-            
-            But in general - I think model should be initialized with a list of functions, so that the user
-            never has to manually call `register_feature_function()`.
-        """
-        self._feature_functions.append(feature_function)
-        self._theta.append(theta)
+        self._network_statistics = network_statistics
 
-    def _calculate_weight(self, W: np.ndarray):
-        G = connectivity_matrix_to_G(W)
 
-        features = [f(G) for f in self._feature_functions]
-
-        weight = np.exp(np.dot(self._theta, features))
+    def calculate_weight(self, W: np.ndarray):
+        features = self._network_statistics.calculate_statistics(W)
+        weight = np.exp(np.dot(self._thetas, features))
 
         return weight
     
@@ -44,16 +34,25 @@ class ERGM():
         self._normalization_factor = 0
 
         for network in networks_for_sample:
-            weight = self._calculate_weight(network)
+            weight = self.calculate_weight(network)
             self._normalization_factor += weight
 
 
-    def fit(self):
+    def fit(self, precalculated_normalization_factor=None, precalculated_thetas=None):
         """
         TODO - This is just a mock implementation. 
         Currently just calculating the normalization factor. 
         """
-        self._calculate_normalization_factor()
+        if precalculated_normalization_factor is not None:
+            self._normalization_factor = precalculated_normalization_factor
+        else:
+            self.normalization_factor = 100
+        
+        if precalculated_thetas is not None:
+            self._thetas = precalculated_thetas
+        else:
+            self._thetas = np.random.uniform(-1, 1, self._n_nodes)
+
 
     def calculate_probability(self, W: np.ndarray):
         """
@@ -70,15 +69,15 @@ class ERGM():
             The probability of the graph under the ERGM model.
         """
 
-        if self._normalization_factor is None:
-            raise ValueError("Normalization factor not set, fit the model before calculating probability.")
+        if self._normalization_factor is None or self._thetas is None:
+            raise ValueError("Normalization factor and thetas not set, fit the model before calculating probability.")
 
-        weight = self._calculate_weight(W)
+        weight = self.calculate_weight(W)
         prob = weight / self._normalization_factor
         
         return prob
 
-    def sample_network(self, seed_network=None, steps=500, burn_in=100):
+    def sample_network(self, sampling_type="gibbs", seed_network=None, steps=500):
         """
         Sample a network from the ERGM model.
         
@@ -97,22 +96,18 @@ class ERGM():
         W : np.ndarray
             The sampled connectivity matrix.
         """
-        if self._normalization_factor is None:
+        if self._normalization_factor is None: # Not sure 
             raise ValueError("Normalization factor not set, fit the model before sampling.")
 
-        if not seed_network:
-            W = np.random.randint(0, 2, (self._n_nodes, self._n_nodes))
+        if sampling_type == "gibbs":
+            sampler = sampling.Gibbs(self._network_statistics)
+        else:
+            raise ValueError(f"Sampling type {sampling_type} not supported.")
         
-        
+        if seed_network is None:
+            G = nx.erdos_renyi_graph(self._n_nodes, 0.4)
+            seed_network = nx.to_numpy_array(G)
 
+        network = sampler.sample(seed_network, n_iter=steps)
 
-
-            # # Propose a new graph
-            # W_proposed = self.propose(W)
-            # # Calculate the acceptance probability
-            # acceptance_prob = self.calculate_acceptance_prob(W_proposed)
-            # # Accept or reject the proposal
-            # if acceptance_prob > np.random.rand():
-            #     W = W_proposed
-        
-
+        return network

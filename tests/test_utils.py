@@ -22,7 +22,7 @@ class TestNetworkStatistics(unittest.TestCase):
                       [1, 1, 0]])
         stats = net_stats.calculate_statistics(W)
         self.assertEqual(stats[0], 3)
-        self.assertEqual(stats[1], 3)
+        self.assertEqual(stats[1], 1)
 
         # Assert that num_triangles can't be run on a directed graph
         with self.assertRaises(ValueError): 
@@ -35,6 +35,22 @@ class TestNetworkStatistics(unittest.TestCase):
         
         stats = net_stats.calculate_statistics(W, directed=True)
         self.assertEqual(stats[0], 5)
+
+        net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"])
+        W = np.array([[0, 0, 0], 
+                      [0, 0, 0], 
+                      [0, 0, 0]])
+        stats = net_stats.calculate_statistics(W)
+        self.assertEqual(stats[0], 0)
+        self.assertEqual(stats[1], 0)
+    
+    def test_get_num_of_statistics(self):
+        net_stats = NetworkStatistics(metric_names=["num_edges"])
+        self.assertEqual(net_stats.get_num_of_statistics(), 1)
+
+        net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"])
+        self.assertEqual(net_stats.get_num_of_statistics(), 2)
+
         
 
         

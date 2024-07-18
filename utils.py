@@ -97,9 +97,20 @@ class NetworkStatistics():
             if metric_name == "num_edges":
                 func = lambda G: len(G.edges())
             elif metric_name == "num_triangles":
-                func = lambda G: sum(nx.triangles(G))
+                func = lambda G: sum(nx.triangles(G).values()) / len(G.nodes())
 
             self.statistics_functions[metric_name] = func
+    
+    def get_num_of_statistics(self):
+        """
+        Get the number of statistics that are registered.
+        
+        Returns
+        -------
+        n_stats : int
+            The number of statistics.
+        """
+        return len(self.statistics_functions)
     
     def calculate_statistics(self, W: np.ndarray, directed=False, verbose=False):
         """
