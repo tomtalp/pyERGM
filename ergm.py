@@ -34,8 +34,8 @@ class ERGM():
         for _ in range(self._n_samples_for_normalization):
             net = self.sample_network(steps=50, sampling_type="gibbs")
             networks.append(net)
-            print(f"Sampled network: ")
-            print(net)
+            # print(f"Sampled network: ")
+            # print(net)
         
         return networks
 
