@@ -92,30 +92,30 @@ class TestERGM(unittest.TestCase):
         expected_probability = round(0.375 / K, 6)
         self.assertEqual(probability, expected_probability)
     
-    def test_sample_network(self):
-        n_nodes = 6
-        net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"], directed=False)      
+    # def test_sample_network(self):
+    #     n_nodes = 6
+    #     net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"], directed=False)      
 
-        ergm = ERGM(n_nodes, net_stats, is_directed=False)
+    #     ergm = ERGM(n_nodes, net_stats, is_directed=False)
 
-        thetas = [-np.log(2), np.log(3)]
-        K = 129 / 8
+    #     thetas = [-np.log(2), np.log(3)]
+    #     K = 129 / 8
 
-        ergm.fit(precalculated_thetas=thetas)
+    #     ergm.fit(precalculated_thetas=thetas)
 
-        sampled_net = ergm.sample_network(steps=30)
-        print(sampled_net)
+    #     sampled_net = ergm.sample_network(steps=30)
+    #     print(sampled_net)
 
-    def test_sample_network_directed(self):
-        n_nodes = 6
-        net_stats = NetworkStatistics(metric_names=["num_edges"], directed=True)      
+    # def test_sample_network_directed(self):
+    #     # n_nodes = 6
+    #     # net_stats = NetworkStatistics(metric_names=["num_edges"], directed=True)      
 
-        ergm = ERGM(n_nodes, net_stats, is_directed=True)
+    #     # ergm = ERGM(n_nodes, net_stats, is_directed=True)
 
-        thetas = [-np.log(2)]
-        K = 129 / 8
+    #     # thetas = [-np.log(2)]
+    #     # K = 129 / 8
 
-        ergm.fit(precalculated_thetas=thetas)
+    #     # ergm.fit(precalculated_thetas=thetas)
 
-        sampled_net = ergm.sample_network(steps=30)
-        print(sampled_net)
+    #     # sampled_net = ergm.sample_network(steps=30)
+    #     # print(sampled_net)

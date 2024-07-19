@@ -2,58 +2,66 @@ import numpy as np
 from utils import *
 
 class Sampler():
-    def __init__(self):
+    def sample(self, initial_state, n_iterations):
         pass
 
-    def sample(self, n_iter):
-        pass
+class NaiveMetropolisHastings(Sampler):
+    def __init__(self, thetas, network_stats_calculator, is_directed=False):
+        """
+        An implementation for the symmetric proposal Metropolis-Hastings algorithm for ERGMS, using the logit
+        of the acceptance rate. See docs for more details.
+        Throughout this implementation, networks are represented as adjacency matrices.
 
-class Gibbs(Sampler):
-    def __init__(self, network_stats_calculator, is_directed):
+        Parameters
+        ----------
+        thetas : np.ndarray
+            Coefficients of the ERGM
+        
+        network_stats_calculator : NetworkStatistics
+            A NetworkStatistics object that can calculate statistics of a network.
+        
+        """
         super().__init__()
-
+        self.thetas = thetas
         self.network_stats_calculator = network_stats_calculator
         self.is_directed = is_directed
-    
-    def _calculate_diff_statistics(self, y_plus, y_minus):
-        stats1 = self.network_stats_calculator.calculate_statistics(y_plus)
-        stats2 = self.network_stats_calculator.calculate_statistics(y_minus)
+
+    def override_network_edge(self, network, i, j, value):
+        """
+        Override the edge between nodes i and j with the value `value` in the network.
+        """
+        if value not in [0, 1]:
+            raise ValueError("Naive MH sampling only has dyads as edges. Value must be 0 or 1.")
         
-        diff_stats = stats1 - stats2
+        perturbed_net = network.copy()
+        perturbed_net[i, j] = value
+        if not self.is_directed:
+            perturbed_net[j, i] = value
 
-        return diff_stats
+        return perturbed_net
     
-    def sample(self, seed_network, parameters, n_iter=500):
-        n = seed_network.shape[0]
+    def _calculate_weighted_change_score(self, y_plus, y_minus):
+        """
+        Calculate g(y_plus)-g(y_minus) and then inner product with thetas.
+        """
+        change_score = self.network_stats_calculator.calculate_statistics(y_plus) - self.network_stats_calculator.calculate_statistics(y_minus)
+        return np.dot(self.thetas, change_score)
 
-        current_network = seed_network.copy()
+    def sample(self, initial_state, n_iterations):
+        current_network = initial_state.copy()
 
-        for i in range(n_iter):
-            # print(f"iter {i}")
-
-            random_entry = get_random_nondiagonal_matrix_entry(n)
+        for i in range(n_iterations):
+            random_entry = get_random_nondiagonal_matrix_entry(current_network.shape[0])
             
-            candidate_a = perturb_network_by_overriding_edge(current_network, 1, random_entry[0], random_entry[1], self.is_directed)
-            candidate_b = perturb_network_by_overriding_edge(current_network, 0, random_entry[0], random_entry[1], self.is_directed)
+            y_plus = self.override_network_edge(current_network, random_entry[0], random_entry[1], 1)
+            y_minus = self.override_network_edge(current_network, random_entry[0], random_entry[1], 0)
 
-            # print("candidate_a")
-            # print(candidate_a)
-            # print("candidate_b")
-            # print(candidate_b)
+            change_score = self._calculate_weighted_change_score(y_plus, y_minus)
+            acceptance_proba = min(1, np.exp(change_score))
 
-            diff_stats = self._calculate_diff_statistics(candidate_a, candidate_b)
-            # print("DIFF STATS - ")
-            # print(diff_stats)
-
-            weighted_diff = np.dot(diff_stats, parameters)
-            # print(f"weighted_diff: {weighted_diff}")
-
-            acceptante_proba = min(1, np.exp(weighted_diff))
-            # print(f"acceptance proba: {acceptante_proba}")
-
-            if np.random.rand() < acceptante_proba:
-                current_network = candidate_a.copy()
+            if np.random.rand() < acceptance_proba:
+                current_network = y_plus.copy()
             else:
-                current_network = candidate_b.copy()
-        
+                current_network = y_minus.copy()
+            
         return current_network

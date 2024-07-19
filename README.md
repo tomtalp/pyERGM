@@ -41,7 +41,7 @@ $.
 The intuition is that if $\text{AR}>1$ then $y^+$ has a higher probability of appearing in the distribution and is thus immediately selected. Otherwise we randomly pick a candidate with probability equal to ratio. 
 
 #### A simplification for calculating the AR
-Observe the quantity $\log(\text{AR}) $ in the symmetric proposal case - 
+Observe the quantity $\log(\text{AR})$ in the symmetric proposal case - 
 
 $$\log(\text{AR}) = \log(\frac{\Pr(\mathbf{Y}=y^+)}{\Pr(\mathbf{Y}=y^-)})
 = \log(\frac{\exp(\theta^Tg(y^+)) / \kappa }{\exp(\theta^Tg(y^-)) / \kappa }) = \theta^T \delta_g(y)_{i,j}$$
