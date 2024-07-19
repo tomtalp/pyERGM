@@ -1,5 +1,7 @@
 import numpy as np
 import networkx as nx
+from scipy.optimize import minimize
+
 import sampling
 
 from utils import *
@@ -42,7 +44,7 @@ class ERGM():
         if initial_thetas is not None:
             self._thetas = initial_thetas
         else:
-            self._thetas = np.random.uniform(-1, 1, self._network_statistics.get_num_of_statistics())
+            self._thetas = self._get_random_thetas(sampling_method="uniform")
         
         if initial_normalization_factor is not None:
             self._normalization_factor = initial_normalization_factor
@@ -60,8 +62,6 @@ class ERGM():
         print(f"Normalization factor approx: {self._normalization_factor}")
         print(f"Is directed: {self._is_directed}")
         # print(f"Network statistics: {self._network_statistics}")
-        
-
 
     def calculate_weight(self, W: np.ndarray):
         features = self._network_statistics.calculate_statistics(W)
@@ -69,40 +69,69 @@ class ERGM():
 
         return weight
     
-    def _generate_networks_for_sample(self):
+    def _get_random_thetas(self, sampling_method="uniform"):
+        if sampling_method == "uniform":
+            return np.random.uniform(-1, 1, self._network_statistics.get_num_of_statistics())
+        else:
+            raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
+
+    def _generate_networks_for_sample(self, n_networks, n_mcmc_steps):
         networks = []
-        for _ in range(self._n_samples_for_normalization):
-            net = self.sample_network(steps=50, sampling_method="NaiveMetropolisHastings")
+        for _ in range(n_networks):
+            net = self.sample_network(steps=n_mcmc_steps, sampling_method="NaiveMetropolisHastings")
             networks.append(net)
         
         return networks
 
-    def _approximate_normalization_factor(self):
-        networks_for_sample = self._generate_networks_for_sample()
+    def _approximate_normalization_factor(self, n_networks, n_mcmc_steps):
+        networks_for_sample = self._generate_networks_for_sample(n_networks, n_mcmc_steps)
         
         self._normalization_factor = 0
 
         for network in networks_for_sample:
             weight = self.calculate_weight(network)
             self._normalization_factor += weight
+
+    def fit(self, observed_network, n_networks_for_norm=100, n_mcmc_steps=500, verbose=False):
+        """
+        Initial version, a simple MLE calculated by minimizing negative log likelihood.
+        Normalizaiton factor is approximated via MCMC.
+
+        Function is then solved via scipy.
+        """
+        self._thetas = self._get_random_thetas(sampling_method="uniform")
+
+        if verbose:
+            print(f"Starting fit with initial normalization factor: {self._normalization_factor}")
+
+        def negative_log_likelihood(thetas):
+            """
+            Receive a list of thetas and return the negative log likelihood of the model.
+            This is done according to - 
+                L(theta | y_obs) = log theta^T g(y_obs) - log Z(theta)
+            """
+            print(f"""Calculating negative log likelihood for thetas: {thetas}""")
+            self._thetas = thetas
         
-        # print(f"Sampled normalization factor: {self._normalization_factor}")
+            self._approximate_normalization_factor(n_networks_for_norm, n_mcmc_steps)
+            Z = self._normalization_factor
+            print(f"Approximated Z - {Z}")
 
-    def fit(self, precalculated_normalization_factor=None, precalculated_thetas=None):
-        """
-        TODO - This is just a mock implementation. 
-        Currently just calculating the normalization factor. 
-        """
-        if precalculated_thetas is not None:
-            self._thetas = precalculated_thetas
-        else:
-            self._thetas = np.random.uniform(-1, 1, self._n_nodes)
+            y_observed_weight = self.calculate_weight(observed_network)
 
-        if precalculated_normalization_factor is not None:
-            self._normalization_factor = precalculated_normalization_factor
-        else:
-            self._approximate_normalization_factor()
+            log_likelihood = np.log(y_observed_weight) - np.log(Z)
+
+            return -log_likelihood
     
+        print("hi")
+        result = minimize(negative_log_likelihood, self._thetas, method='Nelder-Mead', options={'disp': True, 'maxiter': 1, 'maxfev': 5})
+        # result = minimize(negative_log_likelihood, self._thetas, method='BFGS', options={'disp': True, 'maxiter': 10}) 
+        self._thetas = result.x
+
+        print("Optimization result:")
+        print(f"Theta: {self._thetas}")
+        print(f"Normalization factor: {self._normalization_factor}")
+        print(result)
 
     def calculate_probability(self, W: np.ndarray):
         """
@@ -157,3 +186,18 @@ class ERGM():
         network = sampler.sample(seed_network, steps)
 
         return network
+
+# n_nodes = 5
+# stats_calculator = NetworkStatistics(metric_names=["num_edges"])
+# ergm = ERGM(n_nodes, stats_calculator, is_directed=False)
+
+# ergm.print_model_parameters()
+
+# W = np.array([[0., 0., 0., 0., 1.],
+#        [0., 0., 1., 0., 0.],
+#        [0., 1., 0., 0., 0.],
+#        [0., 0., 0., 0., 1.],
+#        [1., 0., 0., 1., 0.]])
+
+# ergm.fit(W, verbose=True)
+              
