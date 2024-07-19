@@ -54,7 +54,6 @@ class ERGM():
         
         self._is_directed = is_directed
         self._seed_MCMC_proba = seed_MCMC_proba
-        self._n_samples_for_normalization = self._n_nodes**2 # TODO just a random polynomial pick for now...
 
     def print_model_parameters(self):
         print(f"Number of nodes: {self._n_nodes}")
@@ -92,7 +91,7 @@ class ERGM():
             weight = self.calculate_weight(network)
             self._normalization_factor += weight
 
-    def fit(self, observed_network, n_networks_for_norm=100, n_mcmc_steps=500, verbose=False):
+    def fit(self, observed_network, n_networks_for_norm=100, n_mcmc_steps=500, verbose=True, optimization_options={}):
         """
         Initial version, a simple MLE calculated by minimizing negative log likelihood.
         Normalizaiton factor is approximated via MCMC.
@@ -102,7 +101,11 @@ class ERGM():
         self._thetas = self._get_random_thetas(sampling_method="uniform")
 
         if verbose:
-            print(f"Starting fit with initial normalization factor: {self._normalization_factor}")
+            print(f"\tStarting fit with initial normalization factor: {self._normalization_factor}")
+
+            if optimization_options != {}:
+                print(f"\tOptimization options: {optimization_options}")
+            
 
         def negative_log_likelihood(thetas):
             """
@@ -110,12 +113,12 @@ class ERGM():
             This is done according to - 
                 L(theta | y_obs) = log theta^T g(y_obs) - log Z(theta)
             """
-            print(f"""Calculating negative log likelihood for thetas: {thetas}""")
+            # print(f"""Calculating negative log likelihood for thetas: {thetas}""")
             self._thetas = thetas
         
             self._approximate_normalization_factor(n_networks_for_norm, n_mcmc_steps)
             Z = self._normalization_factor
-            print(f"Approximated Z - {Z}")
+            # print(f"Approximated Z - {Z}")
 
             y_observed_weight = self.calculate_weight(observed_network)
 
@@ -123,14 +126,11 @@ class ERGM():
 
             return -log_likelihood
     
-        print("hi")
-        result = minimize(negative_log_likelihood, self._thetas, method='Nelder-Mead', options={'disp': True, 'maxiter': 1, 'maxfev': 5})
-        # result = minimize(negative_log_likelihood, self._thetas, method='BFGS', options={'disp': True, 'maxiter': 10}) 
+        result = minimize(negative_log_likelihood, self._thetas, method='Nelder-Mead', options=optimization_options)
         self._thetas = result.x
-
-        print("Optimization result:")
-        print(f"Theta: {self._thetas}")
-        print(f"Normalization factor: {self._normalization_factor}")
+        print("\tOptimization result:")
+        print(f"\tTheta: {self._thetas}")
+        print(f"\tNormalization factor: {self._normalization_factor}")
         print(result)
 
     def calculate_probability(self, W: np.ndarray):
@@ -200,4 +200,56 @@ class ERGM():
 #        [1., 0., 0., 1., 0.]])
 
 # ergm.fit(W, verbose=True)
-              
+
+# n_nodes = 4
+# stats_calculator = NetworkStatistics(metric_names=["num_edges"])
+
+# theta = np.log(3)
+# ergm = ERGM(n_nodes, stats_calculator, is_directed=False, initial_thetas=[theta])
+# print("Baseline ERGM parameters - ")
+# ergm.print_model_parameters()
+
+# W = ergm.sample_network(sampling_method="NaiveMetropolisHastings", steps=1000)
+# G = connectivity_matrix_to_G(W, directed=False)
+# real_edge_count = len(G.edges())
+# real_triangle_count = sum(nx.triangles(G).values()) // 3
+# print(f"Sampled a random network from a model with theta = {theta}")
+# print(W)
+# print(f"Network has statistics - edge count: {real_edge_count}, triangle count: {real_triangle_count}")
+
+# print("")
+
+# print(f"Now, fit a random ERGM to create networks with similar statistics")
+# fitted_ergm = ERGM(n_nodes, stats_calculator, is_directed=False)
+# print(f"Initial ERGM parameters:")
+# fitted_ergm.print_model_parameters()
+
+# samples_before_fit = []
+# for i in range(10):
+#     sampled_W = fitted_ergm.sample_network(sampling_method="NaiveMetropolisHastings", steps=1000)
+#     G = connectivity_matrix_to_G(sampled_W, directed=False)
+#     edge_count = len(G.edges())
+#     triangle_count = sum(nx.triangles(G).values()) // 3
+
+#     samples_before_fit.append({"edge_count": edge_count, "triangle_count": triangle_count})
+
+# print(f"Fitting ERGM...")
+# fitted_ergm.fit(W)
+# print("Done fitting!")
+
+# samples_after_fit = []
+# for i in range(10):
+#     sampled_W = fitted_ergm.sample_network(sampling_method="NaiveMetropolisHastings", steps=1000)
+#     G = connectivity_matrix_to_G(sampled_W, directed=False)
+#     edge_count = len(G.edges())
+#     triangle_count = sum(nx.triangles(G).values()) // 3
+
+#     samples_after_fit.append({"edge_count": edge_count, "triangle_count": triangle_count})
+
+# print("Samples before fit:")
+# print(samples_before_fit)
+# print("Samples after fit:")
+# print(samples_after_fit)
+
+
+            
