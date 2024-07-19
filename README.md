@@ -4,9 +4,8 @@ pyERGM is a pure NumPy & NetworkX implementation of an **ERGM** distribution mod
 ## The ERGM Model
 An ERGM distribution defines a random variable $\mathbf{Y}$, with its probability defined as 
 
-$$
-\Pr_{\theta, \mathcal{Y}}(\mathbf{Y}=y) = \frac{\exp(\theta^Tg(y))}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)) }
-$$
+$$\Pr_{\theta, \mathcal{Y}}(\mathbf{Y}=y) = \frac{\exp(\theta^Tg(y))}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z))}$$
+
 This denotes the probability of sampling a network $y$ from the space of networks $\mathcal{Y}$, given model parameters $\theta$. The denominator is the normalization factor, also referred to as $\kappa$.
 ## Drawing a network from the distribution
 It is computationally infeasible to directly draw networks from the distribution - Calculating the normalization factor $\kappa$ requires an iteration over the entire space of networks, which is exponential.
@@ -44,13 +43,13 @@ The intuition is that if $\text{AR}>1$ then $y^+$ has a higher probability of ap
 #### A simplification for calculating the AR
 Observe the quantity $\log(\text{AR}) $ in the symmetric proposal case - 
 
-$$
-\log(\text{AR}) = \log(\frac{\Pr(\mathbf{Y}=y^+)}{\Pr(\mathbf{Y}=y^-)})
-= \log(\frac{\exp(\theta^Tg(y^+)) / \kappa }{\exp(\theta^Tg(y^-)) / \kappa }) = \theta^T \delta_g(y)_{i,j}
-$$
+$$\log(\text{AR}) = \log(\frac{\Pr(\mathbf{Y}=y^+)}{\Pr(\mathbf{Y}=y^-)})
+= \log(\frac{\exp(\theta^Tg(y^+)) / \kappa }{\exp(\theta^Tg(y^-)) / \kappa }) = \theta^T \delta_g(y)_{i,j}$$
+
 where $\delta_g(y)_{i,j} = g(y^+) - g(y^-)$ is the *change score*.
 
 Now all that's left to do is accept the suggested change with probability 
+
 $$
 p_{\text{accept}} = \min(1, \exp(\theta^T \delta_g(y)_{i,j}))
 $$
