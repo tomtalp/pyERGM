@@ -113,7 +113,7 @@ class NetworkStatistics():
             if metric_name == "num_edges":
                 func = lambda G: len(G.edges())
             elif metric_name == "num_triangles":
-                func = lambda G: sum(nx.triangles(G).values()) // len(G.nodes())
+                func = lambda G: sum(nx.triangles(G).values()) // 3 # nx.triangles counts each triangle 3 times, for every node in it
 
             self.statistics_functions[metric_name] = func
     

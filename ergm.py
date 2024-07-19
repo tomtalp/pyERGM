@@ -37,18 +37,19 @@ class ERGM():
             The probability of a connection in the seed network for MCMC sampling, in case no seed network is provided.
         """
         self._n_nodes = n_nodes
+        self._network_statistics = network_statistics
         
         if initial_thetas is not None:
             self._thetas = initial_thetas
         else:
-            self._thetas = np.random.uniform(-1, 1, n_nodes)
+            self._thetas = np.random.uniform(-1, 1, self._network_statistics.get_num_of_statistics())
         
         if initial_normalization_factor is not None:
             self._normalization_factor = initial_normalization_factor
         else:
             self._normalization_factor = np.random.normal(50, 10)
 
-        self._network_statistics = network_statistics
+        
         self._is_directed = is_directed
         self._seed_MCMC_proba = seed_MCMC_proba
         self._n_samples_for_normalization = self._n_nodes**2 # TODO just a random polynomial pick for now...

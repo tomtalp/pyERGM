@@ -44,7 +44,10 @@ class NaiveMetropolisHastings(Sampler):
         """
         Calculate g(y_plus)-g(y_minus) and then inner product with thetas.
         """
-        change_score = self.network_stats_calculator.calculate_statistics(y_plus) - self.network_stats_calculator.calculate_statistics(y_minus)
+        g_plus = self.network_stats_calculator.calculate_statistics(y_plus)
+        g_minus = self.network_stats_calculator.calculate_statistics(y_minus)
+        change_score = g_plus - g_minus
+
         return np.dot(self.thetas, change_score)
 
     def sample(self, initial_state, n_iterations):

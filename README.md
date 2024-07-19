@@ -16,13 +16,13 @@ We implement the Metropolis-Hastings algorithm, which in it's simplest form work
 
 ### Step 1
 
-Initialize a random network $y_0\in\mathcal{Y}$. 
+Initialize a random network $y_0\in\mathcal{Y}$, which is set to be the first candidate of our MCMC. 
 
 Different initializations can be used, the simplest one being a random sample from the Erdős–Rényi model with some probability.
 
 ### Step 2
 
-Perturb the previous network by adding or removing one of it's edges, between nodes $i, j$.
+Perturb the previous candidate network by adding or removing one of it's edges, between nodes $i, j$.
 This creates two networks, $y^+ , y^-$.
 
 ### Step 3
