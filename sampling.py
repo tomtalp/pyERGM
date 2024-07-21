@@ -22,6 +22,10 @@ class NaiveMetropolisHastings(Sampler):
         
         """
         super().__init__()
+        # OR: the following 2 are passed by reference, not by value. Consider deepcopy so no one can mess up things from
+        # outside the Sampler object.
+        # OR: prob. should move these initializations to an ERGM-Sampler parent class as they will be mutual to all
+        # samplers.
         self.thetas = thetas
         self.network_stats_calculator = network_stats_calculator
         self.is_directed = is_directed
@@ -44,6 +48,9 @@ class NaiveMetropolisHastings(Sampler):
         """
         Calculate g(y_plus)-g(y_minus) and then inner product with thetas.
         """
+        # OR: Should exploit special cases where change_score doesn't require the calculations of the stats again.
+        # Consider implementing a class of stat_calculator, that wraps the function that is now in the dict, and will
+        # have a change_score method as well.
         g_plus = self.network_stats_calculator.calculate_statistics(y_plus)
         g_minus = self.network_stats_calculator.calculate_statistics(y_minus)
         change_score = g_plus - g_minus
@@ -56,6 +63,13 @@ class NaiveMetropolisHastings(Sampler):
         for i in range(n_iterations):
             random_entry = get_random_nondiagonal_matrix_entry(current_network.shape[0])
             
+            # OR: I think it's a bug. It matters whether the current_network is y_plus or y_minus for calculating the
+            # acceptance rate (For example, if P(y_plus) > P(y_minus), the current implementation always chooses y_plus
+            # for the next step, although if current_network is y_plus, it should switch to y_minus with a probability
+            # of P(y_minus)/P(y_plus). Intuitively, this may cause to get stuck in a "local minimum").
+            # I would implement a flip_connection method, rather than override_network_edge, and pass current_network
+            # and the flipped one to _calculate_weighted_change_score, then set current_network = flipped with a
+            # probability of min(1, np.exp(change_score))
             y_plus = self.override_network_edge(current_network, random_entry[0], random_entry[1], 1)
             y_minus = self.override_network_edge(current_network, random_entry[0], random_entry[1], 0)
 

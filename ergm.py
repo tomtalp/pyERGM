@@ -8,11 +8,11 @@ from utils import *
 
 
 class ERGM():
-    def __init__(self, 
-                 n_nodes, 
-                 network_statistics: NetworkStatistics, 
-                 is_directed=False, 
-                 initial_thetas=None, 
+    def __init__(self,
+                 n_nodes,
+                 network_statistics: NetworkStatistics,
+                 is_directed=False,
+                 initial_thetas=None,
                  initial_normalization_factor=None,
                  seed_MCMC_proba=0.25):
         """
@@ -39,19 +39,20 @@ class ERGM():
             The probability of a connection in the seed network for MCMC sampling, in case no seed network is provided.
         """
         self._n_nodes = n_nodes
+        # OR: this is passed by reference, not by value. Consider deepcopy so noone can mess up things from outside the
+        # ERGM object.
         self._network_statistics = network_statistics
-        
+
         if initial_thetas is not None:
             self._thetas = initial_thetas
         else:
             self._thetas = self._get_random_thetas(sampling_method="uniform")
-        
+
         if initial_normalization_factor is not None:
             self._normalization_factor = initial_normalization_factor
         else:
             self._normalization_factor = np.random.normal(50, 10)
 
-        
         self._is_directed = is_directed
         self._seed_MCMC_proba = seed_MCMC_proba
 
@@ -67,7 +68,7 @@ class ERGM():
         weight = np.exp(np.dot(self._thetas, features))
 
         return weight
-    
+
     def _get_random_thetas(self, sampling_method="uniform"):
         if sampling_method == "uniform":
             return np.random.uniform(-1, 1, self._network_statistics.get_num_of_statistics())
@@ -79,12 +80,12 @@ class ERGM():
         for _ in range(n_networks):
             net = self.sample_network(steps=n_mcmc_steps, sampling_method="NaiveMetropolisHastings")
             networks.append(net)
-        
+
         return networks
 
     def _approximate_normalization_factor(self, n_networks, n_mcmc_steps):
         networks_for_sample = self._generate_networks_for_sample(n_networks, n_mcmc_steps)
-        
+
         self._normalization_factor = 0
 
         for network in networks_for_sample:
@@ -105,7 +106,6 @@ class ERGM():
 
             if optimization_options != {}:
                 print(f"\tOptimization options: {optimization_options}")
-            
 
         def negative_log_likelihood(thetas):
             """
@@ -115,7 +115,7 @@ class ERGM():
             """
             # print(f"""Calculating negative log likelihood for thetas: {thetas}""")
             self._thetas = thetas
-        
+
             self._approximate_normalization_factor(n_networks_for_norm, n_mcmc_steps)
             Z = self._normalization_factor
             # print(f"Approximated Z - {Z}")
@@ -125,7 +125,13 @@ class ERGM():
             log_likelihood = np.log(y_observed_weight) - np.log(Z)
 
             return -log_likelihood
-    
+
+        # OR: Providing the Scipy optimizer with a gradient function can streamline the optimization substantially. The
+        # partial derivative of np.log(y_observed_weight) with relation to each entry of theta is trivial (it is the
+        # observed statistic), and maybe this is enough (sometimes it is OK to treat the normalization function as a
+        # constant). If not, the derivative of the normalization factor is the expected value of the corresponding
+        # statistic with relation to the current ERGM distribution. This can be approximated by averaging over a sample
+        # (CLT is a good friend in this case).
         result = minimize(negative_log_likelihood, self._thetas, method='Nelder-Mead', options=optimization_options)
         self._thetas = result.x
         print("\tOptimization result:")
@@ -153,7 +159,7 @@ class ERGM():
 
         weight = self.calculate_weight(W)
         prob = weight / self._normalization_factor
-        
+
         return prob
 
     def sample_network(self, sampling_method="NaiveMetropolisHastings", seed_network=None, steps=500):
@@ -175,10 +181,11 @@ class ERGM():
             The sampled connectivity matrix.
         """
         if sampling_method == "NaiveMetropolisHastings":
-            sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics, is_directed=self._is_directed)
+            sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics,
+                                                       is_directed=self._is_directed)
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
-        
+
         if seed_network is None:
             G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
             seed_network = nx.to_numpy_array(G)
@@ -250,6 +257,3 @@ class ERGM():
 # print(samples_before_fit)
 # print("Samples after fit:")
 # print(samples_after_fit)
-
-
-            

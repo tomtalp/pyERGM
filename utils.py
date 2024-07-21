@@ -44,6 +44,8 @@ def get_random_nondiagonal_matrix_entry(n: int):
     entry : tuple
         The row and column index of the entry.
     """
+    # OR: can reduce to
+    # return tuple(np.random.choice(n, size=2, replace=False))
     i = np.random.randint(n)
     j = np.random.randint(n)
     
@@ -55,6 +57,8 @@ def get_random_nondiagonal_matrix_entry(n: int):
 
 class NetworkStatistics():
     def __init__(self, metric_names=[], custom_metrics={}, directed=False):
+        # OR: Consider at least allow the metrics to get a matrix as an input, and not a graph, for running time
+        # considerations.
         """
         Initialize a NetworkStatistics object with a set of metrics to be calculated.
         
@@ -107,6 +111,8 @@ class NetworkStatistics():
                 raise ValueError(f"Custom Metric {metric_name} is not a function.")
     
     def _register_metrics(self):
+        # OR: consider storing the statistics calculators in an immutable object (e.g. frozenset(dict.items)), it
+        # shouldn't be possible to add/remove statistics after initialization.
         self.statistics_functions = {}
 
         for metric_name in self.metric_names:
