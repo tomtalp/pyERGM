@@ -23,14 +23,14 @@ Different initializations can be used, the simplest one being a random sample fr
 ### Step 2
 
 Perturb the previous candidate network by adding or removing one of it's edges, between nodes $i, j$.
-This creates two networks, $y^+ , y^-$.
+This creates two networks, $y_{\text{current}}\  , \  y_{\text{proposed}}$.
 
 ### Step 3
 
 Decide whether to keep the perturbation or not, according to the Acceptance Ratio *(AR)*, defined as - 
 
 $$
-\text{AR} = \frac{\Pr(\mathbf{Y}=y^+)}{\Pr(\mathbf{Y}=y^-)}\cdot \frac{q(y^- | y^+)}{q(y^+ | y^-)}
+\text{AR} = \frac{\Pr(\mathbf{Y}=y_{\text{proposed}})}{\Pr(\mathbf{Y}=y_{\text{current}})}\cdot \frac{q(y_{\text{current}} | y_{\text{proposed}})}{q(y_{\text{proposed}} | y_{\text{current}})}
 $$
 
 where $q(a|b)$ is the probability of proposing network $a$ when the current network is $b$. In the simplest case $q(a|b) = q(b|a$), which is the case when we toggle whether an edge exists or not.  This is also called a *symmetric proposal* [[1]](#1).
@@ -38,15 +38,15 @@ where $q(a|b)$ is the probability of proposing network $a$ when the current netw
 We accept the change with probability $p_\text{accept} = 
 \min(1, \text{AR})
 $.
-The intuition is that if $\text{AR}>1$ then $y^+$ has a higher probability of appearing in the distribution and is thus immediately selected. Otherwise we randomly pick a candidate with probability equal to ratio. 
+The intuition is that if $\text{AR}>1$ then $y_{\text{proposed}}$ has a higher probability of appearing in the distribution and is thus immediately selected. Otherwise we randomly pick a candidate with probability equal to ratio. 
 
 #### A simplification for calculating the AR
 Observe the quantity $\log(\text{AR})$ in the symmetric proposal case - 
 
-$$\log(\text{AR}) = \log(\frac{\Pr(\mathbf{Y}=y^+)}{\Pr(\mathbf{Y}=y^-)})
-= \log(\frac{\exp(\theta^Tg(y^+)) / \kappa }{\exp(\theta^Tg(y^-)) / \kappa }) = \theta^T \delta_g(y)_{i,j}$$
+$$\log(\text{AR}) = \log(\frac{\Pr(\mathbf{Y}=y_{\text{proposed}})}{\Pr(\mathbf{Y}=y_{\text{current}})})
+= \log(\frac{\exp(\theta^Tg(y_{\text{proposed}})) / \kappa }{\exp(\theta^Tg(y_{\text{current}})) / \kappa }) = \theta^T \delta_g(y)_{i,j}$$
 
-where $\delta_g(y)_{i,j} = g(y^+) - g(y^-)$ is the *change score*.
+where $\delta_g(y)_{i,j} = g(y_{\text{proposed}}) - g(y_{\text{current}})$ is the *change score*.
 
 Now all that's left to do is accept the suggested change with probability 
 
@@ -60,6 +60,28 @@ Steps 1-3 create a Markov chain over possible samples from the ERGM distribution
 
 
 ## Fitting
+The simplest way to fit an ERGM is by performing a Maximum Likelihood estimation (**MLE**).
+
+Given a network $y_{\text{obs}})$, we can treat the probability function as a likelihood function $\mathcal{L}(\theta | y_{\text{obs}}))$, which defines the log likelihood function $\mathcal{l}(\theta)$ - 
+
+$$
+\mathcal{l}(\theta | y_{\text{obs}})) = \theta^Tg(y_{\text{obs}})) - \log(\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))
+$$
+
+which can be optimized to obtain - 
+
+$$
+\theta^* = \arg \max \ \mathcal{l}(\theta | y_{\text{obs}}) = \arg \min \ - \mathcal{l}(\theta | y_{\text{obs}})
+$$
+
+We now take the derivative - 
+
+$$
+\frac{\partial}{\partial \theta} \ \mathcal{l} (\theta) = g(y_{\text{obs}})) - \frac{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))g(z)}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))} = g(y_{\text{obs}})) - \sum_{z\in\mathcal{Y}} \frac{\exp(\theta^Tg(z)))}{\kappa}g(z)
+\\ \\ 
+= g(y_{\text{obs}}))- \sum_{z\in\mathcal{Y}}\Pr_{\theta, \mathcal{Y}}(\mathbf{Y}=z)g(z) = g(y_{\text{obs}}))- \mathbb{E}_{z\sim\mathcal{Y}}[g(z)]
+$$
+
 
 ## References
 <a id="1">[1]</a> 
