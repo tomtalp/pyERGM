@@ -1,6 +1,7 @@
 import numpy as np
 import networkx as nx
-from scipy.optimize import minimize
+from scipy.optimize import minimize, OptimizeResult
+import time
 
 import sampling
 
@@ -56,6 +57,9 @@ class ERGM():
         self._is_directed = is_directed
         self._seed_MCMC_proba = seed_MCMC_proba
 
+        self.optimization_iter = 0
+        self.optimization_start_time = None
+
     def print_model_parameters(self):
         print(f"Number of nodes: {self._n_nodes}")
         print(f"Thetas: {self._thetas}")
@@ -64,6 +68,9 @@ class ERGM():
         # print(f"Network statistics: {self._network_statistics}")
 
     def calculate_weight(self, W: np.ndarray):
+        if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] != self._n_nodes:
+            raise ValueError(f"The dimensions of the given adjacency matrix, {W.shape}, don't comply with the number of"
+                             f" nodes in the network: {self._n_nodes}")
         features = self._network_statistics.calculate_statistics(W)
         weight = np.exp(np.dot(self._thetas, features))
 
@@ -193,6 +200,127 @@ class ERGM():
         network = sampler.sample(seed_network, steps)
 
         return network
+
+
+class BruteForceERGM(ERGM):
+    """
+    A class that implements ERGM by iterating over the entire space of networks and calculating stuff exactly (rather
+    than using statistical methods for approximating and sampling).
+    This is mainly for tests.
+    """
+    # The maximum number of nodes that is allowed for carrying brute force calculations (i.e. iterating the whole space
+    # of networks and calculating stuff exactly). This becomes not tractable above this limit.
+    MAX_NODES_BRUTE_FORCE = 6
+
+    @staticmethod
+    def construct_adj_mat_from_int(int_code: int, num_nodes: int, is_directed: bool) -> np.ndarray:
+        num_pos_connects = num_nodes * (num_nodes - 1)
+        if not is_directed:
+            num_pos_connects //= 2
+        adj_mat_str = f'{int_code:0{num_pos_connects}b}'
+        cur_adj_mat = np.zeros((num_nodes, num_nodes))
+        mat_entries_arr = np.array(list(adj_mat_str), 'uint8')
+        if is_directed:
+            cur_adj_mat[~np.eye(num_nodes, dtype=bool)] = mat_entries_arr
+        else:
+            upper_triangle_indices = np.triu_indices(num_nodes, k=1)
+            cur_adj_mat[upper_triangle_indices] = mat_entries_arr
+            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
+            cur_adj_mat[lower_triangle_indices_aligned] = mat_entries_arr
+        return cur_adj_mat
+
+    @staticmethod
+    def construct_int_from_adj_mat(adj_mat: np.ndarray, is_directed: bool) -> int:
+        if len(adj_mat.shape) != 2 or adj_mat.shape[0] != adj_mat.shape[1]:
+            raise ValueError(f"The dimensions of the given adjacency matrix {adj_mat.shape} are not valid for an "
+                             f"adjacency matrix (should be a 2D squared matrix)")
+        num_nodes = adj_mat.shape[0]
+        adj_mat_no_diag = adj_mat[~np.eye(num_nodes, dtype=bool)]
+        if not is_directed:
+            adj_mat_no_diag = adj_mat_no_diag[:adj_mat_no_diag.size // 2]
+        return round((adj_mat_no_diag * 2 ** np.arange(adj_mat_no_diag.size - 1, -1, -1).astype(np.ulonglong)).sum())
+
+    def __init__(self,
+                 n_nodes,
+                 network_statistics: NetworkStatistics,
+                 is_directed=False,
+                 initial_thetas=None,
+                 initial_normalization_factor=None,
+                 seed_MCMC_proba=0.25):
+        super().__init__(n_nodes,
+                         network_statistics,
+                         is_directed,
+                         initial_thetas,
+                         initial_normalization_factor,
+                         seed_MCMC_proba)
+        self._all_weights = self._calc_all_weights()
+        self._normalization_factor = self._all_weights.sum()
+
+    # TODO: think of an alternative name? confusing with the static method
+    def _get_adj_mat_from_int(self, int_code: int):
+        return BruteForceERGM.construct_adj_mat_from_int(int_code, self._n_nodes, self._is_directed)
+
+    def _calc_all_weights(self):
+        if self._n_nodes > BruteForceERGM.MAX_NODES_BRUTE_FORCE:
+            raise ValueError(
+                f"The number of nodes {self._n_nodes} is larger than the maximum allowed for brute force "
+                f"calculations {BruteForceERGM.MAX_NODES_BRUTE_FORCE}")
+        num_pos_connects = self._n_nodes * (self._n_nodes - 1)
+        if not self._is_directed:
+            num_pos_connects //= 2
+        space_size = 2 ** num_pos_connects
+        all_weights = np.zeros(space_size)
+        for i in range(space_size):
+            cur_adj_mat = self._get_adj_mat_from_int(i)
+            all_weights[i] = super().calculate_weight(cur_adj_mat)
+        return all_weights
+
+    def calculate_weight(self, W: np.ndarray):
+        adj_mat_idx = BruteForceERGM.construct_int_from_adj_mat(W, self._is_directed)
+        return self._all_weights[adj_mat_idx]
+
+    def sample_network(self, sampling_method="Exact", seed_network=None, steps=0):
+        if sampling_method != "Exact":
+            raise ValueError("BruteForceERGM supports only exact sampling (this is its whole purpose)")
+
+        all_nets_probs = self._all_weights / self._normalization_factor
+        sampled_idx = np.random.choice(all_nets_probs.size, p=all_nets_probs)
+        return self._get_adj_mat_from_int(sampled_idx)
+
+    # TODO: these inherited ghost parameters are ugly (also in the sample_network method)
+    def fit(self, observed_network, n_networks_for_norm=100, n_mcmc_steps=500, verbose=True, optimization_options={}):
+        def nll(thetas):
+            model = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas,
+                                   is_directed=self._is_directed)
+            return np.log(model._normalization_factor) - np.log(model.calculate_weight(observed_network))
+
+        def nll_grad(thetas):
+            model = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas,
+                                   is_directed=self._is_directed)
+            observed_features = model._network_statistics.calculate_statistics(observed_network)
+            all_probs = model._all_weights / model._normalization_factor
+            num_features = model._network_statistics.get_num_of_statistics()
+            num_nets = all_probs.size
+            all_features_by_all_nets = np.zeros((num_features, num_nets))
+            for i in range(num_nets):
+                all_features_by_all_nets[:, i] = model._network_statistics.calculate_statistics(
+                    model._get_adj_mat_from_int(i))
+            expected_features = all_features_by_all_nets @ all_probs
+            return expected_features - observed_features
+
+        def after_iteration_callback(intermediate_result: OptimizeResult):
+            self.optimization_iter += 1
+            cur_time = time.time()
+            print(f'iteration: {self.optimization_iter}, time from start '
+                  f'training: {cur_time - self.optimization_start_time} '
+                  f'log likelihood: {-intermediate_result.fun}')
+
+        self.optimization_iter = 0
+        print("optimization started")
+        self.optimization_start_time = time.time()
+        res = minimize(nll, self._thetas, jac=nll_grad, callback=after_iteration_callback)
+        self._thetas = res.x
+        print(res)
 
 # n_nodes = 5
 # stats_calculator = NetworkStatistics(metric_names=["num_edges"])
