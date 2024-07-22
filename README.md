@@ -46,7 +46,7 @@ Observe the quantity $\log(\text{AR})$ in the symmetric proposal case -
 $$\log(\text{AR}) = \log(\frac{\Pr(\mathbf{Y}=y_{\text{proposed}})}{\Pr(\mathbf{Y}=y_{\text{current}})})
 = \log(\frac{\exp(\theta^Tg(y_{\text{proposed}})) / \kappa }{\exp(\theta^Tg(y_{\text{current}})) / \kappa }) = \theta^T \delta_g(y)_{i,j}$$
 
-where $\delta_g(y)_{i,j} = g(y_{\text{proposed}}) - g(y_{\text{current}})$ is the *change score*.
+where $\delta_{g(y)_{i,j}} = g(y_{\text{proposed}}) - g(y_{\text{current}})$ is the *change score*.
 
 Now all that's left to do is accept the suggested change with probability 
 
