@@ -44,14 +44,7 @@ def get_random_nondiagonal_matrix_entry(n: int):
     entry : tuple
         The row and column index of the entry.
     """
-    i = np.random.randint(n)
-    j = np.random.randint(n)
-    
-    while i == j:
-        i = np.random.randint(n)
-        j = np.random.randint(n)
-    
-    return (i, j)
+    return tuple(np.random.choice(n, size=2, replace=False))
 
 class NetworkStatistics():
     def __init__(self, metric_names=[], custom_metrics={}, directed=False):

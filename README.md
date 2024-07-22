@@ -62,10 +62,10 @@ Steps 1-3 create a Markov chain over possible samples from the ERGM distribution
 ## Fitting
 The simplest way to fit an ERGM is by performing a Maximum Likelihood estimation (**MLE**).
 
-Given a network $y_{\text{obs}})$, we can treat the probability function as a likelihood function $\mathcal{L}(\theta | y_{\text{obs}}))$, which defines the log likelihood function $\mathcal{l}(\theta)$ - 
+Given a network $y_{\text{obs}}$, we can treat the probability function as a likelihood function $\mathcal{L}(\theta | y_{\text{obs}})$, which defines the log likelihood function $\mathcal{l}(\theta)$ - 
 
 $$
-\mathcal{l}(\theta | y_{\text{obs}})) = \theta^Tg(y_{\text{obs}})) - \log(\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))
+\mathcal{l}(\theta | y_{\text{obs}}) = \theta^Tg(y_{\text{obs}}) - \log(\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))
 $$
 
 which can be optimized to obtain - 
@@ -77,9 +77,9 @@ $$
 We now take the derivative - 
 
 $$
-\frac{\partial}{\partial \theta} \ \mathcal{l} (\theta) = g(y_{\text{obs}})) - \frac{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))g(z)}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))} = g(y_{\text{obs}})) - \sum_{z\in\mathcal{Y}} \frac{\exp(\theta^Tg(z)))}{\kappa}g(z)
+\frac{\partial}{\partial \theta} \ \mathcal{l} (\theta) = g(y_{\text{obs}}) - \frac{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))g(z)}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))} = g(y_{\text{obs}}) - \sum_{z\in\mathcal{Y}} \frac{\exp(\theta^Tg(z)))}{\kappa}g(z)
 \\ \\ 
-= g(y_{\text{obs}}))- \sum_{z\in\mathcal{Y}}\Pr_{\theta, \mathcal{Y}}(\mathbf{Y}=z)g(z) = g(y_{\text{obs}}))- \mathbb{E}_{z\sim\mathcal{Y}}[g(z)]
+= g(y_{\text{obs}})- \sum_{z\in\mathcal{Y}}\Pr_{\theta, \mathcal{Y}}(\mathbf{Y}=z)g(z) = g(y_{\text{obs}})- \mathbb{E}_{z\sim\mathcal{Y}}[g(z)]
 $$
 
 

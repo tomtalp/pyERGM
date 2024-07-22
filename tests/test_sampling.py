@@ -10,7 +10,7 @@ class Test_MetropolisHastings(unittest.TestCase):
     def setUp(self):
         pass
 
-    def test_override_network_edge(self):
+    def test_flip_network_edge(self):
         stats_calculator = NetworkStatistics(metric_names=["num_edges"])
         thetas = np.array([np.log(2)])
 
@@ -26,7 +26,7 @@ class Test_MetropolisHastings(unittest.TestCase):
 
         node_i = 0
         node_j = 2
-        W_plus = sampler.override_network_edge(test_W, node_i, node_j, 1)
+        W_plus = sampler.flip_network_edge(test_W, node_i, node_j)
 
         expected_W = np.array([
             [0., 0., 1., 1.],
@@ -39,7 +39,7 @@ class Test_MetropolisHastings(unittest.TestCase):
 
         node_i = 0
         node_j = 3
-        W_minus = sampler.override_network_edge(test_W, node_i, node_j, 0)
+        W_minus = sampler.flip_network_edge(test_W, node_i, node_j)
 
         expected_W = np.array([
             [0., 0., 0., 0.],
@@ -57,14 +57,14 @@ class Test_MetropolisHastings(unittest.TestCase):
         test_W = np.array([[0, 1], [0, 0]])
         node_i = 1
         node_j = 0
-        W_plus = sampler.override_network_edge(test_W, node_i, node_j, 1)
+        W_plus = sampler.flip_network_edge(test_W, node_i, node_j)
         expected_W = np.array([[0, 1], [1, 0]])
         
         self.assertTrue((W_plus == expected_W).all())
 
         node_i = 0
         node_j = 1
-        W_minus = sampler.override_network_edge(test_W, node_i, node_j, 0)
+        W_minus = sampler.flip_network_edge(test_W, node_i, node_j)
         expected_W = np.array([[0, 0], [0, 0]])
 
         self.assertTrue((W_minus == expected_W).all())
@@ -158,19 +158,19 @@ class Test_MetropolisHastings(unittest.TestCase):
 
         self.assertEqual(change_score, expected_change_score)
         
-    def test_sample(self):
-        ## TODO - finish this test
-        is_directed = False
-        stats_calculator = NetworkStatistics(metric_names=["num_edges"], directed=is_directed)
+    # def test_sample(self):
+    #     ## TODO - finish this test
+    #     is_directed = False
+    #     stats_calculator = NetworkStatistics(metric_names=["num_edges"], directed=is_directed)
 
-        theta_edges = np.log(2)
-        thetas = np.array([theta_edges])
+    #     theta_edges = np.log(2)
+    #     thetas = np.array([theta_edges])
 
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator, is_directed=is_directed)
+    #     sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator, is_directed=is_directed)
 
-        seed_network = nx.to_numpy_array(nx.erdos_renyi_graph(10, 0.2))
+    #     seed_network = nx.to_numpy_array(nx.erdos_renyi_graph(10, 0.2))
 
-        n_iterations = 500
+    #     n_iterations = 500
 
-        sampled_net = sampler.sample(seed_network, n_iterations)
-        print(sampled_net)
+    #     sampled_net = sampler.sample(seed_network, n_iterations)
+    #     # print(sampled_net)

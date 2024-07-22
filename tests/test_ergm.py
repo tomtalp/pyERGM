@@ -11,8 +11,7 @@ class TestERGM(unittest.TestCase):
         self.thetas = np.ones(self.net_stats.get_num_of_statistics())
         
     def test_calculate_weight(self):
-        ergm = ERGM(self.n_nodes, self.net_stats)
-        ergm.fit(precalculated_thetas=self.thetas, precalculated_normalization_factor=self.K)
+        ergm = ERGM(self.n_nodes, self.net_stats, initial_thetas=self.thetas, initial_normalization_factor=self.K)
 
         W = np.array([[0, 1, 1], 
                       [1, 0, 1], 
@@ -37,8 +36,7 @@ class TestERGM(unittest.TestCase):
         self.assertEqual(weight, expected_weight)
     
     def test_calculate_probability(self):
-        ergm = ERGM(self.n_nodes, self.net_stats)
-        ergm.fit(precalculated_thetas=self.thetas, precalculated_normalization_factor=self.K)
+        ergm = ERGM(self.n_nodes, self.net_stats, initial_thetas=self.thetas, initial_normalization_factor=self.K)
 
         W = np.array([[0, 1, 1], 
                       [1, 0, 1], 
@@ -53,12 +51,10 @@ class TestERGM(unittest.TestCase):
         self.assertEqual(probability, expected_probability)
 
     def test_calculate_probability_wiki_example(self):
-        ergm = ERGM(self.n_nodes, self.net_stats)
-        
         thetas = [-np.log(2), np.log(3)]
         K = 29 / 8
 
-        ergm.fit(precalculated_thetas=thetas, precalculated_normalization_factor=K)
+        ergm = ERGM(self.n_nodes, self.net_stats, initial_thetas=thetas, initial_normalization_factor=K)
 
         W_0_edges = np.array([[0, 0, 0], 
                               [0, 0, 0], 

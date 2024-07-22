@@ -1,7 +1,13 @@
+from copy import deepcopy
 import numpy as np
 from utils import *
 
 class Sampler():
+    def __init__(self, thetas, network_stats_calculator, is_directed=False):
+        self.thetas = deepcopy(thetas)
+        self.network_stats_calculator = deepcopy(network_stats_calculator)
+        self.is_directed = is_directed
+
     def sample(self, initial_state, n_iterations):
         pass
 
@@ -20,33 +26,31 @@ class NaiveMetropolisHastings(Sampler):
         network_stats_calculator : NetworkStatistics
             A NetworkStatistics object that can calculate statistics of a network.
         
-        """
-        super().__init__()
-        self.thetas = thetas
-        self.network_stats_calculator = network_stats_calculator
-        self.is_directed = is_directed
-
-    def override_network_edge(self, network, i, j, value):
-        """
-        Override the edge between nodes i and j with the value `value` in the network.
-        """
-        if value not in [0, 1]:
-            raise ValueError("Naive MH sampling only has dyads as edges. Value must be 0 or 1.")
+        is_directed : bool
+            A boolean flag indicating whether the network is directed or not.
         
-        perturbed_net = network.copy()
-        perturbed_net[i, j] = value
-        if not self.is_directed:
-            perturbed_net[j, i] = value
+        """
+        super().__init__(thetas, network_stats_calculator, is_directed)
 
-        return perturbed_net
+    def flip_network_edge(self, current_network, i, j):
+        """
+        Flip the edge between nodes i, j. If it's an undirected network, we flip entries W_i,j and W_j,i.
+        """
+        proposed_network = current_network.copy()
+        proposed_network[i, j] = 1 - proposed_network[i, j]
+        
+        if not self.is_directed:
+            proposed_network[j, i] = 1 - proposed_network[j, i]
+        
+        return proposed_network
     
-    def _calculate_weighted_change_score(self, y_plus, y_minus):
+    def _calculate_weighted_change_score(self, proposed_network, current_network):
         """
-        Calculate g(y_plus)-g(y_minus) and then inner product with thetas.
+        Calculate g(proposed_network)-g(current_network) and then inner product with thetas.
         """
-        g_plus = self.network_stats_calculator.calculate_statistics(y_plus)
-        g_minus = self.network_stats_calculator.calculate_statistics(y_minus)
-        change_score = g_plus - g_minus
+        g_proposed = self.network_stats_calculator.calculate_statistics(proposed_network)
+        g_current = self.network_stats_calculator.calculate_statistics(current_network)
+        change_score = g_proposed - g_current
 
         return np.dot(self.thetas, change_score)
 
@@ -56,15 +60,14 @@ class NaiveMetropolisHastings(Sampler):
         for i in range(n_iterations):
             random_entry = get_random_nondiagonal_matrix_entry(current_network.shape[0])
             
-            y_plus = self.override_network_edge(current_network, random_entry[0], random_entry[1], 1)
-            y_minus = self.override_network_edge(current_network, random_entry[0], random_entry[1], 0)
+            proposed_network = self.flip_network_edge(current_network, random_entry[0], random_entry[1])
 
-            change_score = self._calculate_weighted_change_score(y_plus, y_minus)
+            change_score = self._calculate_weighted_change_score(proposed_network, current_network)
             acceptance_proba = min(1, np.exp(change_score))
 
-            if np.random.rand() < acceptance_proba:
-                current_network = y_plus.copy()
+            if np.random.rand() <= acceptance_proba:
+                current_network = proposed_network.copy()
             else:
-                current_network = y_minus.copy()
+                current_network = current_network.copy()
             
         return current_network
