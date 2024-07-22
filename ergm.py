@@ -83,6 +83,7 @@ class ERGM():
         return networks
 
     def _approximate_normalization_factor(self, n_networks, n_mcmc_steps):
+        # TODO - verify that we haven't created the same network twice
         networks_for_sample = self._generate_networks_for_sample(n_networks, n_mcmc_steps)
         
         self._normalization_factor = 0
