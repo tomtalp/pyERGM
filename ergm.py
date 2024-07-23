@@ -15,7 +15,11 @@ class ERGM():
                  is_directed=False,
                  initial_thetas=None,
                  initial_normalization_factor=None,
-                 seed_MCMC_proba=0.25):
+                 seed_MCMC_proba=0.25,
+                 n_networks_for_norm=100,
+                 n_mcmc_steps=500,
+                 verbose=True,
+                 optimization_options={}):
         """
         An ERGM model object. 
         
@@ -40,8 +44,6 @@ class ERGM():
             The probability of a connection in the seed network for MCMC sampling, in case no seed network is provided.
         """
         self._n_nodes = n_nodes
-        # OR: this is passed by reference, not by value. Consider deepcopy so noone can mess up things from outside the
-        # ERGM object.
         self._network_statistics = network_statistics
 
         if initial_thetas is not None:
@@ -59,6 +61,11 @@ class ERGM():
 
         self.optimization_iter = 0
         self.optimization_start_time = None
+
+        self.n_networks_for_norm = n_networks_for_norm
+        self.n_mcmc_steps = n_mcmc_steps
+        self.verbose = verbose
+        self.optimization_options = optimization_options
 
     def print_model_parameters(self):
         print(f"Number of nodes: {self._n_nodes}")
@@ -90,8 +97,8 @@ class ERGM():
 
         return networks
 
-    def _approximate_normalization_factor(self, n_networks, n_mcmc_steps):
-        networks_for_sample = self._generate_networks_for_sample(n_networks, n_mcmc_steps)
+    def _approximate_normalization_factor(self):
+        networks_for_sample = self._generate_networks_for_sample(self.n_networks, self.n_mcmc_steps)
 
         self._normalization_factor = 0
 
@@ -99,7 +106,7 @@ class ERGM():
             weight = self.calculate_weight(network)
             self._normalization_factor += weight
 
-    def fit(self, observed_network, n_networks_for_norm=100, n_mcmc_steps=500, verbose=True, optimization_options={}):
+    def fit(self, observed_network):
         """
         Initial version, a simple MLE calculated by minimizing negative log likelihood.
         Normalizaiton factor is approximated via MCMC.
@@ -108,11 +115,11 @@ class ERGM():
         """
         self._thetas = self._get_random_thetas(sampling_method="uniform")
 
-        if verbose:
+        if self.verbose:
             print(f"\tStarting fit with initial normalization factor: {self._normalization_factor}")
 
-            if optimization_options != {}:
-                print(f"\tOptimization options: {optimization_options}")
+            if self.optimization_options != {}:
+                print(f"\tOptimization options: {self.optimization_options}")
 
         def negative_log_likelihood(thetas):
             """
@@ -123,7 +130,7 @@ class ERGM():
             # print(f"""Calculating negative log likelihood for thetas: {thetas}""")
             self._thetas = thetas
 
-            self._approximate_normalization_factor(n_networks_for_norm, n_mcmc_steps)
+            self._approximate_normalization_factor()
             Z = self._normalization_factor
             # print(f"Approximated Z - {Z}")
 
@@ -133,13 +140,8 @@ class ERGM():
 
             return -log_likelihood
 
-        # OR: Providing the Scipy optimizer with a gradient function can streamline the optimization substantially. The
-        # partial derivative of np.log(y_observed_weight) with relation to each entry of theta is trivial (it is the
-        # observed statistic), and maybe this is enough (sometimes it is OK to treat the normalization function as a
-        # constant). If not, the derivative of the normalization factor is the expected value of the corresponding
-        # statistic with relation to the current ERGM distribution. This can be approximated by averaging over a sample
-        # (CLT is a good friend in this case).
-        result = minimize(negative_log_likelihood, self._thetas, method='Nelder-Mead', options=optimization_options)
+        result = minimize(negative_log_likelihood, self._thetas, method='Nelder-Mead',
+                          options=self.optimization_options)
         self._thetas = result.x
         print("\tOptimization result:")
         print(f"\tTheta: {self._thetas}")
@@ -210,73 +212,48 @@ class BruteForceERGM(ERGM):
     """
     # The maximum number of nodes that is allowed for carrying brute force calculations (i.e. iterating the whole space
     # of networks and calculating stuff exactly). This becomes not tractable above this limit.
-    MAX_NODES_BRUTE_FORCE = 6
-
-    @staticmethod
-    def construct_adj_mat_from_int(int_code: int, num_nodes: int, is_directed: bool) -> np.ndarray:
-        num_pos_connects = num_nodes * (num_nodes - 1)
-        if not is_directed:
-            num_pos_connects //= 2
-        adj_mat_str = f'{int_code:0{num_pos_connects}b}'
-        cur_adj_mat = np.zeros((num_nodes, num_nodes))
-        mat_entries_arr = np.array(list(adj_mat_str), 'uint8')
-        if is_directed:
-            cur_adj_mat[~np.eye(num_nodes, dtype=bool)] = mat_entries_arr
-        else:
-            upper_triangle_indices = np.triu_indices(num_nodes, k=1)
-            cur_adj_mat[upper_triangle_indices] = mat_entries_arr
-            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
-            cur_adj_mat[lower_triangle_indices_aligned] = mat_entries_arr
-        return cur_adj_mat
-
-    @staticmethod
-    def construct_int_from_adj_mat(adj_mat: np.ndarray, is_directed: bool) -> int:
-        if len(adj_mat.shape) != 2 or adj_mat.shape[0] != adj_mat.shape[1]:
-            raise ValueError(f"The dimensions of the given adjacency matrix {adj_mat.shape} are not valid for an "
-                             f"adjacency matrix (should be a 2D squared matrix)")
-        num_nodes = adj_mat.shape[0]
-        adj_mat_no_diag = adj_mat[~np.eye(num_nodes, dtype=bool)]
-        if not is_directed:
-            adj_mat_no_diag = adj_mat_no_diag[:adj_mat_no_diag.size // 2]
-        return round((adj_mat_no_diag * 2 ** np.arange(adj_mat_no_diag.size - 1, -1, -1).astype(np.ulonglong)).sum())
+    MAX_NODES_BRUTE_FORCE_DIRECTED = 5
+    MAX_NODES_BRUTE_FORCE_NOT_DIRECTED = 7
 
     def __init__(self,
                  n_nodes,
                  network_statistics: NetworkStatistics,
                  is_directed=False,
-                 initial_thetas=None,
-                 initial_normalization_factor=None,
-                 seed_MCMC_proba=0.25):
+                 initial_thetas=None):
         super().__init__(n_nodes,
                          network_statistics,
                          is_directed,
-                         initial_thetas,
-                         initial_normalization_factor,
-                         seed_MCMC_proba)
+                         initial_thetas)
         self._all_weights = self._calc_all_weights()
         self._normalization_factor = self._all_weights.sum()
 
-    # TODO: think of an alternative name? confusing with the static method
-    def _get_adj_mat_from_int(self, int_code: int):
-        return BruteForceERGM.construct_adj_mat_from_int(int_code, self._n_nodes, self._is_directed)
+    def _validate_net_size(self):
+        return (
+                (self._is_directed and self._n_nodes <= BruteForceERGM.MAX_NODES_BRUTE_FORCE_DIRECTED)
+                or
+                (not self._is_directed and self._n_nodes <= BruteForceERGM.MAX_NODES_BRUTE_FORCE_NOT_DIRECTED)
+        )
 
     def _calc_all_weights(self):
-        if self._n_nodes > BruteForceERGM.MAX_NODES_BRUTE_FORCE:
+        if not self._validate_net_size():
+            directed_str = 'directed' if self._is_directed else 'not directed'
+            size_limit = BruteForceERGM.MAX_NODES_BRUTE_FORCE_DIRECTED if self._is_directed else (
+                BruteForceERGM.MAX_NODES_BRUTE_FORCE_NOT_DIRECTED)
             raise ValueError(
-                f"The number of nodes {self._n_nodes} is larger than the maximum allowed for brute force "
-                f"calculations {BruteForceERGM.MAX_NODES_BRUTE_FORCE}")
+                f"The number of nodes {self._n_nodes} is larger than the maximum allowed for brute force of "
+                f"{directed_str} graphs calculations {size_limit}")
         num_pos_connects = self._n_nodes * (self._n_nodes - 1)
         if not self._is_directed:
             num_pos_connects //= 2
         space_size = 2 ** num_pos_connects
         all_weights = np.zeros(space_size)
         for i in range(space_size):
-            cur_adj_mat = self._get_adj_mat_from_int(i)
+            cur_adj_mat = construct_adj_mat_from_int(i, self._n_nodes, self._is_directed)
             all_weights[i] = super().calculate_weight(cur_adj_mat)
         return all_weights
 
     def calculate_weight(self, W: np.ndarray):
-        adj_mat_idx = BruteForceERGM.construct_int_from_adj_mat(W, self._is_directed)
+        adj_mat_idx = construct_int_from_adj_mat(W, self._is_directed)
         return self._all_weights[adj_mat_idx]
 
     def sample_network(self, sampling_method="Exact", seed_network=None, steps=0):
@@ -285,10 +262,9 @@ class BruteForceERGM(ERGM):
 
         all_nets_probs = self._all_weights / self._normalization_factor
         sampled_idx = np.random.choice(all_nets_probs.size, p=all_nets_probs)
-        return self._get_adj_mat_from_int(sampled_idx)
+        return construct_adj_mat_from_int(sampled_idx, self._n_nodes, self._is_directed)
 
-    # TODO: these inherited ghost parameters are ugly (also in the sample_network method)
-    def fit(self, observed_network, n_networks_for_norm=100, n_mcmc_steps=500, verbose=True, optimization_options={}):
+    def fit(self, observed_network):
         def nll(thetas):
             model = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas,
                                    is_directed=self._is_directed)
@@ -304,7 +280,7 @@ class BruteForceERGM(ERGM):
             all_features_by_all_nets = np.zeros((num_features, num_nets))
             for i in range(num_nets):
                 all_features_by_all_nets[:, i] = model._network_statistics.calculate_statistics(
-                    model._get_adj_mat_from_int(i))
+                    construct_adj_mat_from_int(i, self._n_nodes, self._is_directed))
             expected_features = all_features_by_all_nets @ all_probs
             return expected_features - observed_features
 

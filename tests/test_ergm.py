@@ -94,7 +94,7 @@ class TestERGM(unittest.TestCase):
         expected_probability = round(0.375 / K, 6)
         self.assertEqual(probability, expected_probability)
 
-    def test_benchmark_er_convergence(self, n=5, p=0.4, is_directed=False):
+    def test_benchmark_er_convergence(self, n=4, p=0.25, is_directed=True):
         np.random.seed(9873645)
         num_pos_connect = n * (n - 1)
         if not is_directed:
