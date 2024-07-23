@@ -55,7 +55,7 @@ class NaiveMetropolisHastings(Sampler):
 
         for i in range(n_iterations):
             random_entry = get_random_nondiagonal_matrix_entry(current_network.shape[0])
-            
+
             y_plus = self.override_network_edge(current_network, random_entry[0], random_entry[1], 1)
             y_minus = self.override_network_edge(current_network, random_entry[0], random_entry[1], 0)
 
