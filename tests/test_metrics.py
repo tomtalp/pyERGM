@@ -64,3 +64,34 @@ class TestNumberOfTriangles(unittest.TestCase):
         expected_result = 1
 
         self.assertEqual(result, expected_result)
+    
+class TestMetricsCollection(unittest.TestCase):
+    def test_calculate_statistics(self):
+        ## Test undirected graphs
+        metrics = [NumberOfEdges(), NumberOfTriangles()]
+        collection = MetricsCollection(metrics, is_directed=False)
+
+        W = np.array([
+                [0, 1, 1], 
+                [1, 0, 1], 
+                [1, 1, 0]
+            ])
+
+        stats = collection.calculate_statistics(W)
+        expected_stats = np.array([3, 1])
+
+        np.testing.assert_array_equal(stats, expected_stats)
+
+        ## Test directed graphs
+        metrics = [NumberOfEdges()]
+        collection = MetricsCollection(metrics, is_directed=True)
+        W = np.array([
+                [0, 1, 0], 
+                [1, 0, 1], 
+                [1, 0, 0]
+            ])
+
+        stats = collection.calculate_statistics(W)
+        expected_stats = np.array([4])
+
+        np.testing.assert_array_equal(stats, expected_stats)

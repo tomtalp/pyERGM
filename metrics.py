@@ -55,7 +55,7 @@ class MetricsCollection():
             An array of statistics
         """
         if self.requires_graph:
-            G = connectivity_matrix_to_G(W, directed=self._is_directed)
+            G = connectivity_matrix_to_G(W, directed=self.is_directed)
         
         statistics = np.zeros(len(self.metrics))
         for i, metric in enumerate(self.metrics):
@@ -70,8 +70,6 @@ class MetricsCollection():
        
 
                 
-    
-
 
     
 
