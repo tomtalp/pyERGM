@@ -92,14 +92,17 @@ class ERGM():
 
     def _generate_networks_for_sample(self, n_networks, n_mcmc_steps):
         networks = []
-        for _ in range(n_networks):
+        networks_count = 0
+
+        while networks_count < n_networks:
             net = self.sample_network(steps=n_mcmc_steps, sampling_method="NaiveMetropolisHastings")
-            networks.append(net)
+            if net not in networks:
+                networks.append(net)
+                networks_count += 1
 
         return networks
 
     def _approximate_normalization_factor(self, n_networks, n_mcmc_steps):
-        # TODO - verify that we haven't created the same network twice
         networks_for_sample = self._generate_networks_for_sample(n_networks, n_mcmc_steps)
         
         self._normalization_factor = 0
