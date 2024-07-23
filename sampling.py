@@ -23,8 +23,8 @@ class NaiveMetropolisHastings(Sampler):
         thetas : np.ndarray
             Coefficients of the ERGM
         
-        network_stats_calculator : NetworkStatistics
-            A NetworkStatistics object that can calculate statistics of a network.
+        network_stats_calculator : MetricsCollection
+            A MetricsCollection object that can calculate statistics of a network.
         
         is_directed : bool
             A boolean flag indicating whether the network is directed or not.

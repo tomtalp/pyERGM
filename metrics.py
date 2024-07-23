@@ -40,7 +40,18 @@ class MetricsCollection():
         self.requires_graph = any([x.requires_graph for x in self.metrics])
         self.is_directed = is_directed
 
-    def calculate_statistics(self, W: np.ndarray, verbose=False):
+    def get_num_of_statistics(self):
+        """
+        Get the number of statistics that are registered.
+        
+        Returns
+        -------
+        n_stats : int
+            The number of statistics.
+        """
+        return len(self.metrics)    
+
+    def calculate_statistics(self, W: np.ndarray):
         """
         Calculate the statistics of a graph, formally written as g(y).
 
