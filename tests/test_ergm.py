@@ -92,7 +92,7 @@ class TestERGM(unittest.TestCase):
         expected_probability = round(0.375 / K, 6)
         self.assertEqual(probability, expected_probability)
 
-    def test_benchmark_er_convergence(self, n=4, p=0.25, is_directed=True):
+    def test_benchmark_er_convergence(self, n=4, p=0.25, is_directed=False):
         np.random.seed(9873645)
         num_pos_connect = n * (n - 1)
 
@@ -101,7 +101,8 @@ class TestERGM(unittest.TestCase):
 
         ground_truth_num_edges = round(num_pos_connect * p)
         ground_truth_p = ground_truth_num_edges / num_pos_connect
-        ground_truth_theta = np.array([np.log(ground_truth_p / (1 - ground_truth_p))])
+        # TODO @oren - is this true also for directed graphs? See ergm 2008 paper Sec. 4.1
+        ground_truth_theta = np.array([np.log(ground_truth_p / (1 - ground_truth_p))]) 
 
         adj_mat_no_diag = np.zeros(num_pos_connect)
         on_indices = np.random.choice(num_pos_connect, size=ground_truth_num_edges, replace=False).astype(int)
@@ -138,3 +139,4 @@ class TestERGM(unittest.TestCase):
             model_with_true_theta._normalization_factor)
         
         print(f"model with true theta log like: {ground_truth_model_log_like}")
+        print(f"normalization factor: {model_with_true_theta._normalization_factor}")

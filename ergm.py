@@ -131,6 +131,10 @@ class ERGM():
         def nll(thetas):
             model = ERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas, is_directed=self._is_directed)
 
+            ## TODO @oren - in the regular fit  (i.e. non brute-force ERGM) - 
+            ## the Z approximation when evaluating the nll function is different from the approximation 
+            ## in the nll_grad() calculation. 
+            ## Isn't this a problem? It means that the grad is evaluated using different parameters.
             return np.log(model._normalization_factor) - np.log(model.calculate_weight(observed_network))
 
         def nll_grad(thetas):
@@ -318,51 +322,7 @@ class BruteForceERGM(ERGM):
         self._thetas = res.x
         print(res)
 
-# n_nodes = 5
-# stats_calculator = MetricsCollection([NumberOfEdges()], is_directed=False)
-
-# theta = -np.log(3)
-# ergm = ERGM(n_nodes, stats_calculator, is_directed=False, initial_thetas=[theta])
-
-# print("Baseline ERGM parameters - ")
-# ergm.print_model_parameters()
-
-# W = ergm.sample_network(sampling_method="NaiveMetropolisHastings", steps=1000)
-
-# G = connectivity_matrix_to_G(W, directed=False)
-
-# real_edge_count = len(G.edges())
-# real_triangle_count = sum(nx.triangles(G).values()) // 3
-
-# print(f"Sampled a random network from a model with theta = {theta}")
-# print(W)
-# print(f"Network has statistics - edge count: {real_edge_count}, triangle count: {real_triangle_count}")
-
-# fitted_ergm = ERGM(n_nodes, stats_calculator, is_directed=False)
-# print(f"Initial ERGM parameters:")
-# fitted_ergm.print_model_parameters()
-
-# pre_fit_W_matrices = []
-# samples_before_fit = []
-
-# n_samples = 10
-
-# for i in range(n_samples):
-#     sampled_W = fitted_ergm.sample_network(sampling_method="NaiveMetropolisHastings", steps=1000)
-#     G = connectivity_matrix_to_G(sampled_W, directed=False)
-#     edge_count = len(G.edges())
-#     triangle_count = sum(nx.triangles(G).values()) // 3
-
-#     samples_before_fit.append({"edge_count": edge_count, "triangle_count": triangle_count})
-#     pre_fit_W_matrices.append(sampled_W)
-
-# # samples_before_fit_df = pd.DataFrame(samples_before_fit)
-# # print("")
-# # Print mean for each metric - 
-# # print(f"Mean of samples before fitting, calculated on {n_samples} samples- ")
-# # print(samples_before_fit_df.mean())
-
-
-# print(f"Fitting ERGM...")
-# fitted_ergm.fit(W)
-# print("Done fitting!")
+# is_directed=False
+# metrics_calc = MetricsCollection([NumberOfEdges()], is_directed=is_directed)
+# fitted_model = ERGM(n, metrics_calc, is_directed=is_directed, n_networks_for_norm=200, n_mcmc_steps=200)
+# fitted_model.fit(adj_mat)

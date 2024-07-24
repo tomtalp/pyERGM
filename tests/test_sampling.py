@@ -158,3 +158,6 @@ class Test_MetropolisHastings(unittest.TestCase):
         expected_change_score = changed_edges*theta_edges
 
         self.assertEqual(change_score, expected_change_score)
+
+    def normalization_approximation_benchmarks(self):
+        pass
