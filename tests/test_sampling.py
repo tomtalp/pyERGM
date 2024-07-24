@@ -4,7 +4,7 @@ import networkx as nx
 
 from utils import *
 from metrics import *
-from ergm import ERGM
+from ergm import ERGM, BruteForceERGM
 import sampling
 
 class Test_MetropolisHastings(unittest.TestCase):  
@@ -160,4 +160,32 @@ class Test_MetropolisHastings(unittest.TestCase):
         self.assertEqual(change_score, expected_change_score)
 
     def normalization_approximation_benchmarks(self):
-        pass
+        np.random.seed(9873645)
+        n = 4
+        p = 0.25
+        true_theta = -np.log(2)
+        is_directed = False
+
+        stats_calculator = MetricsCollection([NumberOfEdges()], is_directed=is_directed)
+        
+        true_model = BruteForceERGM(n,  stats_calculator, is_directed=is_directed, initial_thetas=[true_theta])
+        true_norm_factor = true_model._normalization_factor
+        print(f"Normalization factor for a network with {n} nodes, theta = {true_theta}: {true_norm_factor}")
+
+        nets_for_approx = n*n*1000
+        mcmc_steps_for_sample = n*10
+        model = ERGM(n, stats_calculator, is_directed=is_directed, initial_thetas=[true_theta], n_networks_for_norm=nets_for_approx, n_mcmc_steps=mcmc_steps_for_sample)
+        model._approximate_normalization_factor()
+        approximated_normalization_factor = model._normalization_factor
+        print(f"Approximated normalization factor: {approximated_normalization_factor}")
+
+        print(f"Simulated network with {n} nodes, p={p}")
+        W = nx.to_numpy_array(nx.erdos_renyi_graph(n, p, seed=9873645))
+        print(W)
+        
+        true_proba = true_model.calculate_probability(W)
+        estimated_proba = model.calculate_probability(W)
+
+        print(f"True model params - thetas = {true_model._thetas}, Z = {true_model._normalization_factor}. Probability - {true_proba:.8f}")
+        print(f"Approx. model params - thetas = {model._thetas}, Z = {model._normalization_factor}. Probability - {estimated_proba:.8f}")
+        print("Done")

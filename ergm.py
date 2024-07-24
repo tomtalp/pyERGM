@@ -120,6 +120,8 @@ class ERGM():
         for network in networks_for_sample:
             weight = self.calculate_weight(network)
             self._normalization_factor += weight
+        
+        # print(f"Finished generating networks for Z, which is estimated at {self._normalization_factor}")
 
     def fit(self, observed_network):
         """
