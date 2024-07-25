@@ -78,9 +78,7 @@ We now take the derivative -
 
 $$
 \frac{\partial}{\partial \theta} \ \ell (\theta) = g(y_{\text{obs}}) - \frac{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))g(z)}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))} = g(y_{\text{obs}}) - \sum_{z\in\mathcal{Y}} \frac{\exp(\theta^Tg(z)))}{\kappa}g(z)
-\\ \\ 
 = g(y_{\text{obs}})- \sum_{z\in\mathcal{Y}}\Pr_{\theta, \mathcal{Y}}(\mathbf{Y}=z)g(z) = g(y_{\text{obs}})- \mathbb{E}_{z\sim\mathcal{Y}}[g(z)]
-\\
 = g(y_{\text{obs}}) - \frac{1}{k} \sum_{i=1}^k g(z_i)
 $$
 
