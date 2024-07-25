@@ -79,7 +79,6 @@ class ERGM():
         print(f"Thetas: {self._thetas}")
         print(f"Normalization factor approx: {self._normalization_factor}")
         print(f"Is directed: {self._is_directed}")
-        # print(f"Network statistics: {self._network_statistics}")
 
     def calculate_weight(self, W: np.ndarray):
         if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] != self._n_nodes:
@@ -96,83 +95,152 @@ class ERGM():
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
-    def _generate_networks_for_sample(self):
-        networks = []
-        networks_count = 0
+    def generate_networks_for_sample(self):
+        sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics,
+                                                       is_directed=self._is_directed)
+        G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
+        seed_network = nx.to_numpy_array(G)
+        
+        return sampler.sample(seed_network, self.n_networks_for_norm)
 
-        while networks_count < self.n_networks_for_norm:
-            net = self.sample_network(steps=self.n_mcmc_steps, sampling_method="NaiveMetropolisHastings")
-
-            ## TODO - how much does this slow things down?
-            # if any([np.array_equal(net, net_j) for net_j in networks]):
-                # continue
-            
-            networks.append(net)
-            networks_count += 1
-
-        return networks
 
     def _approximate_normalization_factor(self):
-        networks_for_sample = self._generate_networks_for_sample()
+        networks_for_sample = self.generate_networks_for_sample()
         
         self._normalization_factor = 0
 
-        for network in networks_for_sample:
+        for network_idx in range(self.n_networks_for_norm):
+            network = networks_for_sample[:, :, network_idx]
             weight = self.calculate_weight(network)
             self._normalization_factor += weight
-        
+
         # print(f"Finished generating networks for Z, which is estimated at {self._normalization_factor}")
 
-    def fit(self, observed_network):
+    def fit(self, observed_network, 
+                lr=0.001, 
+                opt_steps=1000, 
+                steps_for_decay=100,
+                lr_decay_pct=0.01,  
+                l2_grad_thresh=0.001, 
+                sliding_grad_window_k=10, 
+                max_sliding_window_size=100, 
+                max_nets_for_sample=1000, 
+                sample_pct_growth=0.02):
         """
-        Initial version, a simple MLE calculated by minimizing negative log likelihood.
-        Normalizaiton factor is approximated via MCMC.
+        Fit an ERGM model to a given network.
 
-        Function is then solved via scipy.
+        Parameters
+        ----------
+        observed_network : np.ndarray
+            The adjacency matrix of the observed network.
+        
+        lr : float
+            The learning rate for the optimization.
+        
+        opt_steps : int
+            The number of optimization steps to run.
+        
+        steps_for_decay : int
+            The number of steps after which to decay the optimization params. (## TODO - Pick a different step value for different params? Right now all params are decayed with the same interval)
+        
+        lr_decay_pct : float
+            The decay factor for the learning rate
+        
+        l2_grad_thresh : float
+            The threshold for the L2 norm of the gradient to stop the optimization.
+        
+        sliding_grad_window_k : int
+            The size of the sliding window for the gradient, for which we use to calculate the mean gradient norm. This value is then tested against l2_grad_thresh to decide whether optimization halts.
+        
+        max_sliding_window_size : int
+            The maximum size of the sliding window for the gradient.
+        
+        max_nets_for_sample : int
+            The maximum number of networks to sample when approximating the expected network statistics (i.e. E[g(y)])
+        
+        sample_pct_growth : float
+            The percentage growth of the number of networks to sample, which we want to increase over time
+    
+            
         """
-        def nll(thetas):
-            model = ERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas, is_directed=self._is_directed)
-
-            ## TODO @oren - in the regular fit  (i.e. non brute-force ERGM) - 
-            ## the Z approximation when evaluating the nll function is different from the approximation 
-            ## in the nll_grad() calculation. 
-            ## Isn't this a problem? It means that the grad is evaluated using different parameters.
-            return np.log(model._normalization_factor) - np.log(model.calculate_weight(observed_network))
-
         def nll_grad(thetas):
             model = ERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas, is_directed=self._is_directed)
 
             observed_features = model._network_statistics.calculate_statistics(observed_network)
 
-            networks_for_sample = self._generate_networks_for_sample()
+            networks_for_sample = self.generate_networks_for_sample()
             num_of_features = model._network_statistics.get_num_of_statistics()
 
             features_of_net_samples = np.zeros((num_of_features, self.n_networks_for_norm))
             for i in range(self.n_networks_for_norm):
-                features_of_net_samples[:, i] = model._network_statistics.calculate_statistics(networks_for_sample[i])
+                features_of_net_samples[:, i] = model._network_statistics.calculate_statistics(networks_for_sample[:,:, i])
 
             mean_features = np.mean(features_of_net_samples, axis=1)
             
             return mean_features - observed_features
-    
-        def after_iteration_callback(intermediate_result: OptimizeResult):
-            self.optimization_iter += 1
-            cur_time = time.time()
-            print(f'iteration: {self.optimization_iter}, time from start '
-                  f'training: {cur_time - self.optimization_start_time} '
-                  f'log likelihood: {-intermediate_result.fun}')
+
+        def true_nll_grad(model):
+            """
+            ## TODO - THIS IS FOR DEBUG, REMOVE LATER
+            """
+            observed_features = model._network_statistics.calculate_statistics(observed_network)
+            all_probs = model._all_weights / model._normalization_factor
+            num_features = model._network_statistics.get_num_of_statistics()
+            num_nets = all_probs.size
+            all_features_by_all_nets = np.zeros((num_features, num_nets))
+            for i in range(num_nets):
+                all_features_by_all_nets[:, i] = model._network_statistics.calculate_statistics(
+                    construct_adj_mat_from_int(i, self._n_nodes, self._is_directed))
+            expected_features = all_features_by_all_nets @ all_probs
+            return expected_features - observed_features
 
         self._thetas = self._get_random_thetas(sampling_method="uniform")
-
         self.optimization_iter = 0
+
         print("optimization started")
+
         self.optimization_start_time = time.time()
-        res = minimize(nll, self._thetas, jac=nll_grad, callback=after_iteration_callback)
-        self._thetas = res.x
-        print("\tOptimization result:")
-        print(f"\tTheta: {self._thetas}")
-        print(f"\tNormalization factor: {self._normalization_factor}")
-        print(res)
+        
+        grads = np.zeros((opt_steps, self._network_statistics.get_num_of_statistics()))
+        true_grads = np.zeros((opt_steps, self._network_statistics.get_num_of_statistics()))
+ 
+        for i in range(opt_steps):
+            if ((i+1) % steps_for_decay) == 0:
+                lr *= (1-lr_decay_pct)
+
+                if self.n_networks_for_norm < max_nets_for_sample:
+                    self.n_networks_for_norm *= (1+sample_pct_growth)
+                    self.n_networks_for_norm = np.min([int(self.n_networks_for_norm), max_nets_for_sample])
+                
+                if sliding_grad_window_k < max_sliding_window_size:
+                    sliding_grad_window_k *= (1+sample_pct_growth)
+                    sliding_grad_window_k = np.min([np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
+
+            
+            grad = nll_grad(self._thetas)
+            self._thetas = self._thetas - lr*grad
+
+            grads[i] = grad
+
+            idx_for_sliding_grad = np.max([0, i - sliding_grad_window_k+1])
+            sliding_window_grads = grads[idx_for_sliding_grad:i+1].mean()
+        
+            if i % 100 == 0:
+                ## TODO - THIS IS FOR DEBUG.
+                bruteforce = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=self._thetas, is_directed=self._is_directed)
+                true_grad = true_nll_grad(bruteforce)
+                true_grads[i] = true_grad
+                # true_grad = 0
+
+                delta_t = time.time() - self.optimization_start_time
+                print(f"Step {i} - true_grad: {true_grad}, grad: {grads[i-1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, n_networks_for_norm: {self.n_networks_for_norm}, sliding_grad_window_k: {sliding_grad_window_k}")
+
+            if np.linalg.norm(sliding_window_grads) <= l2_grad_thresh:
+                print(f"Reached threshold of {l2_grad_thresh} after {i} steps. DONE!")
+                grads = grads[:i]
+                break
+
+        return grads, true_grads
 
     def calculate_probability(self, W: np.ndarray):
         """
@@ -225,10 +293,9 @@ class ERGM():
             G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
             seed_network = nx.to_numpy_array(G)
 
-        network = sampler.sample(seed_network, steps)
+        network = sampler.sample(seed_network, num_of_nets=1)
 
         return network
-
 
 class BruteForceERGM(ERGM):
     """
@@ -290,7 +357,7 @@ class BruteForceERGM(ERGM):
         sampled_idx = np.random.choice(all_nets_probs.size, p=all_nets_probs)
         return construct_adj_mat_from_int(sampled_idx, self._n_nodes, self._is_directed)
 
-    def fit(self, observed_network):
+    def fit(self, observed_network, lr=0.001, opt_steps=1000, lr_decay_pct=0.01, steps_for_decay=100, l2_grad_thresh=0.001):
         def nll(thetas):
             model = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas,
                                    is_directed=self._is_directed)
@@ -320,11 +387,29 @@ class BruteForceERGM(ERGM):
         self.optimization_iter = 0
         print("optimization started")
         self.optimization_start_time = time.time()
-        res = minimize(nll, self._thetas, jac=nll_grad, callback=after_iteration_callback)
-        self._thetas = res.x
-        print(res)
+        
+        grads = np.zeros((opt_steps, self._network_statistics.get_num_of_statistics()))
+        loss_values = np.zeros(opt_steps)
 
-# is_directed=False
-# metrics_calc = MetricsCollection([NumberOfEdges()], is_directed=is_directed)
-# fitted_model = ERGM(n, metrics_calc, is_directed=is_directed, n_networks_for_norm=200, n_mcmc_steps=200)
-# fitted_model.fit(adj_mat)
+        for i in range(opt_steps):
+            if i % steps_for_decay == 0:
+                lr *= (1-lr_decay_pct)
+            
+            if i % 500 == 0:
+                delta_t = time.time() - self.optimization_start_time
+                print(f"Step {i} - loss: {loss_values[i-1]}, grad: {grads[i-1]}, lr: {lr}, thetas: {self._thetas}, time from start: {delta_t}")
+            grad = nll_grad(self._thetas)
+            self._thetas = self._thetas - lr*grad
+
+            grads[i] = grad
+            loss = nll(self._thetas)
+            loss_values[i] = loss
+
+            if np.linalg.norm(grad) <= l2_grad_thresh:
+                print(f"Reached threshold of {l2_grad_thresh} after {i} steps. DONE!")
+                loss_values = loss_values[:i]
+                grads = grads[:i]
+                break
+
+        
+        return (loss_values, grads)
