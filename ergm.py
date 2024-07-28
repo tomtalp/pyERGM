@@ -227,10 +227,10 @@ class ERGM():
         
             if i % 100 == 0:
                 ## TODO - THIS IS FOR DEBUG.
-                bruteforce = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=self._thetas, is_directed=self._is_directed)
-                true_grad = true_nll_grad(bruteforce)
-                true_grads[i] = true_grad
-                # true_grad = 0
+                # bruteforce = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=self._thetas, is_directed=self._is_directed)
+                # true_grad = true_nll_grad(bruteforce)
+                # true_grads[i] = true_grad
+                true_grad = 0
 
                 delta_t = time.time() - self.optimization_start_time
                 print(f"Step {i} - true_grad: {true_grad}, grad: {grads[i-1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, n_networks_for_grad_estimation: {self.n_networks_for_grad_estimation}, sliding_grad_window_k: {sliding_grad_window_k}")
