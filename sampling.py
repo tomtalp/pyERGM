@@ -91,17 +91,18 @@ class NaiveMetropolisHastings(Sampler):
             proposed_network = self.flip_network_edge(current_network, random_entry[0], random_entry[1])
 
             change_score = self._calculate_weighted_change_score(proposed_network, current_network)
-            acceptance_proba = min(1, np.exp(change_score)) ## TODO - This threw an overflow error in one of the tests. This needs to be bounded better
 
-            if np.random.rand() <= acceptance_proba:
+            if change_score >= 1:
                 current_network = proposed_network.copy()
             else:
-                current_network = current_network.copy()
+                acceptance_proba = min(1, np.exp(change_score))
+                if np.random.rand() <= acceptance_proba:
+                    current_network = proposed_network.copy()
             
             if (mcmc_iter_count - self.burn_in) % self.steps_per_sample == 0:
                 sampled_networks[:, :, networks_count] = current_network
 
-                if not replace :
+                if not replace:
                     if np.unique(sampled_networks[:, :, :networks_count+1], axis=2).shape[2] == networks_count + 1:
                         networks_count += 1
                     else:

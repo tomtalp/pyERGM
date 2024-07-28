@@ -44,14 +44,3 @@ from utils import *
 #         self.assertEqual(stats[0], 0)
 #         self.assertEqual(stats[1], 0)
     
-#     def test_get_num_of_statistics(self):
-#         net_stats = NetworkStatistics(metric_names=["num_edges"])
-#         self.assertEqual(net_stats.get_num_of_statistics(), 1)
-
-#         net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"])
-#         self.assertEqual(net_stats.get_num_of_statistics(), 2)
-
-        
-
-        
-

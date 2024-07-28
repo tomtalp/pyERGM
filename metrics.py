@@ -6,6 +6,7 @@ import networkx as nx
 from utils import *
 
 ## TODO - Metrics needs to implement a diff() function
+
 class Metric(ABC):
     def __init__(self, metric_name, requires_graph=False):
         self.metric_name = metric_name
@@ -14,7 +15,8 @@ class Metric(ABC):
     @abstractmethod
     def calculate(self, input):
         pass
-    
+
+## TODO - Rethink the is_directed flag in the Metrics objects. Should we have a separate class for directed metrics?    
 class NumberOfEdges(Metric):
     def __init__(self):
         super().__init__(metric_name="num_edges", requires_graph=False)
@@ -41,17 +43,7 @@ class MetricsCollection():
         self.metrics = tuple(metrics)
         self.requires_graph = any([x.requires_graph for x in self.metrics])
         self.is_directed = is_directed
-
-    def get_num_of_statistics(self):
-        """
-        Get the number of statistics that are registered.
-        
-        Returns
-        -------
-        n_stats : int
-            The number of statistics.
-        """
-        return len(self.metrics)    
+        self.num_of_metrics = len(self.metrics)
 
     def calculate_statistics(self, W: np.ndarray):
         """
