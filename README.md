@@ -46,7 +46,11 @@ Observe the quantity $\log(\text{AR})$ in the symmetric proposal case -
 $$\log(\text{AR}) = \log(\frac{\Pr(\mathbf{Y}=y_{\text{proposed}})}{\Pr(\mathbf{Y}=y_{\text{current}})})
 = \log(\frac{\exp(\theta^Tg(y_{\text{proposed}})) / \kappa }{\exp(\theta^Tg(y_{\text{current}})) / \kappa }) = \theta^T \delta_g(y)_{i,j}$$
 
-where $\delta_{g(y)_{i,j}} = g(y_{\text{proposed}}) - g(y_{\text{current}})$ is the *change score*.
+where $\delta_g(y)_{i,j}$ is the *change score* - 
+
+$$
+\delta_g(y)_{i,j} = g(y\_{\text{proposed}}) - g(y\_{\text{current}})
+$$
 
 Now all that's left to do is accept the suggested change with probability 
 
@@ -76,9 +80,10 @@ $$
 
 We now take the derivative - 
 
-$$ \frac{\partial}{\partial \theta} \ \ell (\theta) = g(y_{\text{obs}}) - \frac{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))g(z)}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))} = g(y_{\text{obs}}) - \sum_{z\in\mathcal{Y}} \frac{\exp(\theta^Tg(z)))}{\kappa}g(z)
-= g(y_{\text{obs}})- \sum_{z\in\mathcal{Y}}\Pr_{\theta, \mathcal{Y}}(\mathbf{Y}=z)g(z) = g(y_{\text{obs}})- \mathbb{E}_{z\sim\mathcal{Y}}[g(z)]
-= g(y_{\text{obs}}) - \frac{1}{k} \sum_{i=1}^k g(z_i) $$
+$$
+\frac{\partial}{\partial \theta} \ \ell (\theta) = g(y_{\text{obs}}) - \frac{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))g(z)}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))} = g(y_{\text{obs}}) - \sum_{z\in\mathcal{Y}} \frac{\exp(\theta^Tg(z)))}{\kappa}g(z)
+= g(y_{\text{obs}})- \sum_{z\in\mathcal{Y}}\Pr_{\theta, \mathcal{Y}}(\mathbf{Y}=z)g(z) = g(y_{\text{obs}})- \mathbb{E}_{z\sim\mathcal{Y}}[g(z)] 
+$$
 
 
 ## References
