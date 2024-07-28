@@ -1,20 +1,21 @@
 import unittest
 from utils import *
+from metrics import *
 from ergm import ERGM, BruteForceERGM
 import sys
 
 
 class TestERGM(unittest.TestCase):
     def setUp(self):
-        self.net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"])
+        metrics = [NumberOfEdges(), NumberOfTriangles()]
+        self.net_stats = MetricsCollection(metrics, is_directed=False)
         self.n_nodes = 3
 
         self.K = 100
-        self.thetas = np.ones(self.net_stats.get_num_of_statistics())
+        self.thetas = np.ones(self.net_stats.num_of_metrics)
 
     def test_calculate_weight(self):
-        ergm = ERGM(self.n_nodes, self.net_stats)
-        ergm.fit(precalculated_thetas=self.thetas, precalculated_normalization_factor=self.K)
+        ergm = ERGM(self.n_nodes, self.net_stats, initial_thetas=self.thetas, initial_normalization_factor=self.K)
 
         W = np.array([[0, 1, 1],
                       [1, 0, 1],
@@ -39,8 +40,7 @@ class TestERGM(unittest.TestCase):
         self.assertEqual(weight, expected_weight)
 
     def test_calculate_probability(self):
-        ergm = ERGM(self.n_nodes, self.net_stats)
-        ergm.fit(precalculated_thetas=self.thetas, precalculated_normalization_factor=self.K)
+        ergm = ERGM(self.n_nodes, self.net_stats, initial_thetas=self.thetas, initial_normalization_factor=self.K)
 
         W = np.array([[0, 1, 1],
                       [1, 0, 1],
@@ -55,12 +55,10 @@ class TestERGM(unittest.TestCase):
         self.assertEqual(probability, expected_probability)
 
     def test_calculate_probability_wiki_example(self):
-        ergm = ERGM(self.n_nodes, self.net_stats)
-
         thetas = [-np.log(2), np.log(3)]
         K = 29 / 8
 
-        ergm.fit(precalculated_thetas=thetas, precalculated_normalization_factor=K)
+        ergm = ERGM(self.n_nodes, self.net_stats, initial_thetas=thetas, initial_normalization_factor=K)
 
         W_0_edges = np.array([[0, 0, 0],
                               [0, 0, 0],
@@ -94,18 +92,23 @@ class TestERGM(unittest.TestCase):
         expected_probability = round(0.375 / K, 6)
         self.assertEqual(probability, expected_probability)
 
-    def test_benchmark_er_convergence(self, n=4, p=0.25, is_directed=True):
+    def test_benchmark_er_convergence(self, n=5, p=0.1, is_directed=False):
         np.random.seed(9873645)
+        print(f"Running an ERGM bruteforce fit with {n} nodes, p={p}, directed={is_directed}")
         num_pos_connect = n * (n - 1)
+
         if not is_directed:
             num_pos_connect //= 2
+
         ground_truth_num_edges = round(num_pos_connect * p)
         ground_truth_p = ground_truth_num_edges / num_pos_connect
-        ground_truth_theta = np.array([np.log(ground_truth_p / (1 - ground_truth_p))])
+        ground_truth_theta = np.array([np.log(ground_truth_p / (1 - ground_truth_p))]) 
+
         adj_mat_no_diag = np.zeros(num_pos_connect)
         on_indices = np.random.choice(num_pos_connect, size=ground_truth_num_edges, replace=False).astype(int)
         adj_mat_no_diag[on_indices] = 1
         adj_mat = np.zeros((n, n))
+
         if not is_directed:
             upper_triangle_indices = np.triu_indices(n, k=1)
             adj_mat[upper_triangle_indices] = adj_mat_no_diag
@@ -113,48 +116,27 @@ class TestERGM(unittest.TestCase):
             adj_mat[lower_triangle_indices_aligned] = adj_mat_no_diag
         else:
             adj_mat[~np.eye(n, dtype=bool)] = adj_mat_no_diag
-        model = BruteForceERGM(n, NetworkStatistics(['num_edges'], directed=is_directed), is_directed=is_directed)
+
+        model = BruteForceERGM(n, MetricsCollection([NumberOfEdges()], is_directed=is_directed), is_directed=is_directed)
         model.fit(adj_mat)
+
         print(f"ground truth theta: {ground_truth_theta}")
         print(f"fit theta: {model._thetas}")
+
         for t_model, t_ground_truth in zip(model._thetas, ground_truth_theta):
-            self.assertAlmostEqual(t_model, t_ground_truth, places=5)
+            self.assertAlmostEqual(t_model, t_ground_truth, places=5) 
 
         non_synapses_indices = np.where(adj_mat_no_diag == 0)[0]
         prediction = ground_truth_p * np.ones(adj_mat_no_diag.size)
         prediction[non_synapses_indices] = 1 - ground_truth_p
         true_log_like = np.log(prediction).sum()
         print(f"true log likelihood: {true_log_like}")
-        model_with_true_theta = BruteForceERGM(n, NetworkStatistics(['num_edges'], directed=is_directed),
+
+        model_with_true_theta = BruteForceERGM(n, MetricsCollection([NumberOfEdges()], is_directed=is_directed),
                                                initial_thetas=np.array(ground_truth_theta), is_directed=is_directed)
+        
         ground_truth_model_log_like = np.log(model_with_true_theta.calculate_weight(adj_mat)) - np.log(
             model_with_true_theta._normalization_factor)
+        
         print(f"model with true theta log like: {ground_truth_model_log_like}")
-
-    # def test_sample_network(self):
-    #     n_nodes = 6
-    #     net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"], directed=False)      
-
-    #     ergm = ERGM(n_nodes, net_stats, is_directed=False)
-
-    #     thetas = [-np.log(2), np.log(3)]
-    #     K = 129 / 8
-
-    #     ergm.fit(precalculated_thetas=thetas)
-
-    #     sampled_net = ergm.sample_network(steps=30)
-    #     print(sampled_net)
-
-    # def test_sample_network_directed(self):
-    #     # n_nodes = 6
-    #     # net_stats = NetworkStatistics(metric_names=["num_edges"], directed=True)      
-
-    #     # ergm = ERGM(n_nodes, net_stats, is_directed=True)
-
-    #     # thetas = [-np.log(2)]
-    #     # K = 129 / 8
-
-    #     # ergm.fit(precalculated_thetas=thetas)
-
-    #     # sampled_net = ergm.sample_network(steps=30)
-    #     # print(sampled_net)
+        print(f"normalization factor: {model_with_true_theta._normalization_factor}")

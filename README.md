@@ -46,7 +46,11 @@ Observe the quantity $\log(\text{AR})$ in the symmetric proposal case -
 $$\log(\text{AR}) = \log(\frac{\Pr(\mathbf{Y}=y_{\text{proposed}})}{\Pr(\mathbf{Y}=y_{\text{current}})})
 = \log(\frac{\exp(\theta^Tg(y_{\text{proposed}})) / \kappa }{\exp(\theta^Tg(y_{\text{current}})) / \kappa }) = \theta^T \delta_g(y)_{i,j}$$
 
-where $\delta_g(y)_{i,j} = g(y_{\text{proposed}}) - g(y_{\text{current}})$ is the *change score*.
+where $\delta_g(y)_{i,j}$ is the *change score* - 
+
+$$
+\delta_g(y)_{i,j} = g(y\_{\text{proposed}}) - g(y\_{\text{current}})
+$$
 
 Now all that's left to do is accept the suggested change with probability 
 
@@ -62,24 +66,23 @@ Steps 1-3 create a Markov chain over possible samples from the ERGM distribution
 ## Fitting
 The simplest way to fit an ERGM is by performing a Maximum Likelihood estimation (**MLE**).
 
-Given a network $y_{\text{obs}})$, we can treat the probability function as a likelihood function $\mathcal{L}(\theta | y_{\text{obs}}))$, which defines the log likelihood function $\mathcal{l}(\theta)$ - 
+Given a network $y_{\text{obs}}$, we can treat the probability function as a likelihood function $\ell(\theta | y_{\text{obs}})$, which defines the log likelihood function $\ell(\theta)$ - 
 
 $$
-\mathcal{l}(\theta | y_{\text{obs}})) = \theta^Tg(y_{\text{obs}})) - \log(\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))
+\ell(\theta | y_{\text{obs}}) = \theta^Tg(y_{\text{obs}}) - \log(\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))
 $$
 
 which can be optimized to obtain - 
 
 $$
-\theta^* = \arg \max \ \mathcal{l}(\theta | y_{\text{obs}}) = \arg \min \ - \mathcal{l}(\theta | y_{\text{obs}})
+\theta^* = \arg \max \ \ell(\theta | y_{\text{obs}}) = \arg \min \ - \ell(\theta | y_{\text{obs}})
 $$
 
 We now take the derivative - 
 
 $$
-\frac{\partial}{\partial \theta} \ \mathcal{l} (\theta) = g(y_{\text{obs}})) - \frac{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))g(z)}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))} = g(y_{\text{obs}})) - \sum_{z\in\mathcal{Y}} \frac{\exp(\theta^Tg(z)))}{\kappa}g(z)
-\\ \\ 
-= g(y_{\text{obs}}))- \sum_{z\in\mathcal{Y}}\Pr_{\theta, \mathcal{Y}}(\mathbf{Y}=z)g(z) = g(y_{\text{obs}}))- \mathbb{E}_{z\sim\mathcal{Y}}[g(z)]
+\frac{\partial}{\partial \theta} \ \ell (\theta) = g(y_{\text{obs}}) - \frac{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))g(z)}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z)))} = g(y_{\text{obs}}) - \sum_{z\in\mathcal{Y}} \frac{\exp(\theta^Tg(z)))}{\kappa}g(z)
+= g(y_{\text{obs}})- \sum_{z\in\mathcal{Y}}\Pr_{\theta, \mathcal{Y}}(\mathbf{Y}=z)g(z) = g(y_{\text{obs}})- \mathbb{E}_{z\sim\mathcal{Y}}[g(z)] 
 $$
 
 
