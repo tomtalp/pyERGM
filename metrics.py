@@ -66,6 +66,23 @@ class Reciprocity(Metric):
 
     def get_effective_feature_count(self, n):
         return math.comb(n, 2)
+    
+class TotalReciprocity(Metric):
+    """
+    Calculates how many reciprocal connections exist in a network  
+    """
+    def __init__(self):
+        super().__init__(metric_name="total_reciprocity", requires_graph=False)
+    
+    def calculate(self, W, is_directed):
+        if not is_directed:
+            raise ValueError("Total Reciprocity effect cannot be calculated for undirected networks")
+
+        n = W.shape[0]
+        y_ij = W[np.triu_indices(n, k=1)]
+        y_ji = W.T[np.triu_indices(n, k=1)]
+
+        return sum(np.multiply(y_ij, y_ji))  
 
 class MetricsCollection():
     def __init__(self, metrics: List[Metric], is_directed: bool):
