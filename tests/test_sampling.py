@@ -17,8 +17,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         thetas = np.array([np.log(2)])
 
         # UNDIRECTED VERSION
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator,
-                                                   is_directed=False)
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
 
         test_W = np.array([
             [0., 0., 0., 1.],
@@ -55,8 +54,7 @@ class Test_MetropolisHastings(unittest.TestCase):
 
         # DIRECTED VERSION
         stats_calculator = MetricsCollection([NumberOfEdgesDirected()], is_directed=True)
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator,
-                                                   is_directed=True)
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
 
         test_W = np.array([[0, 1], [0, 0]])
         node_i = 1
@@ -82,8 +80,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         theta_edges = 0.5
         thetas = np.array([theta_edges])
 
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator,
-                                                   is_directed=False)
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
 
         test_W_plus = np.array([
             [0, 1, 1],
@@ -111,8 +108,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         theta_triangles = 0.5
         thetas = np.array([theta_edges, theta_triangles])
 
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator,
-                                                   is_directed=False)
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
 
         test_W_plus = np.array([
             [0, 1, 1],
@@ -143,8 +139,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         theta_edges = -1
         thetas = np.array([theta_edges])
 
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator,
-                                                   is_directed=True)
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
 
         test_W_plus = np.array([
             [0, 1, 1],

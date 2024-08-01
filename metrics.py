@@ -7,7 +7,6 @@ import networkx as nx
 from utils import *
 
 
-## TODO - Metrics needs to implement a diff() function
 class Metric(ABC):
     def __init__(self, metric_name, requires_graph=False):
         self.metric_name = metric_name
@@ -26,7 +25,22 @@ class Metric(ABC):
         """
         return 1
 
+    def calc_change_score(self, net_1: np.ndarray | nx.Graph, net_2: np.ndarray | nx.Graph):
+        """
+        The default naive way to calculate the change score (namely, the difference in statistics) of a pair of
+        networks.
 
+        Returns
+        -------
+        statistic of net_2 minus statistic of net_1.
+        """
+        net_2_stat = self.calculate(net_2)
+        net_1_stat = self.calculate(net_1)
+        change_score = net_2_stat - net_1_stat
+        return change_score
+
+
+# TODO: override the change_score function with a more efficient calculation when possible.
 class NumberOfEdgesUndirected(Metric):
     def __init__(self):
         super().__init__(metric_name="num_edges_undirected", requires_graph=False)
@@ -153,3 +167,30 @@ class MetricsCollection:
             feature_idx += n_features_from_metric
 
         return statistics
+
+    def calc_change_scores(self, W1: np.ndarray, W2: np.ndarray):
+        """
+        Calculates the vector of change scores, namely g(net_2) - g(net_1)
+        """
+        if W1.shape != W2.shape:
+            raise ValueError(f"The dimensions of the given networks do not match! {W1.shape}, {W2.shape}")
+        if self.requires_graph:
+            G1 = connectivity_matrix_to_G(W1, directed=self.is_directed)
+            G2 = connectivity_matrix_to_G(W2, directed=self.is_directed)
+
+        n_nodes = W1.shape[0]
+        change_scores = np.zeros(self.get_num_of_features(n_nodes))
+
+        feature_idx = 0
+        for metric in self.metrics:
+            if metric.requires_graph:
+                inputs = (G1, G2)
+            else:
+                inputs = (W1, W2)
+
+            n_features_from_metric = metric.get_effective_feature_count(n_nodes)
+            change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(inputs[0],
+                                                                                                       inputs[1])
+            feature_idx += n_features_from_metric
+
+        return change_scores
