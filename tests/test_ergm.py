@@ -141,3 +141,50 @@ class TestERGM(unittest.TestCase):
 
         print(f"model with true theta log like: {ground_truth_model_log_like}")
         print(f"normalization factor: {model_with_true_theta._normalization_factor}")
+
+    def test_fit_small_ER_network(self):
+        n = 4
+        p = 0.25
+        is_directed = False
+
+        num_pos_connect = n * (n - 1)
+        if not is_directed:
+            num_pos_connect //= 2
+
+        ground_truth_num_edges = round(num_pos_connect * p)
+        ground_truth_p = ground_truth_num_edges / num_pos_connect
+        ground_truth_theta = np.array([np.log(ground_truth_p / (1 - ground_truth_p))])
+
+        adj_mat_no_diag = np.zeros(num_pos_connect)
+        on_indices = np.random.choice(num_pos_connect, size=ground_truth_num_edges, replace=False).astype(int)
+        adj_mat_no_diag[on_indices] = 1
+        adj_mat = np.zeros((n, n))
+
+        if not is_directed:
+            upper_triangle_indices = np.triu_indices(n, k=1)
+            adj_mat[upper_triangle_indices] = adj_mat_no_diag
+            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
+            adj_mat[lower_triangle_indices_aligned] = adj_mat_no_diag
+        else:
+            adj_mat[~np.eye(n, dtype=bool)] = adj_mat_no_diag
+
+        W = adj_mat
+        print("Fitting matrix - ")
+        print(W)
+
+        ergm = ERGM(n, 
+                    [NumberOfEdgesUndirected()], 
+                    is_directed=is_directed, 
+                    n_networks_for_grad_estimation=200, 
+                    n_mcmc_steps=10,
+                    seed_MCMC_proba=0.25
+                )
+    
+        ergm.fit(W, lr=0.01, opt_steps=300, sliding_grad_window_k=10, sample_pct_growth=0.05, steps_for_decay=20, lr_decay_pct=0.05)
+
+        fit_theta = ergm._thetas[0]
+        print(f"ground truth theta: {ground_truth_theta}")
+        print(f"fit theta: {fit_theta}")
+
+        # TODO - what criteria to use for testing convergence? From manual tests, it doesn't seem to perfectly converge on the true thetas...
+        # Nevertheless, even without an assert, this will catch errors - fit won't work if something breaks.

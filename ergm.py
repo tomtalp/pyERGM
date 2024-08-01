@@ -164,7 +164,7 @@ class ERGM():
         """
 
         def nll_grad(thetas):
-            model = ERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas, is_directed=self._is_directed)
+            model = ERGM(self._n_nodes, self._network_statistics.metrics, initial_thetas=thetas, is_directed=self._is_directed)
 
             observed_features = model._network_statistics.calculate_statistics(observed_network)
 
