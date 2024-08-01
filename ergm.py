@@ -2,7 +2,7 @@ import numpy as np
 import networkx as nx
 from scipy.optimize import minimize, OptimizeResult
 import time
-
+from typing import Collection
 import sampling
 
 from utils import *
@@ -12,7 +12,7 @@ from metrics import *
 class ERGM():
     def __init__(self,
                  n_nodes,
-                 network_statistics: MetricsCollection,
+                 network_statistics: Collection[Metric],
                  is_directed=False,
                  initial_thetas=None,
                  initial_normalization_factor=None,
@@ -29,8 +29,8 @@ class ERGM():
         n_nodes : int
             The number of nodes in the network.
         
-        network_statistics : MetricsCollection
-            A MetricsCollection object that can calculate statistics of a network.
+        network_statistics : list
+            A list of Metric objects for calculating statistics of a network.
         
         is_directed : bool
             Whether the network is directed or not.
@@ -51,7 +51,8 @@ class ERGM():
             The number of steps to run the MCMC sampler when sampling a network
         """
         self._n_nodes = n_nodes
-        self._network_statistics = network_statistics
+        self._is_directed = is_directed
+        self._network_statistics = MetricsCollection(network_statistics, self._is_directed)
 
         if initial_thetas is not None:
             self._thetas = initial_thetas
@@ -63,7 +64,6 @@ class ERGM():
         else:
             self._normalization_factor = np.random.normal(50, 10)
 
-        self._is_directed = is_directed
         self._seed_MCMC_proba = seed_MCMC_proba
 
         self.optimization_iter = 0
@@ -97,16 +97,15 @@ class ERGM():
 
     def generate_networks_for_sample(self, replace=True):
         sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics,
-                                                       is_directed=self._is_directed)
+                                                   is_directed=self._is_directed)
         G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
         seed_network = nx.to_numpy_array(G)
-        
-        return sampler.sample(seed_network, self.n_networks_for_grad_estimation, replace=replace)
 
+        return sampler.sample(seed_network, self.n_networks_for_grad_estimation, replace=replace)
 
     def _approximate_normalization_factor(self):
         networks_for_sample = self.generate_networks_for_sample(replace=False)
-        
+
         self._normalization_factor = 0
 
         for network_idx in range(self.n_networks_for_grad_estimation):
@@ -116,16 +115,16 @@ class ERGM():
 
         # print(f"Finished generating networks for Z, which is estimated at {self._normalization_factor}")
 
-    def fit(self, observed_network, 
-                lr=0.001, 
-                opt_steps=1000, 
-                steps_for_decay=100,
-                lr_decay_pct=0.01,  
-                l2_grad_thresh=0.001, 
-                sliding_grad_window_k=10, 
-                max_sliding_window_size=100, 
-                max_nets_for_sample=1000, 
-                sample_pct_growth=0.02):
+    def fit(self, observed_network,
+            lr=0.001,
+            opt_steps=1000,
+            steps_for_decay=100,
+            lr_decay_pct=0.01,
+            l2_grad_thresh=0.001,
+            sliding_grad_window_k=10,
+            max_sliding_window_size=100,
+            max_nets_for_sample=1000,
+            sample_pct_growth=0.02):
         """
         Fit an ERGM model to a given network.
 
@@ -163,6 +162,7 @@ class ERGM():
     
             
         """
+
         def nll_grad(thetas):
             model = ERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas, is_directed=self._is_directed)
 
@@ -173,10 +173,11 @@ class ERGM():
 
             features_of_net_samples = np.zeros((num_of_features, self.n_networks_for_grad_estimation))
             for i in range(self.n_networks_for_grad_estimation):
-                features_of_net_samples[:, i] = model._network_statistics.calculate_statistics(networks_for_sample[:,:, i])
+                features_of_net_samples[:, i] = model._network_statistics.calculate_statistics(
+                    networks_for_sample[:, :, i])
 
             mean_features = np.mean(features_of_net_samples, axis=1)
-            
+
             return mean_features - observed_features
 
         def true_nll_grad(model):
@@ -200,31 +201,32 @@ class ERGM():
         print("optimization started")
 
         self.optimization_start_time = time.time()
-        
+
         grads = np.zeros((opt_steps, self._network_statistics.num_of_metrics))
         true_grads = np.zeros((opt_steps, self._network_statistics.num_of_metrics))
- 
+
         for i in range(opt_steps):
-            if ((i+1) % steps_for_decay) == 0:
-                lr *= (1-lr_decay_pct)
+            if ((i + 1) % steps_for_decay) == 0:
+                lr *= (1 - lr_decay_pct)
 
                 if self.n_networks_for_grad_estimation < max_nets_for_sample:
-                    self.n_networks_for_grad_estimation *= (1+sample_pct_growth)
-                    self.n_networks_for_grad_estimation = np.min([int(self.n_networks_for_grad_estimation), max_nets_for_sample])
-                
-                if sliding_grad_window_k < max_sliding_window_size:
-                    sliding_grad_window_k *= (1+sample_pct_growth)
-                    sliding_grad_window_k = np.min([np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
+                    self.n_networks_for_grad_estimation *= (1 + sample_pct_growth)
+                    self.n_networks_for_grad_estimation = np.min(
+                        [int(self.n_networks_for_grad_estimation), max_nets_for_sample])
 
-            
+                if sliding_grad_window_k < max_sliding_window_size:
+                    sliding_grad_window_k *= (1 + sample_pct_growth)
+                    sliding_grad_window_k = np.min(
+                        [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
+
             grad = nll_grad(self._thetas)
-            self._thetas = self._thetas - lr*grad
+            self._thetas = self._thetas - lr * grad
 
             grads[i] = grad
 
-            idx_for_sliding_grad = np.max([0, i - sliding_grad_window_k+1])
-            sliding_window_grads = grads[idx_for_sliding_grad:i+1].mean()
-        
+            idx_for_sliding_grad = np.max([0, i - sliding_grad_window_k + 1])
+            sliding_window_grads = grads[idx_for_sliding_grad:i + 1].mean()
+
             if i % 100 == 0:
                 ## TODO - THIS IS FOR DEBUG.
                 # bruteforce = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=self._thetas, is_directed=self._is_directed)
@@ -233,7 +235,8 @@ class ERGM():
                 true_grad = 0
 
                 delta_t = time.time() - self.optimization_start_time
-                print(f"Step {i} - true_grad: {true_grad}, grad: {grads[i-1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, n_networks_for_grad_estimation: {self.n_networks_for_grad_estimation}, sliding_grad_window_k: {sliding_grad_window_k}")
+                print(
+                    f"Step {i} - true_grad: {true_grad}, grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, n_networks_for_grad_estimation: {self.n_networks_for_grad_estimation}, sliding_grad_window_k: {sliding_grad_window_k}")
 
             if np.linalg.norm(sliding_window_grads) <= l2_grad_thresh:
                 print(f"Reached threshold of {l2_grad_thresh} after {i} steps. DONE!")
@@ -297,6 +300,7 @@ class ERGM():
 
         return network
 
+
 class BruteForceERGM(ERGM):
     """
     A class that implements ERGM by iterating over the entire space of networks and calculating stuff exactly (rather
@@ -310,7 +314,7 @@ class BruteForceERGM(ERGM):
 
     def __init__(self,
                  n_nodes,
-                 network_statistics: MetricsCollection,
+                 network_statistics: Collection[Metric],
                  is_directed=False,
                  initial_thetas=None):
         super().__init__(n_nodes,
@@ -359,12 +363,12 @@ class BruteForceERGM(ERGM):
 
     def fit(self, observed_network):
         def nll(thetas):
-            model = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas,
+            model = BruteForceERGM(self._n_nodes, list(self._network_statistics.metrics), initial_thetas=thetas,
                                    is_directed=self._is_directed)
             return np.log(model._normalization_factor) - np.log(model.calculate_weight(observed_network))
 
         def nll_grad(thetas):
-            model = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=thetas,
+            model = BruteForceERGM(self._n_nodes, list(self._network_statistics.metrics), initial_thetas=thetas,
                                    is_directed=self._is_directed)
             observed_features = model._network_statistics.calculate_statistics(observed_network)
             all_probs = model._all_weights / model._normalization_factor
