@@ -7,15 +7,14 @@ import sys
 
 class TestERGM(unittest.TestCase):
     def setUp(self):
-        metrics = [NumberOfEdges(), NumberOfTriangles()]
-        self.net_stats = MetricsCollection(metrics, is_directed=False)
+        self.metrics = [NumberOfEdgesUndirected(), NumberOfTriangles()]
         self.n_nodes = 3
 
         self.K = 100
-        self.thetas = np.ones(self.net_stats.num_of_metrics)
+        self.thetas = np.ones(MetricsCollection(self.metrics, is_directed=False).get_num_of_features(self.n_nodes))
 
     def test_calculate_weight(self):
-        ergm = ERGM(self.n_nodes, self.net_stats, initial_thetas=self.thetas, initial_normalization_factor=self.K)
+        ergm = ERGM(self.n_nodes, self.metrics, initial_thetas=self.thetas, initial_normalization_factor=self.K)
 
         W = np.array([[0, 1, 1],
                       [1, 0, 1],
@@ -40,7 +39,7 @@ class TestERGM(unittest.TestCase):
         self.assertEqual(weight, expected_weight)
 
     def test_calculate_probability(self):
-        ergm = ERGM(self.n_nodes, self.net_stats, initial_thetas=self.thetas, initial_normalization_factor=self.K)
+        ergm = ERGM(self.n_nodes, self.metrics, initial_thetas=self.thetas, initial_normalization_factor=self.K)
 
         W = np.array([[0, 1, 1],
                       [1, 0, 1],
@@ -58,7 +57,7 @@ class TestERGM(unittest.TestCase):
         thetas = [-np.log(2), np.log(3)]
         K = 29 / 8
 
-        ergm = ERGM(self.n_nodes, self.net_stats, initial_thetas=thetas, initial_normalization_factor=K)
+        ergm = ERGM(self.n_nodes, self.metrics, initial_thetas=thetas, initial_normalization_factor=K)
 
         W_0_edges = np.array([[0, 0, 0],
                               [0, 0, 0],
@@ -102,7 +101,7 @@ class TestERGM(unittest.TestCase):
 
         ground_truth_num_edges = round(num_pos_connect * p)
         ground_truth_p = ground_truth_num_edges / num_pos_connect
-        ground_truth_theta = np.array([np.log(ground_truth_p / (1 - ground_truth_p))]) 
+        ground_truth_theta = np.array([np.log(ground_truth_p / (1 - ground_truth_p))])
 
         adj_mat_no_diag = np.zeros(num_pos_connect)
         on_indices = np.random.choice(num_pos_connect, size=ground_truth_num_edges, replace=False).astype(int)
@@ -117,14 +116,15 @@ class TestERGM(unittest.TestCase):
         else:
             adj_mat[~np.eye(n, dtype=bool)] = adj_mat_no_diag
 
-        model = BruteForceERGM(n, MetricsCollection([NumberOfEdges()], is_directed=is_directed), is_directed=is_directed)
+        number_of_edges_metric = NumberOfEdgesDirected() if is_directed else NumberOfEdgesUndirected()
+        model = BruteForceERGM(n, [number_of_edges_metric], is_directed=is_directed)
         model.fit(adj_mat)
 
         print(f"ground truth theta: {ground_truth_theta}")
         print(f"fit theta: {model._thetas}")
 
         for t_model, t_ground_truth in zip(model._thetas, ground_truth_theta):
-            self.assertAlmostEqual(t_model, t_ground_truth, places=5) 
+            self.assertAlmostEqual(t_model, t_ground_truth, places=5)
 
         non_synapses_indices = np.where(adj_mat_no_diag == 0)[0]
         prediction = ground_truth_p * np.ones(adj_mat_no_diag.size)
@@ -132,11 +132,12 @@ class TestERGM(unittest.TestCase):
         true_log_like = np.log(prediction).sum()
         print(f"true log likelihood: {true_log_like}")
 
-        model_with_true_theta = BruteForceERGM(n, MetricsCollection([NumberOfEdges()], is_directed=is_directed),
+        number_of_edges_metric = NumberOfEdgesDirected() if is_directed else NumberOfEdgesUndirected()
+        model_with_true_theta = BruteForceERGM(n, [number_of_edges_metric],
                                                initial_thetas=np.array(ground_truth_theta), is_directed=is_directed)
-        
+
         ground_truth_model_log_like = np.log(model_with_true_theta.calculate_weight(adj_mat)) - np.log(
             model_with_true_theta._normalization_factor)
-        
+
         print(f"model with true theta log like: {ground_truth_model_log_like}")
         print(f"normalization factor: {model_with_true_theta._normalization_factor}")

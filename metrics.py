@@ -1,6 +1,5 @@
 from abc import ABC, abstractmethod
-import math
-from typing import List
+from typing import Collection
 
 import numpy as np
 import networkx as nx
@@ -13,9 +12,12 @@ class Metric(ABC):
     def __init__(self, metric_name, requires_graph=False):
         self.metric_name = metric_name
         self.requires_graph = requires_graph
+        # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
+        # and should not change.
+        self._is_directed = None
 
     @abstractmethod
-    def calculate(self, input):
+    def calculate(self, input: np.ndarray | nx.Graph):
         pass
 
     def get_effective_feature_count(self, n):
@@ -24,26 +26,36 @@ class Metric(ABC):
         """
         return 1
 
-## TODO - Rethink the is_directed flag in the Metrics objects. Should we have a separate class for directed metrics?    
-class NumberOfEdges(Metric):
+
+class NumberOfEdgesUndirected(Metric):
     def __init__(self):
-        super().__init__(metric_name="num_edges", requires_graph=False)
-    
-    def calculate(self, W, is_directed):
-        if is_directed:
-            return np.sum(W)
-        else:
-            return np.sum(W) // 2
+        super().__init__(metric_name="num_edges_undirected", requires_graph=False)
+        self._is_directed = False
+
+    def calculate(self, W: np.ndarray):
+        return np.sum(W) // 2
+
+
+class NumberOfEdgesDirected(Metric):
+    def __init__(self):
+        super().__init__(metric_name="num_edges_directed", requires_graph=False)
+        self._is_directed = True
+
+    def calculate(self, W: np.ndarray):
+        return np.sum(W)
+
 
 class NumberOfTriangles(Metric):
     def __init__(self):
         super().__init__(metric_name="num_triangles", requires_graph=True)
-    
-    def calculate(self, G, is_directed=False):
-        if is_directed or isinstance(G, nx.DiGraph):
+        self._is_directed = False
+
+    def calculate(self, G: nx.Graph):
+        if isinstance(G, nx.DiGraph):
             raise ValueError("NumOfTriangles not implemented for directed graphs")
-        
-        return sum(nx.triangles(G).values()) // 3 # nx.triangles counts each triangle 3 times, for every one of its nodes
+        return sum(
+            nx.triangles(G).values()) // 3  # nx.triangles counts each triangle 3 times, for every one of its nodes
+
 
 class Reciprocity(Metric):
     """
@@ -51,44 +63,43 @@ class Reciprocity(Metric):
     of size n-choose-2 indicating whether nodes i,j are connected. i.e. $ y_{i, j} \cdot y_{j, i} $
     for every possible pair of nodes   
     """
+
     def __init__(self):
         super().__init__(metric_name="reciprocity", requires_graph=False)
-    
-    def calculate(self, W, is_directed):
-        if not is_directed:
-            raise ValueError("Reciprocity effect cannot be calculated for undirected networks")
+        self._is_directed = True
 
-        n = W.shape[0]
-        y_ij = W[np.triu_indices(n, k=1)]
-        y_ji = W.T[np.triu_indices(n, k=1)]
-
-        return np.multiply(y_ij, y_ji)
+    def calculate(self, W: np.ndarray):
+        return (W * W.T)[np.triu_indices(W.shape[0], 1)]
 
     def get_effective_feature_count(self, n):
-        return math.comb(n, 2)
-    
+        # n choose 2
+        return n * (n - 1) // 2
+
+
 class TotalReciprocity(Metric):
     """
     Calculates how many reciprocal connections exist in a network  
     """
+
     def __init__(self):
         super().__init__(metric_name="total_reciprocity", requires_graph=False)
-    
-    def calculate(self, W, is_directed):
-        if not is_directed:
-            raise ValueError("Total Reciprocity effect cannot be calculated for undirected networks")
+        self._is_directed = True
 
-        n = W.shape[0]
-        y_ij = W[np.triu_indices(n, k=1)]
-        y_ji = W.T[np.triu_indices(n, k=1)]
+    def calculate(self, W: np.ndarray):
+        return (W * W.T).sum() / 2
 
-        return sum(np.multiply(y_ij, y_ji))  
 
-class MetricsCollection():
-    def __init__(self, metrics: List[Metric], is_directed: bool):
+class MetricsCollection:
+    def __init__(self, metrics: Collection[Metric], is_directed: bool):
         self.metrics = tuple(metrics)
         self.requires_graph = any([x.requires_graph for x in self.metrics])
         self.is_directed = is_directed
+        for x in self.metrics:
+            if x._is_directed != self.is_directed:
+                model_is_directed_str = "a directed" if self.is_directed else "an undirected"
+                metric_is_directed_str = "a directed" if x._is_directed else "an undirected"
+                raise ValueError(f"Trying to initialize {model_is_directed_str} model with {metric_is_directed_str} "
+                                 f"metric {x.metric_name}!")
         self.num_of_metrics = len(self.metrics)
 
     def get_num_of_features(self, n: int):
@@ -126,7 +137,7 @@ class MetricsCollection():
         """
         if self.requires_graph:
             G = connectivity_matrix_to_G(W, directed=self.is_directed)
-        
+
         n_nodes = W.shape[0]
         statistics = np.zeros(self.get_num_of_features(n_nodes))
 
@@ -138,8 +149,7 @@ class MetricsCollection():
                 input = W
 
             n_features_from_metric = metric.get_effective_feature_count(n_nodes)
-            statistics[feature_idx:feature_idx+n_features_from_metric] = metric.calculate(input, self.is_directed)
+            statistics[feature_idx:feature_idx + n_features_from_metric] = metric.calculate(input)
             feature_idx += n_features_from_metric
-            
 
         return statistics
