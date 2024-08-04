@@ -117,7 +117,7 @@ class Reciprocity(Metric):
         if net_1[indices[1], indices[0]] and is_turned_on:
             all_changes[indices[0], indices[1]] = 1
         elif net_1[indices[1], indices[0]] and not is_turned_on:
-            all_changes[indices[0], indices[1]] = 1
+            all_changes[indices[0], indices[1]] = -1
         return all_changes[np.triu_indices(all_changes.shape[0], 1)]
 
 
