@@ -40,7 +40,7 @@ class TestNumberOfTriangles(unittest.TestCase):
     def test_validation(self):
         metric = NumberOfTriangles()
 
-        self.assertTrue(metric.requires_graph)
+        self.assertTrue(not metric.requires_graph)
 
         W = np.array([
             [0, 1, 0],
@@ -48,10 +48,8 @@ class TestNumberOfTriangles(unittest.TestCase):
             [1, 0, 0]
         ])
 
-        G = nx.from_numpy_array(W, create_using=nx.DiGraph)
-
         with self.assertRaises(ValueError):
-            metric.calculate(G)
+            metric.calculate(W)
 
     def test_num_of_triangles(self):
         metric = NumberOfTriangles()
@@ -61,9 +59,7 @@ class TestNumberOfTriangles(unittest.TestCase):
             [1, 1, 0]
         ])
 
-        G = nx.from_numpy_array(W)
-
-        result = metric.calculate(G)
+        result = metric.calculate(W)
         expected_result = 1
 
         self.assertEqual(result, expected_result)
