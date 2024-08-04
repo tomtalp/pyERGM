@@ -5,16 +5,16 @@ from metrics import MetricsCollection
 
 
 class Sampler():
-    def __init__(self, thetas, network_stats_calculator, is_directed=False):
+    def __init__(self, thetas, network_stats_calculator):
         self.thetas = deepcopy(thetas)
         self.network_stats_calculator = deepcopy(network_stats_calculator)
-        self.is_directed = is_directed
 
     def sample(self, initial_state, n_iterations):
         pass
 
+
 class NaiveMetropolisHastings(Sampler):
-    def __init__(self, thetas, network_stats_calculator: MetricsCollection, is_directed=False, burn_in=1000, steps_per_sample=10):
+    def __init__(self, thetas, network_stats_calculator: MetricsCollection, burn_in=1000, steps_per_sample=10):
         """
         An implementation for the symmetric proposal Metropolis-Hastings algorithm for ERGMS, using the logit
         of the acceptance rate. See docs for more details.
@@ -27,12 +27,8 @@ class NaiveMetropolisHastings(Sampler):
         
         network_stats_calculator : MetricsCollection
             A MetricsCollection object that can calculate statistics of a network.
-        
-        is_directed : bool
-            A boolean flag indicating whether the network is directed or not.
-        
         """
-        super().__init__(thetas, network_stats_calculator, is_directed)
+        super().__init__(thetas, network_stats_calculator)
 
         ## TODO - these two params need to be dependent on the network size
         self.burn_in = burn_in
@@ -43,22 +39,20 @@ class NaiveMetropolisHastings(Sampler):
         Flip the edge between nodes i, j. If it's an undirected network, we flip entries W_i,j and W_j,i.
         """
         proposed_network = current_network.copy()
+        is_turned_on = not proposed_network[i, j]
         proposed_network[i, j] = 1 - proposed_network[i, j]
-        
-        if not self.is_directed:
+
+        if not self.network_stats_calculator.is_directed:
             proposed_network[j, i] = 1 - proposed_network[j, i]
-        
-        return proposed_network
-    
-    # TODO - this needs to go to Metric()
-    def _calculate_weighted_change_score(self, proposed_network, current_network):
+
+        return proposed_network, is_turned_on
+
+    def _calculate_weighted_change_score(self, proposed_network, current_network, is_turned_on, indices: tuple):
         """
         Calculate g(proposed_network)-g(current_network) and then inner product with thetas.
         """
-        g_proposed = self.network_stats_calculator.calculate_statistics(proposed_network)
-        g_current = self.network_stats_calculator.calculate_statistics(current_network)
-        change_score = g_proposed - g_current
-
+        change_score = self.network_stats_calculator.calc_change_scores(current_network, proposed_network, is_turned_on,
+                                                                        indices)
         return np.dot(self.thetas, change_score)
 
     def sample(self, initial_state, num_of_nets, replace=True):
@@ -87,10 +81,11 @@ class NaiveMetropolisHastings(Sampler):
 
         while networks_count != num_of_nets:
             random_entry = get_random_nondiagonal_matrix_entry(current_network.shape[0])
-            
-            proposed_network = self.flip_network_edge(current_network, random_entry[0], random_entry[1])
 
-            change_score = self._calculate_weighted_change_score(proposed_network, current_network)
+            proposed_network, is_turned_on = self.flip_network_edge(current_network, random_entry[0], random_entry[1])
+
+            change_score = self._calculate_weighted_change_score(proposed_network, current_network, is_turned_on,
+                                                                 random_entry)
 
             if change_score >= 1:
                 current_network = proposed_network.copy()
@@ -98,18 +93,18 @@ class NaiveMetropolisHastings(Sampler):
                 acceptance_proba = min(1, np.exp(change_score))
                 if np.random.rand() <= acceptance_proba:
                     current_network = proposed_network.copy()
-            
+
             if (mcmc_iter_count - self.burn_in) % self.steps_per_sample == 0:
                 sampled_networks[:, :, networks_count] = current_network
 
                 if not replace:
-                    if np.unique(sampled_networks[:, :, :networks_count+1], axis=2).shape[2] == networks_count + 1:
+                    if np.unique(sampled_networks[:, :, :networks_count + 1], axis=2).shape[2] == networks_count + 1:
                         networks_count += 1
                     else:
-                        sampled_networks[:, :, networks_count] = np.zeros((net_size, net_size))               
+                        sampled_networks[:, :, networks_count] = np.zeros((net_size, net_size))
                 else:
                     networks_count += 1
 
             mcmc_iter_count += 1
-            
+
         return sampled_networks

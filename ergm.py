@@ -96,8 +96,7 @@ class ERGM():
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
     def generate_networks_for_sample(self, replace=True):
-        sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics,
-                                                   is_directed=self._is_directed)
+        sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics)
         G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
         seed_network = nx.to_numpy_array(G)
 
@@ -164,7 +163,8 @@ class ERGM():
         """
 
         def nll_grad(thetas):
-            model = ERGM(self._n_nodes, self._network_statistics.metrics, initial_thetas=thetas, is_directed=self._is_directed)
+            model = ERGM(self._n_nodes, self._network_statistics.metrics, initial_thetas=thetas,
+                         is_directed=self._is_directed)
 
             observed_features = model._network_statistics.calculate_statistics(observed_network)
 
@@ -287,8 +287,7 @@ class ERGM():
             The sampled connectivity matrix.
         """
         if sampling_method == "NaiveMetropolisHastings":
-            sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics,
-                                                       is_directed=self._is_directed)
+            sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics)
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
