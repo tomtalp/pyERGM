@@ -114,10 +114,14 @@ class Reciprocity(Metric):
         # initializing an array of zeros of size n choose 2) to ensure compliance with the indexing returned by
         # the calculate method.
         all_changes = np.zeros(net_1.shape)
+
+        min_idx = min(indices)
+        max_idx = max(indices)
+
         if net_1[indices[1], indices[0]] and is_turned_on:
-            all_changes[indices[0], indices[1]] = 1
+            all_changes[min_idx, max_idx] = 1
         elif net_1[indices[1], indices[0]] and not is_turned_on:
-            all_changes[indices[0], indices[1]] = -1
+            all_changes[min_idx, max_idx] = -1
         return all_changes[np.triu_indices(all_changes.shape[0], 1)]
 
 

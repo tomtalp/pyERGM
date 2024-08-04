@@ -168,3 +168,27 @@ class TestMetricsCollection(unittest.TestCase):
         expected_num_of_features = math.comb(n, 2) + 1
 
         self.assertEqual(num_of_features, expected_num_of_features)
+    
+    def test_calc_change_scores(self):
+        metrics = [NumberOfEdgesDirected(), Reciprocity()]
+        collection = MetricsCollection(metrics, is_directed=True)
+
+        W1 = np.array([
+            [0, 0, 1],
+            [1, 0, 0],
+            [1, 1, 0]
+        ])
+
+        W2 = np.array([
+            [0, 0, 1],
+            [1, 0, 0],
+            [0, 1, 0]
+        ])
+
+        flipped_indices = (2, 0)
+        result = collection.calc_change_scores(W1, W2, is_turned_on=False, indices=flipped_indices)
+        print(result)
+
+        print(collection.calculate_statistics(W1))
+        print(collection.calculate_statistics(W2))
+
