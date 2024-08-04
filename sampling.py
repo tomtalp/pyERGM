@@ -39,18 +39,20 @@ class NaiveMetropolisHastings(Sampler):
         Flip the edge between nodes i, j. If it's an undirected network, we flip entries W_i,j and W_j,i.
         """
         proposed_network = current_network.copy()
+        is_turned_on = not proposed_network[i, j]
         proposed_network[i, j] = 1 - proposed_network[i, j]
 
         if not self.network_stats_calculator.is_directed:
             proposed_network[j, i] = 1 - proposed_network[j, i]
 
-        return proposed_network
+        return proposed_network, is_turned_on
 
-    def _calculate_weighted_change_score(self, proposed_network, current_network):
+    def _calculate_weighted_change_score(self, proposed_network, current_network, is_turned_on, indices: tuple):
         """
         Calculate g(proposed_network)-g(current_network) and then inner product with thetas.
         """
-        change_score = self.network_stats_calculator.calc_change_scores(current_network, proposed_network)
+        change_score = self.network_stats_calculator.calc_change_scores(current_network, proposed_network, is_turned_on,
+                                                                        indices)
         return np.dot(self.thetas, change_score)
 
     def sample(self, initial_state, num_of_nets, replace=True):
@@ -80,9 +82,10 @@ class NaiveMetropolisHastings(Sampler):
         while networks_count != num_of_nets:
             random_entry = get_random_nondiagonal_matrix_entry(current_network.shape[0])
 
-            proposed_network = self.flip_network_edge(current_network, random_entry[0], random_entry[1])
+            proposed_network, is_turned_on = self.flip_network_edge(current_network, random_entry[0], random_entry[1])
 
-            change_score = self._calculate_weighted_change_score(proposed_network, current_network)
+            change_score = self._calculate_weighted_change_score(proposed_network, current_network, is_turned_on,
+                                                                 random_entry)
 
             if change_score >= 1:
                 current_network = proposed_network.copy()
