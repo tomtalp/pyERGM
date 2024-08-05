@@ -162,7 +162,7 @@ class ERGM():
             
         """
 
-        def nll_grad(thetas):
+        def nll_grad_hessian(thetas):
             model = ERGM(self._n_nodes, self._network_statistics.metrics, initial_thetas=thetas,
                          is_directed=self._is_directed)
 
@@ -178,7 +178,19 @@ class ERGM():
 
             mean_features = np.mean(features_of_net_samples, axis=1)
 
-            return mean_features - observed_features
+            nll_grad = mean_features - observed_features
+
+            # An outer product of the means (E[gi]E[gj])
+            cross_prod_mean_features = (mean_features.reshape(num_of_features, 1) @
+                                        mean_features.T.reshape(1, num_of_features))
+            # A mean of the outer products of the sample (E[gi*gj])
+            mean_features_cross_prod = np.mean(
+                features_of_net_samples.T.reshape(self.n_networks_for_grad_estimation, num_of_features, 1) @
+                features_of_net_samples.T.reshape(self.n_networks_for_grad_estimation, 1, num_of_features), axis=0)
+
+            nll_hessian = mean_features_cross_prod - cross_prod_mean_features
+
+            return nll_grad, nll_hessian
 
         def true_nll_grad(model):
             """
@@ -219,8 +231,13 @@ class ERGM():
                     sliding_grad_window_k = np.min(
                         [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
-            grad = nll_grad(self._thetas)
-            self._thetas = self._thetas - lr * grad
+            grad, hessian = nll_grad_hessian(self._thetas)
+            try:
+                inv_hessian = np.linalg.inv(hessian)
+            except np.linalg.LinAlgError:
+                print("The hessian is not invertible")
+                inv_hessian = np.linalg.pinv(hessian)
+            self._thetas = self._thetas - lr * inv_hessian @ grad
 
             grads[i] = grad
 

@@ -279,7 +279,7 @@ class TestMetricsCollection(unittest.TestCase):
         ])
 
         flipped_indices = (2, 0)
-        result = collection.calc_change_scores(W1, W2, is_turned_on=False, indices=flipped_indices)
+        result = collection.calc_change_scores(W1, W2, indices=flipped_indices)
         
         # 1st is -1 because we lost an edge, and 3rd entry is -1 because node #2 lost it's reciprocity
         expected_result = [-1, 0, -1, 0] 

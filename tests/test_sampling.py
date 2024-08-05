@@ -28,7 +28,7 @@ class Test_MetropolisHastings(unittest.TestCase):
 
         node_i = 0
         node_j = 2
-        W_plus, is_turned_on = sampler.flip_network_edge(test_W, node_i, node_j)
+        W_plus = sampler.flip_network_edge(test_W, node_i, node_j)
 
         expected_W = np.array([
             [0., 0., 1., 1.],
@@ -41,7 +41,7 @@ class Test_MetropolisHastings(unittest.TestCase):
 
         node_i = 0
         node_j = 3
-        W_minus, is_turned_on = sampler.flip_network_edge(test_W, node_i, node_j)
+        W_minus = sampler.flip_network_edge(test_W, node_i, node_j)
 
         expected_W = np.array([
             [0., 0., 0., 0.],
@@ -59,14 +59,14 @@ class Test_MetropolisHastings(unittest.TestCase):
         test_W = np.array([[0, 1], [0, 0]])
         node_i = 1
         node_j = 0
-        W_plus, is_turned_on = sampler.flip_network_edge(test_W, node_i, node_j)
+        W_plus = sampler.flip_network_edge(test_W, node_i, node_j)
         expected_W = np.array([[0, 1], [1, 0]])
 
         self.assertTrue(np.all(W_plus == expected_W))
 
         node_i = 0
         node_j = 1
-        W_minus, is_turned_on = sampler.flip_network_edge(test_W, node_i, node_j)
+        W_minus = sampler.flip_network_edge(test_W, node_i, node_j)
         expected_W = np.array([[0, 0], [0, 0]])
 
         self.assertTrue(np.all(W_minus == expected_W))
@@ -94,7 +94,7 @@ class Test_MetropolisHastings(unittest.TestCase):
             [1, 1, 0]
         ])
 
-        change_score = sampler._calculate_weighted_change_score(test_W_plus, test_W_minus, True, (0, 1))
+        change_score = sampler._calculate_weighted_change_score(test_W_plus, test_W_minus, (0, 1))
         expected_change_score = 1 * theta_edges
         self.assertEqual(change_score, expected_change_score)
 
@@ -122,7 +122,7 @@ class Test_MetropolisHastings(unittest.TestCase):
             [1, 1, 0]
         ])
 
-        change_score = sampler._calculate_weighted_change_score(test_W_plus, test_W_minus, True, (0, 1))
+        change_score = sampler._calculate_weighted_change_score(test_W_plus, test_W_minus, (0, 1))
 
         changed_edges = 1
         changed_triangles = 1
@@ -159,8 +159,8 @@ class Test_MetropolisHastings(unittest.TestCase):
             [0, 1, 0]
         ])
 
-        total_change_score = (sampler._calculate_weighted_change_score(test_W_plus, test_W_minus, True, (0, 1)) +
-                              sampler._calculate_weighted_change_score(test_W_plus_plus, test_W_plus, True, (2, 0)))
+        total_change_score = (sampler._calculate_weighted_change_score(test_W_plus, test_W_minus, (0, 1)) +
+                              sampler._calculate_weighted_change_score(test_W_plus_plus, test_W_plus, (2, 0)))
 
         changed_edges = 2
         expected_change_score = changed_edges * theta_edges
