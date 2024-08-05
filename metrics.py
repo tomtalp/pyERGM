@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Collection
+from copy import deepcopy
 
 import numpy as np
 import networkx as nx
@@ -8,8 +9,7 @@ from utils import *
 
 
 class Metric(ABC):
-    def __init__(self, metric_name, requires_graph=False):
-        self.metric_name = metric_name
+    def __init__(self, requires_graph=False):
         self.requires_graph = requires_graph
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
@@ -43,8 +43,11 @@ class Metric(ABC):
 
 # TODO: override the change_score function with a more efficient calculation when possible.
 class NumberOfEdgesUndirected(Metric):
+    def __str__(self):
+        return "num_edges_undirected"
+    
     def __init__(self):
-        super().__init__(metric_name="num_edges_undirected", requires_graph=False)
+        super().__init__(requires_graph=False)
         self._is_directed = False
 
     def calculate(self, W: np.ndarray):
@@ -55,8 +58,11 @@ class NumberOfEdgesUndirected(Metric):
 
 
 class NumberOfEdgesDirected(Metric):
+    def __str__(self):
+        return "num_edges_directed"
+
     def __init__(self):
-        super().__init__(metric_name="num_edges_directed", requires_graph=False)
+        super().__init__(requires_graph=False)
         self._is_directed = True
 
     def calculate(self, W: np.ndarray):
@@ -68,8 +74,11 @@ class NumberOfEdgesDirected(Metric):
 
 # TODO: change the name of this one to undirected and implement also a directed version?
 class NumberOfTriangles(Metric):
+    def __str__(self):
+        return "num_triangles"
+
     def __init__(self):
-        super().__init__(metric_name="num_triangles", requires_graph=False)
+        super().__init__(requires_graph=False)
         self._is_directed = False
 
     def calculate(self, W: np.ndarray):
@@ -90,6 +99,49 @@ class NumberOfTriangles(Metric):
         sign = 1 if is_turned_on else -1
         return sign * ((net_1 @ net_1)[indices[0], indices[1]])
 
+class BaseDegreeVector(Metric):
+    """
+    A base class for calculating a degree vector for a network.
+    To avoid multicollinearity with other features, an optional parameter `base_idx` can be used to specify
+    which index the calculation starts from.
+    """
+    def __init__(self, requires_graph: bool, degree_type: str, base_idx=0):
+        super().__init__(requires_graph=requires_graph)
+        self._is_directed = True
+        self.base_idx = base_idx
+        
+        if degree_type not in ("in", "out"):
+            raise ValueError(f"Degree type {degree_type} is not valid. Degree must be either in / out.")
+        self.degree_type = degree_type
+
+    def calculate(self, W: np.ndarray):
+        if self.degree_type == "in":
+            return W.sum(axis=0)[self.base_idx:]
+        elif self.degree_type == "out":
+            return W.sum(axis=1)[self.base_idx:]
+    
+    def get_effective_feature_count(self, n):
+        return n - self.base_idx
+
+class InDegree(BaseDegreeVector):
+    """
+    Calculate the in-degree of each node.
+    """
+    def __str__(self):
+        return "indegree"
+
+    def __init__(self, base_idx=0):
+        super().__init__(requires_graph=False, degree_type="in", base_idx=base_idx) 
+
+class OutDegree(BaseDegreeVector):
+    """
+    Calculate the out-degree of each node.
+    """
+    def __str__(self):
+        return "outdegree"
+
+    def __init__(self, base_idx=0):
+        super().__init__(requires_graph=False, degree_type="out", base_idx=base_idx)  
 
 class Reciprocity(Metric):
     """
@@ -97,9 +149,11 @@ class Reciprocity(Metric):
     of size n-choose-2 indicating whether nodes i,j are connected. i.e. $ y_{i, j} \cdot y_{j, i} $
     for every possible pair of nodes   
     """
+    def __str__(self):
+        return "reciprocity"
 
     def __init__(self):
-        super().__init__(metric_name="reciprocity", requires_graph=False)
+        super().__init__(requires_graph=False)
         self._is_directed = True
 
     def calculate(self, W: np.ndarray):
@@ -129,9 +183,11 @@ class TotalReciprocity(Metric):
     """
     Calculates how many reciprocal connections exist in a network  
     """
+    def __str__(self):
+        return "total_reciprocity"
 
     def __init__(self):
-        super().__init__(metric_name="total_reciprocity", requires_graph=False)
+        super().__init__(requires_graph=False)
         self._is_directed = True
 
     def calculate(self, W: np.ndarray):
@@ -145,10 +201,11 @@ class TotalReciprocity(Metric):
         else:
             return 0
 
-
 class MetricsCollection:
-    def __init__(self, metrics: Collection[Metric], is_directed: bool):
-        self.metrics = tuple(metrics)
+    def __init__(self, metrics: Collection[Metric], is_directed: bool, fix_collinearity=True):
+        self.metrics = tuple([deepcopy(metric) for metric in metrics]) 
+        self.metric_names = tuple([str(metric) for metric in self.metrics])
+
         self.requires_graph = any([x.requires_graph for x in self.metrics])
         self.is_directed = is_directed
         for x in self.metrics:
@@ -156,9 +213,43 @@ class MetricsCollection:
                 model_is_directed_str = "a directed" if self.is_directed else "an undirected"
                 metric_is_directed_str = "a directed" if x._is_directed else "an undirected"
                 raise ValueError(f"Trying to initialize {model_is_directed_str} model with {metric_is_directed_str} "
-                                 f"metric {x.metric_name}!")
+                                 f"metric `{str(x)}`!")
         self.num_of_metrics = len(self.metrics)
 
+        self._fix_collinearity = fix_collinearity
+        if self._fix_collinearity:
+            self.collinearity_fixer()
+
+    def get_metric(self, metric_name: str) -> Metric:
+        """
+        Get a metric instance
+        """
+        return self.metrics[self.metric_names.index(metric_name)]
+
+
+    def collinearity_fixer(self):
+        """
+        Find collinearity between metrics in the collection.
+
+        Currently this is a naive version that only handles the very simple cases. 
+        TODO - Implement a smarter solution
+        """
+        num_edges_name = str(NumberOfEdgesDirected())
+        indegree_name = str(InDegree())
+        outdegree_name = str(OutDegree())
+
+        if num_edges_name in self.metric_names and indegree_name in self.metric_names:
+            self.get_metric(indegree_name).base_idx = 1
+        
+        if num_edges_name in self.metric_names and outdegree_name in self.metric_names:
+            self.get_metric(outdegree_name).base_idx = 1
+
+        # TODO - Defaults to trimming indegree. Is this fine? 
+        if indegree_name in self.metric_names and outdegree_name in self.metric_names:
+            self.get_metric(indegree_name).base_idx = 1
+            # self.get_metric(outdegree_name).base_idx = 1
+
+    
     def get_num_of_features(self, n: int):
         """
         Returns the number of features that are being calculated. Since a single metric might

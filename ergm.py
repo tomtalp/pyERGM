@@ -91,7 +91,7 @@ class ERGM():
 
     def _get_random_thetas(self, sampling_method="uniform"):
         if sampling_method == "uniform":
-            return np.random.uniform(-1, 1, self._network_statistics.num_of_metrics)
+            return np.random.uniform(-1, 1, self._network_statistics.get_num_of_features(self._n_nodes))
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
@@ -169,7 +169,7 @@ class ERGM():
             observed_features = model._network_statistics.calculate_statistics(observed_network)
 
             networks_for_sample = self.generate_networks_for_sample()
-            num_of_features = model._network_statistics.num_of_metrics
+            num_of_features = model._network_statistics.get_num_of_features(self._n_nodes)
 
             features_of_net_samples = np.zeros((num_of_features, self.n_networks_for_grad_estimation))
             for i in range(self.n_networks_for_grad_estimation):
@@ -186,7 +186,7 @@ class ERGM():
             """
             observed_features = model._network_statistics.calculate_statistics(observed_network)
             all_probs = model._all_weights / model._normalization_factor
-            num_features = model._network_statistics.num_of_metrics
+            num_features = model._network_statistics.get_num_of_features(self._n_nodes)
             num_nets = all_probs.size
             all_features_by_all_nets = np.zeros((num_features, num_nets))
             for i in range(num_nets):
@@ -202,8 +202,8 @@ class ERGM():
 
         self.optimization_start_time = time.time()
 
-        grads = np.zeros((opt_steps, self._network_statistics.num_of_metrics))
-        true_grads = np.zeros((opt_steps, self._network_statistics.num_of_metrics))
+        grads = np.zeros((opt_steps, self._network_statistics.get_num_of_features(self._n_nodes)))
+        true_grads = np.zeros((opt_steps, self._network_statistics.get_num_of_features(self._n_nodes)))
 
         for i in range(opt_steps):
             if ((i + 1) % steps_for_decay) == 0:
