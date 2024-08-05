@@ -25,8 +25,7 @@ class Metric(ABC):
         """
         return 1
 
-    def calc_change_score(self, net_1: np.ndarray | nx.Graph, net_2: np.ndarray | nx.Graph, is_turned_on: bool,
-                          indices: tuple):
+    def calc_change_score(self, net_1: np.ndarray | nx.Graph, net_2: np.ndarray | nx.Graph, indices: tuple):
         """
         The default naive way to calculate the change score (namely, the difference in statistics) of a pair of
         networks.
@@ -41,7 +40,6 @@ class Metric(ABC):
         return change_score
 
 
-# TODO: override the change_score function with a more efficient calculation when possible.
 class NumberOfEdgesUndirected(Metric):
     def __init__(self):
         super().__init__(metric_name="num_edges_undirected", requires_graph=False)
@@ -50,8 +48,8 @@ class NumberOfEdgesUndirected(Metric):
     def calculate(self, W: np.ndarray):
         return np.sum(W) // 2
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, is_turned_on: bool, indices: tuple):
-        return 1 if is_turned_on else -1
+    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
+        return 1 if net_2[indices[0], indices[1]] else -1
 
 
 class NumberOfEdgesDirected(Metric):
@@ -62,8 +60,8 @@ class NumberOfEdgesDirected(Metric):
     def calculate(self, W: np.ndarray):
         return np.sum(W)
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, is_turned_on: bool, indices: tuple):
-        return 1 if is_turned_on else -1
+    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
+        return 1 if net_2[indices[0], indices[1]] else -1
 
 
 # TODO: change the name of this one to undirected and implement also a directed version?
@@ -82,13 +80,13 @@ class NumberOfTriangles(Metric):
         # forming it), thus the division by 3.
         return (np.linalg.matrix_power(W, 3)).diagonal().sum() // (3 * 2)
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, is_turned_on: bool, indices: tuple):
+    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
         # The triangles that are affected by the edge toggling are those that involve it, namely, if the (i,j)-th edge
         # is toggled, the change in absolute value equals to the number of nodes k for which the edges (i,k) and (j,k)
         # exist. This is equivalent to the number of 2-length paths from i to j, which is the (i,j)-th entry of W^2.
         # If the edge is turned on, the change is positive, and otherwise negative.
-        sign = 1 if is_turned_on else -1
-        return sign * ((net_1 @ net_1)[indices[0], indices[1]])
+        sign = 1 if net_2[indices[0], indices[1]] else -1
+        return sign * np.dot(net_1[indices[0]], net_1[:, indices[1]])
 
 
 class Reciprocity(Metric):
@@ -109,15 +107,17 @@ class Reciprocity(Metric):
         # n choose 2
         return n * (n - 1) // 2
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, is_turned_on: bool, indices: tuple):
+    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
         # Note: we intentionally initialize the whole matrix and return np.triu_indices() by the end (rather than
         # initializing an array of zeros of size n choose 2) to ensure compliance with the indexing returned by
         # the calculate method.
         all_changes = np.zeros(net_1.shape)
-        if net_1[indices[1], indices[0]] and is_turned_on:
-            all_changes[indices[0], indices[1]] = 1
-        elif net_1[indices[1], indices[0]] and not is_turned_on:
-            all_changes[indices[0], indices[1]] = -1
+        min_idx = min(indices)
+        max_idx = max(indices)
+        if net_1[indices[1], indices[0]] and net_2[indices[0], indices[1]]:
+            all_changes[min_idx, max_idx] = 1
+        elif net_1[indices[1], indices[0]] and not net_2[indices[0], indices[1]]:
+            all_changes[min_idx, max_idx] = -1
         return all_changes[np.triu_indices(all_changes.shape[0], 1)]
 
 
@@ -133,10 +133,10 @@ class TotalReciprocity(Metric):
     def calculate(self, W: np.ndarray):
         return (W * W.T).sum() / 2
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, is_turned_on: bool, indices: tuple):
-        if net_1[indices[1], indices[0]] and is_turned_on:
+    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
+        if net_1[indices[1], indices[0]] and net_2[indices[0], indices[1]]:
             return 1
-        elif net_1[indices[1], indices[0]] and not is_turned_on:
+        elif net_1[indices[1], indices[0]] and not net_2[indices[0], indices[1]]:
             return -1
         else:
             return 0
@@ -207,7 +207,7 @@ class MetricsCollection:
 
         return statistics
 
-    def calc_change_scores(self, W1: np.ndarray, W2: np.ndarray, is_turned_on: bool, indices: tuple):
+    def calc_change_scores(self, W1: np.ndarray, W2: np.ndarray, indices: tuple):
         """
         Calculates the vector of change scores, namely g(net_2) - g(net_1)
         """
@@ -230,7 +230,6 @@ class MetricsCollection:
             n_features_from_metric = metric.get_effective_feature_count(n_nodes)
             change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(inputs[0],
                                                                                                        inputs[1],
-                                                                                                       is_turned_on,
                                                                                                        indices)
             feature_idx += n_features_from_metric
 
