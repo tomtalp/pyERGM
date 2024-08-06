@@ -148,14 +148,28 @@ class TestDegreeMetrics(unittest.TestCase):
         receiver = InDegree()
         indegree = receiver.calculate(W)
 
-        self.assertTrue(np.all(indegree == expected_in_degrees))
+        self.assertTrue(all(indegree == expected_in_degrees))
 
         expected_out_degrees = list(dict(G.out_degree()).values())
 
         sender = OutDegree()
         outdegree = sender.calculate(W)
 
-        self.assertTrue(np.all(outdegree == expected_out_degrees))
+        self.assertTrue(all(outdegree == expected_out_degrees))
+
+        undirected_degree = UndirectedDegree()
+        W = np.array([
+            [0, 1, 0, 1],
+            [1, 0, 0, 1],
+            [0, 0, 0, 1],
+            [1, 1, 1, 0]
+        ])
+
+        G = nx.from_numpy_array(W)
+        
+        degrees = undirected_degree.calculate(W)
+        expected_degrees = list(dict(G.degree()).values())
+        self.assertTrue(all(degrees == expected_degrees))
 
 
 class TestMetricsCollection(unittest.TestCase):
@@ -165,7 +179,14 @@ class TestMetricsCollection(unittest.TestCase):
         
         expected_metric_names = tuple([str(NumberOfEdgesDirected()), str(TotalReciprocity()), str(InDegree())])
 
-        self.assertTrue(np.all(collection.metric_names == expected_metric_names))
+        self.assertTrue(collection.metric_names == expected_metric_names)
+
+        metrics = [InDegree(), UndirectedDegree()]
+        with self.assertRaises(ValueError):
+            collection = MetricsCollection(metrics, is_directed=True) # Should fail because we have an undirected metric in a directed metrics collection
+
+        with self.assertRaises(ValueError):
+            collection = MetricsCollection(metrics, is_directed=False) # Should fail because we have a directed metric in an undirected metrics collection
 
     def test_collinearity_fixer(self):
         n = 18
@@ -284,5 +305,5 @@ class TestMetricsCollection(unittest.TestCase):
         # 1st is -1 because we lost an edge, and 3rd entry is -1 because node #2 lost it's reciprocity
         expected_result = [-1, 0, -1, 0] 
 
-        self.assertTrue(np.all(result == expected_result))
+        self.assertTrue(all(result == expected_result))
 
