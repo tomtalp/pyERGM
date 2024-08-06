@@ -114,6 +114,57 @@ class ERGM():
 
         # print(f"Finished generating networks for Z, which is estimated at {self._normalization_factor}")
 
+    def approximate_auto_correlation_function(self, networks_sample: np.ndarray) -> np.ndarray:
+        """
+        This is gamma hat from Geyer's handbook of mcmc.
+        """
+        features_of_net_samples = self._calc_sample_statistics(networks_sample)
+        features_mean_diff = features_of_net_samples - features_of_net_samples.mean(axis=1)[:, None]
+        num_features = features_of_net_samples.shape[0]
+        sample_size = networks_sample.shape[2]
+        auto_correlation_func = np.zeros((sample_size, num_features, num_features))
+        for k in range(sample_size):
+            auto_correlation_func[k] = 1 / sample_size * (
+                    features_mean_diff[:, :sample_size-k].T.reshape(sample_size - k, num_features, 1) @
+                    features_mean_diff[:, k:].T.reshape(sample_size - k, 1, num_features)
+            ).sum(axis=0)
+
+        # cross_feature_mean_diff_across_samples = (
+        #         features_mean_diff.T.reshape(networks_sample.shape[1], features_of_net_samples.shape[0], 1) @
+        #         features_of_net_samples.T.reshape(networks_sample.shape[1], 1, features_of_net_samples.shape[0]))
+        # # Padding the cross features mean diffs to eliminate the effect of circular boundaries
+        # padded_cross_feature_mean_diff_across_samples = np.concatenate(
+        #     (cross_feature_mean_diff_across_samples, np.zeros(cross_feature_mean_diff_across_samples.shape)), axis=0)
+        # # Transform to the frequency domain
+        # padded_features_mean_diff_fft = np.fft.fft(padded_cross_feature_mean_diff_across_samples, axis=0)
+        # # Use the theorem of convolution - it is a product with the conjugate in the frequency domain. Then take the
+        # # first half of the resulting array (to take the sums without padding, only lags within the original array).
+        # auto_correlation_func = np.fft.ifft(padded_features_mean_diff_fft * np.conjugate(padded_features_mean_diff_fft),
+        #                                     axis=0).real[:networks_sample.shape[1]]
+        # auto_correlation_func /= networks_sample.shape[1]
+        return auto_correlation_func
+
+    def _calc_sample_statistics(self, networks_sample: np.ndarray) -> np.ndarray:
+        """
+        Calculate the statistics over a sample of networks
+        # TODO: there are many Metrics for which this can be calculated more efficiently (without looping). E.g. number
+            of edges is just summing up along the 2 first axes of the sample array. Maybe we should export this to
+            MetricsCollection and perform it more efficiently when possible (like with the calculation of change_score).
+        Parameters
+        ----------
+        networks_sample
+            The networks sample - an array of n X n X sample_size
+        Returns
+        -------
+        an array of the statistics vector per sample (num_features X sample_size)
+        """
+        features_of_net_samples = np.zeros(
+            (self._network_statistics.get_num_of_features(self._n_nodes), networks_sample.shape[2]))
+        for i in range(networks_sample.shape[2]):
+            features_of_net_samples[:, i] = self._network_statistics.calculate_statistics(
+                networks_sample[:, :, i])
+        return features_of_net_samples
+
     def fit(self, observed_network,
             lr=0.001,
             opt_steps=1000,
@@ -169,12 +220,9 @@ class ERGM():
             observed_features = model._network_statistics.calculate_statistics(observed_network)
 
             networks_for_sample = self.generate_networks_for_sample()
-            num_of_features = model._network_statistics.num_of_metrics
+            num_of_features = model._network_statistics.get_num_of_features(model._n_nodes)
 
-            features_of_net_samples = np.zeros((num_of_features, self.n_networks_for_grad_estimation))
-            for i in range(self.n_networks_for_grad_estimation):
-                features_of_net_samples[:, i] = model._network_statistics.calculate_statistics(
-                    networks_for_sample[:, :, i])
+            features_of_net_samples = model._calc_sample_statistics(networks_for_sample)
 
             mean_features = np.mean(features_of_net_samples, axis=1)
 

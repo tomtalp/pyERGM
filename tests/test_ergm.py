@@ -172,15 +172,16 @@ class TestERGM(unittest.TestCase):
         print("Fitting matrix - ")
         print(W)
 
-        ergm = ERGM(n, 
-                    [NumberOfEdgesUndirected()], 
-                    is_directed=is_directed, 
-                    n_networks_for_grad_estimation=200, 
+        ergm = ERGM(n,
+                    [NumberOfEdgesUndirected()],
+                    is_directed=is_directed,
+                    n_networks_for_grad_estimation=200,
                     n_mcmc_steps=10,
                     seed_MCMC_proba=0.25
-                )
-    
-        ergm.fit(W, lr=0.01, opt_steps=300, sliding_grad_window_k=10, sample_pct_growth=0.05, steps_for_decay=20, lr_decay_pct=0.05)
+                    )
+
+        ergm.fit(W, lr=0.01, opt_steps=300, sliding_grad_window_k=10, sample_pct_growth=0.05, steps_for_decay=20,
+                 lr_decay_pct=0.05)
 
         fit_theta = ergm._thetas[0]
         print(f"ground truth theta: {ground_truth_theta}")
@@ -188,3 +189,35 @@ class TestERGM(unittest.TestCase):
 
         # TODO - what criteria to use for testing convergence? From manual tests, it doesn't seem to perfectly converge on the true thetas...
         # Nevertheless, even without an assert, this will catch errors - fit won't work if something breaks.
+
+    def test_auto_correlation_function(self):
+        n = 3
+        sample_size = 3
+        W1 = np.array([[0, 1, 0],
+                       [0, 0, 1],
+                       [1, 1, 0]])
+
+        W2 = np.array([[0, 1, 0],
+                       [0, 0, 1],
+                       [0, 1, 0]])
+
+        W3 = np.array([[0, 1, 1],
+                       [0, 0, 1],
+                       [1, 1, 0]])
+
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
+        sample[:, :, 1] = W2
+        sample[:, :, 2] = W3
+
+        expected_gamma_hat_0 = 1 / 9 * np.array([[6, 3], [3, 2]])
+        expected_gamma_hat_1 = 1 / 27 * np.array([[-9, -6], [0, -1]])
+        expected_gamma_hat_2 = 1 / 27 * np.array([[0, 0], [-3, -2]])
+
+        ergm = ERGM(n, [NumberOfEdgesDirected(), TotalReciprocity()], True)
+
+        gammas = ergm.approximate_auto_correlation_function(sample)
+
+        self.assertTrue(np.abs(expected_gamma_hat_0 - gammas[0]).max() < 10 ** -15)
+        self.assertTrue(np.abs(expected_gamma_hat_1 - gammas[1]).max() < 10 ** -15)
+        self.assertTrue(np.abs(expected_gamma_hat_2 - gammas[2]).max() < 10 ** -15)
