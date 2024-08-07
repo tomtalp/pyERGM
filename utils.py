@@ -1,6 +1,6 @@
 import numpy as np
 import networkx as nx
-
+import random
 
 def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
     perturbed_net = network.copy()
@@ -47,8 +47,8 @@ def get_random_nondiagonal_matrix_entry(n: int):
     entry : tuple
         The row and column index of the entry.
     """
-
-    return tuple(np.random.choice(n, size=2, replace=False))
+    xs = list(range(n))
+    return tuple(random.sample(xs, 2))
 
 def construct_adj_mat_from_int(int_code: int, num_nodes: int, is_directed: bool) -> np.ndarray:
     num_pos_connects = num_nodes * (num_nodes - 1)
