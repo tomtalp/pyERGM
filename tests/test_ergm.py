@@ -175,7 +175,7 @@ class TestERGM(unittest.TestCase):
         ergm = ERGM(n,
                     [NumberOfEdgesUndirected()],
                     is_directed=is_directed,
-                    n_networks_for_grad_estimation=200,
+                    sample_size=200,
                     n_mcmc_steps=10,
                     seed_MCMC_proba=0.25
                     )
@@ -224,7 +224,7 @@ class TestERGM(unittest.TestCase):
 
     def test_batches_covariance_estimation(self):
         n = 3
-        sample_size = 4
+        sample_size = 6
         W1 = np.array([[0, 1, 0],
                        [0, 0, 1],
                        [1, 1, 0]])
@@ -240,17 +240,30 @@ class TestERGM(unittest.TestCase):
         W4 = np.array([[0, 0, 1],
                        [1, 0, 1],
                        [1, 1, 0]])
+        
+        W5 = np.array([[0, 0, 1],
+                       [1, 0, 0],
+                       [1, 0, 0]])
+        
+        W6 = np.array([[0, 0, 1],
+                       [1, 0, 1],
+                       [1, 0, 0]])
 
         sample = np.zeros((n, n, sample_size))
         sample[:, :, 0] = W1
         sample[:, :, 1] = W2
         sample[:, :, 2] = W3
         sample[:, :, 3] = W4
+        sample[:, :, 4] = W5
+        sample[:, :, 5] = W6
 
-        expected_covariance_batch_estimation = 2 * 0.25 * np.ones((2, 2))
+        # expected_covariance_batch_estimation = 2 * 0.25 * np.ones((2, 2))
+        expected_covariance_batch_estimation = np.ones((2,2)) * 4/9
 
         ergm = ERGM(n, [NumberOfEdgesDirected(), TotalReciprocity()], True)
+        features_of_sample = ergm._calc_sample_statistics(sample)
 
-        batch_estimation = ergm.covariance_matrix_estimation(sample, method='batch', num_batches=2)
-
-        self.assertTrue(np.all(expected_covariance_batch_estimation == batch_estimation))
+        batch_estimation = ergm.covariance_matrix_estimation(features_of_sample, method='batch', num_batches=3)
+        print(batch_estimation)
+        print(expected_covariance_batch_estimation)
+        self.assertTrue(np.abs(expected_covariance_batch_estimation - batch_estimation).max() < 10**-15)

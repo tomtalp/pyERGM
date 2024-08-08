@@ -1,6 +1,8 @@
 import numpy as np
 import networkx as nx
 from scipy.optimize import minimize, OptimizeResult
+from scipy.spatial.distance import mahalanobis
+from scipy.stats import f
 import time
 from typing import Collection
 import sampling
@@ -17,7 +19,7 @@ class ERGM():
                  initial_thetas=None,
                  initial_normalization_factor=None,
                  seed_MCMC_proba=0.25,
-                 n_networks_for_grad_estimation=100,
+                 sample_size=100,
                  n_mcmc_steps=500,
                  verbose=True,
                  optimization_options={}):
@@ -44,7 +46,7 @@ class ERGM():
         seed_MCMC_proba : float
             The probability of a connection in the seed network for MCMC sampling, in case no seed network is provided.
         
-        n_networks_for_grad_estimation : int
+        sample_size : int
             The number of networks to sample for approximating the normalization factor.
         
         n_mcmc_steps : int
@@ -69,7 +71,7 @@ class ERGM():
         self.optimization_iter = 0
         self.optimization_start_time = None
 
-        self.n_networks_for_grad_estimation = n_networks_for_grad_estimation
+        self.sample_size = sample_size
         self.n_mcmc_steps = n_mcmc_steps
         self.verbose = verbose
         self.optimization_options = optimization_options
@@ -100,14 +102,14 @@ class ERGM():
         G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
         seed_network = nx.to_numpy_array(G)
 
-        return sampler.sample(seed_network, self.n_networks_for_grad_estimation, replace=replace)
+        return sampler.sample(seed_network, self.sample_size, replace=replace)
 
     def _approximate_normalization_factor(self):
         networks_for_sample = self.generate_networks_for_sample(replace=False)
 
         self._normalization_factor = 0
 
-        for network_idx in range(self.n_networks_for_grad_estimation):
+        for network_idx in range(self.sample_size):
             network = networks_for_sample[:, :, network_idx]
             weight = self.calculate_weight(network)
             self._normalization_factor += weight
@@ -132,13 +134,13 @@ class ERGM():
             ).sum(axis=0)
         return auto_correlation_func
 
-    def covariance_matrix_estimation(self, networks_sample: np.ndarray, method='batch', num_batches=25) -> np.ndarray:
+    def covariance_matrix_estimation(self, features_of_net_samples: np.ndarray, method='batch', num_batches=25) -> np.ndarray:
         """
         Approximate the covariance matrix of the model's features
         Parameters
         ----------
-        networks_sample
-            The sample using which the approximation is done. Of dimensions (num_nodes X num_nodes X sample_size)
+        features_of_net_samples
+            The calculated features of the networks that are used for the approximation. Of dimensions (num_features X sample_size)
         method
             the method to use for approximating the covariance matrix
         TODO: implement a mechanism that allows to pass arguments that are customized for each method
@@ -148,16 +150,20 @@ class ERGM():
         The covariance matrix estimation (num_features X num_features).
         """
         if method == 'batch':
-            features_of_net_samples = self._calc_sample_statistics(networks_sample)
             num_features = features_of_net_samples.shape[0]
-            sample_size = networks_sample.shape[2]
+            sample_size = features_of_net_samples.shape[1]
             # Verify that the sample is nicely divided into non-overlapping batches.
             while sample_size % num_batches != 0:
                 num_batches += 1
             sample_mean = features_of_net_samples.mean(axis=1)
             batch_size = sample_size // num_batches
+            
             # Divide the sample into batches, and calculate the mean of each one of them
-            batches_means = features_of_net_samples.reshape(-1, num_features, batch_size).mean(axis=2)
+            batches_means = np.zeros((num_features, num_batches))
+            for i in range(num_batches):
+                batches_means[:, i] = features_of_net_samples[:, i*batch_size:(i+1)*batch_size].mean(axis=1)
+
+                
             diff_of_global_mean = batches_means - sample_mean[:, None]
             # Average the outer products of the differences between batch means and the global mean
             batches_cov_mat_est = np.mean(
@@ -189,6 +195,32 @@ class ERGM():
                 networks_sample[:, :, i])
         return features_of_net_samples
 
+    def _calculate_optimization_step(self, observed_features, features_of_net_samples, optimization_method):
+        num_of_features = self._network_statistics.get_num_of_features(self._n_nodes)
+
+        mean_features = np.mean(features_of_net_samples, axis=1)
+
+        nll_grad = mean_features - observed_features
+
+        if optimization_method == "gradient_descent":
+            nll_hessian = None
+            
+        elif optimization_method == "newton_raphson":
+            # # An outer product of the means (E[gi]E[gj])
+            cross_prod_mean_features = (mean_features.reshape(num_of_features, 1) @
+                                        mean_features.T.reshape(1, num_of_features))
+            # A mean of the outer products of the sample (E[gi*gj])
+            mean_features_cross_prod = np.mean(
+                features_of_net_samples.T.reshape(self.sample_size, num_of_features, 1) @
+                features_of_net_samples.T.reshape(self.sample_size, 1, num_of_features), axis=0)
+
+            nll_hessian = mean_features_cross_prod - cross_prod_mean_features
+        else: 
+            raise ValueError(f"Optimization method {optimization_method} not defined") # TODO - throw this error in fit()
+
+        return nll_grad, nll_hessian
+
+
     def fit(self, observed_network,
             lr=0.001,
             opt_steps=1000,
@@ -199,7 +231,11 @@ class ERGM():
             max_sliding_window_size=100,
             max_nets_for_sample=1000,
             sample_pct_growth=0.02,
-            optimization_method="gradient_descent"):
+            optimization_method="gradient_descent",
+            convergence_criterion="hotelling",
+            cov_matrix_estimation_method="batch",
+            cov_matrix_num_batches=25,
+            hotelling_confidence=0.99):
         """
         Fit an ERGM model to a given network.
 
@@ -237,66 +273,44 @@ class ERGM():
     
             
         """
-
-        def nll_grad_hessian(thetas):
-            model = ERGM(self._n_nodes, self._network_statistics.metrics, initial_thetas=thetas,
-                         is_directed=self._is_directed)
-
-            observed_features = model._network_statistics.calculate_statistics(observed_network)
-
-            networks_for_sample = model.generate_networks_for_sample()
-
-            num_of_features = model._network_statistics.get_num_of_features(model._n_nodes)
-
-            features_of_net_samples = model._calc_sample_statistics(networks_for_sample)
-
-            mean_features = np.mean(features_of_net_samples, axis=1)
-
-            nll_grad = mean_features - observed_features
-
-            if optimization_method == "gradient_descent":
-                nll_hessian = None
-                
-            elif optimization_method == "newton_raphson":
-                # # An outer product of the means (E[gi]E[gj])
-                cross_prod_mean_features = (mean_features.reshape(num_of_features, 1) @
-                                            mean_features.T.reshape(1, num_of_features))
-                # A mean of the outer products of the sample (E[gi*gj])
-                mean_features_cross_prod = np.mean(
-                    features_of_net_samples.T.reshape(model.n_networks_for_grad_estimation, num_of_features, 1) @
-                    features_of_net_samples.T.reshape(model.n_networks_for_grad_estimation, 1, num_of_features), axis=0)
-
-                nll_hessian = mean_features_cross_prod - cross_prod_mean_features
-
-            return nll_grad, nll_hessian
-
-
         self._thetas = self._get_random_thetas(sampling_method="uniform")
         self.optimization_iter = 0
-        
+      
         print(f"Initial thetas - {self._thetas}")
         print("optimization started")
 
         self.optimization_start_time = time.time()
+        num_of_features = self._network_statistics.get_num_of_features(self._n_nodes)
+        
+        if convergence_criterion == "hotelling":
+            hotelling_critical_value = f.ppf(1-hotelling_confidence, num_of_features, self.sample_size - num_of_features) # F(p, n-p) TODO - doc this better
 
-        grads = np.zeros((opt_steps, self._network_statistics.get_num_of_features(self._n_nodes)))
-        true_grads = np.zeros((opt_steps, self._network_statistics.get_num_of_features(self._n_nodes)))
+        grads = np.zeros((opt_steps, num_of_features))
+        hotelling_statistics = []
 
         for i in range(opt_steps):
             if ((i + 1) % steps_for_decay) == 0:
                 lr *= (1 - lr_decay_pct)
 
-                if self.n_networks_for_grad_estimation < max_nets_for_sample:
-                    self.n_networks_for_grad_estimation *= (1 + sample_pct_growth)
-                    self.n_networks_for_grad_estimation = np.min(
-                        [int(self.n_networks_for_grad_estimation), max_nets_for_sample])
+                if self.sample_size < max_nets_for_sample:
+                    self.sample_size *= (1 + sample_pct_growth)
+                    self.sample_size = np.min(
+                        [int(self.sample_size), max_nets_for_sample])
+                
+                    if convergence_criterion == "hotelling":
+                        hotelling_critical_value = f.ppf(1-hotelling_confidence, num_of_features, self.sample_size - num_of_features) # F(p, n-p) TODO - doc this better
 
                 if sliding_grad_window_k < max_sliding_window_size:
                     sliding_grad_window_k *= (1 + sample_pct_growth)
                     sliding_grad_window_k = np.min(
                         [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
-            grad, hessian = nll_grad_hessian(self._thetas)
+            networks_for_sample = self.generate_networks_for_sample()
+            features_of_net_samples = self._calc_sample_statistics(networks_for_sample)
+            observed_features = self._network_statistics.calculate_statistics(observed_network)
+
+            grad, hessian = self._calculate_optimization_step(observed_features, features_of_net_samples, optimization_method)
+
             if optimization_method == "newton_raphson":
                 try:
                     inv_hessian = np.linalg.inv(hessian)
@@ -308,8 +322,6 @@ class ERGM():
             
             elif optimization_method == "gradient_descent":
                 self._thetas = self._thetas - lr * grad
-            else:
-                raise ValueError(f"Optimization method {optimization_method} not defined")
 
             grads[i] = grad
 
@@ -319,14 +331,42 @@ class ERGM():
             if i % 100 == 0:
                 delta_t = time.time() - self.optimization_start_time
                 print(
-                    f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, n_networks_for_grad_estimation: {self.n_networks_for_grad_estimation}, sliding_grad_window_k: {sliding_grad_window_k}")
+                    f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
 
-            if np.linalg.norm(sliding_window_grads) <= l2_grad_thresh:
-                print(f"Reached threshold of {l2_grad_thresh} after {i} steps. DONE!")
-                grads = grads[:i]
-                break
+            if convergence_criterion == "hotelling":
+                estimated_cov_matrix = self.covariance_matrix_estimation(features_of_net_samples, method=cov_matrix_estimation_method, num_batches=cov_matrix_num_batches)
+                mean_features = np.mean(features_of_net_samples, axis=1) # TODO - this is calculated in `_calculate_optimization_step()` and covariance estimation, consider sharing the two
 
-        return grads, true_grads
+                dist = mahalanobis(observed_features, mean_features, estimated_cov_matrix)
+
+                hotelling_t_statistic = self.sample_size * dist * dist
+
+                # (n-p / p(n-1))* t^2 ~ F_p, n-p  (#TODO - give reference for this)
+                hotelling_as_f_statistic = ((self.sample_size - num_of_features) / (num_of_features * (self.sample_size - 1))) * hotelling_t_statistic
+
+                hotelling_statistics.append({
+                    "dist": dist,
+                    "hotelling_t": hotelling_t_statistic,
+                    "hotelling_F": hotelling_as_f_statistic,
+                    "critical_val": hotelling_critical_value
+                })
+
+                if hotelling_as_f_statistic <= hotelling_critical_value:
+                    print(f"hotelling - {hotelling_as_f_statistic}, hotelling_critical_value={hotelling_critical_value}")
+                    print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
+                    grads = grads[:i]
+                    break
+                
+
+            elif convergence_criterion == "zero_grad_norm":
+                if np.linalg.norm(sliding_window_grads) <= l2_grad_thresh:
+                    print(f"Reached threshold of {l2_grad_thresh} after {i} steps. DONE!")
+                    grads = grads[:i]
+                    break
+            else:
+                raise ValueError(f"Convergence criterion {convergence_criterion} not defined")   
+
+        return grads, hotelling_statistics
 
     def calculate_probability(self, W: np.ndarray):
         """
