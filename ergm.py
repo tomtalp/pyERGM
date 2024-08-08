@@ -91,7 +91,7 @@ class ERGM():
 
     def _get_random_thetas(self, sampling_method="uniform"):
         if sampling_method == "uniform":
-            return np.random.uniform(-1, 1, self._network_statistics.num_of_metrics)
+            return np.random.uniform(-1, 1, self._network_statistics.get_num_of_features(self._n_nodes))
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
@@ -198,7 +198,8 @@ class ERGM():
             sliding_grad_window_k=10,
             max_sliding_window_size=100,
             max_nets_for_sample=1000,
-            sample_pct_growth=0.02):
+            sample_pct_growth=0.02,
+            optimization_method="gradient_descent"):
         """
         Fit an ERGM model to a given network.
 
@@ -243,7 +244,8 @@ class ERGM():
 
             observed_features = model._network_statistics.calculate_statistics(observed_network)
 
-            networks_for_sample = self.generate_networks_for_sample()
+            networks_for_sample = model.generate_networks_for_sample()
+
             num_of_features = model._network_statistics.get_num_of_features(model._n_nodes)
 
             features_of_net_samples = model._calc_sample_statistics(networks_for_sample)
@@ -252,42 +254,33 @@ class ERGM():
 
             nll_grad = mean_features - observed_features
 
-            # An outer product of the means (E[gi]E[gj])
-            cross_prod_mean_features = (mean_features.reshape(num_of_features, 1) @
-                                        mean_features.T.reshape(1, num_of_features))
-            # A mean of the outer products of the sample (E[gi*gj])
-            mean_features_cross_prod = np.mean(
-                features_of_net_samples.T.reshape(self.n_networks_for_grad_estimation, num_of_features, 1) @
-                features_of_net_samples.T.reshape(self.n_networks_for_grad_estimation, 1, num_of_features), axis=0)
+            if optimization_method == "gradient_descent":
+                nll_hessian = None
+                
+            elif optimization_method == "newton_raphson":
+                # # An outer product of the means (E[gi]E[gj])
+                cross_prod_mean_features = (mean_features.reshape(num_of_features, 1) @
+                                            mean_features.T.reshape(1, num_of_features))
+                # A mean of the outer products of the sample (E[gi*gj])
+                mean_features_cross_prod = np.mean(
+                    features_of_net_samples.T.reshape(model.n_networks_for_grad_estimation, num_of_features, 1) @
+                    features_of_net_samples.T.reshape(model.n_networks_for_grad_estimation, 1, num_of_features), axis=0)
 
-            nll_hessian = mean_features_cross_prod - cross_prod_mean_features
+                nll_hessian = mean_features_cross_prod - cross_prod_mean_features
 
             return nll_grad, nll_hessian
 
-        def true_nll_grad(model):
-            """
-            ## TODO - THIS IS FOR DEBUG, REMOVE LATER
-            """
-            observed_features = model._network_statistics.calculate_statistics(observed_network)
-            all_probs = model._all_weights / model._normalization_factor
-            num_features = model._network_statistics.num_of_metrics
-            num_nets = all_probs.size
-            all_features_by_all_nets = np.zeros((num_features, num_nets))
-            for i in range(num_nets):
-                all_features_by_all_nets[:, i] = model._network_statistics.calculate_statistics(
-                    construct_adj_mat_from_int(i, self._n_nodes, self._is_directed))
-            expected_features = all_features_by_all_nets @ all_probs
-            return expected_features - observed_features
 
         self._thetas = self._get_random_thetas(sampling_method="uniform")
         self.optimization_iter = 0
-
+        
+        print(f"Initial thetas - {self._thetas}")
         print("optimization started")
 
         self.optimization_start_time = time.time()
 
-        grads = np.zeros((opt_steps, self._network_statistics.num_of_metrics))
-        true_grads = np.zeros((opt_steps, self._network_statistics.num_of_metrics))
+        grads = np.zeros((opt_steps, self._network_statistics.get_num_of_features(self._n_nodes)))
+        true_grads = np.zeros((opt_steps, self._network_statistics.get_num_of_features(self._n_nodes)))
 
         for i in range(opt_steps):
             if ((i + 1) % steps_for_decay) == 0:
@@ -304,12 +297,19 @@ class ERGM():
                         [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
             grad, hessian = nll_grad_hessian(self._thetas)
-            try:
-                inv_hessian = np.linalg.inv(hessian)
-            except np.linalg.LinAlgError:
-                print("The hessian is not invertible")
-                inv_hessian = np.linalg.pinv(hessian)
-            self._thetas = self._thetas - lr * inv_hessian @ grad
+            if optimization_method == "newton_raphson":
+                try:
+                    inv_hessian = np.linalg.inv(hessian)
+                except np.linalg.LinAlgError:
+                    print("The hessian is not invertible")
+                    inv_hessian = np.linalg.pinv(hessian)
+
+                self._thetas = self._thetas - lr * inv_hessian @ grad
+            
+            elif optimization_method == "gradient_descent":
+                self._thetas = self._thetas - lr * grad
+            else:
+                raise ValueError(f"Optimization method {optimization_method} not defined")
 
             grads[i] = grad
 
@@ -317,15 +317,9 @@ class ERGM():
             sliding_window_grads = grads[idx_for_sliding_grad:i + 1].mean()
 
             if i % 100 == 0:
-                ## TODO - THIS IS FOR DEBUG.
-                # bruteforce = BruteForceERGM(self._n_nodes, self._network_statistics, initial_thetas=self._thetas, is_directed=self._is_directed)
-                # true_grad = true_nll_grad(bruteforce)
-                # true_grads[i] = true_grad
-                true_grad = 0
-
                 delta_t = time.time() - self.optimization_start_time
                 print(
-                    f"Step {i} - true_grad: {true_grad}, grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, n_networks_for_grad_estimation: {self.n_networks_for_grad_estimation}, sliding_grad_window_k: {sliding_grad_window_k}")
+                    f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, n_networks_for_grad_estimation: {self.n_networks_for_grad_estimation}, sliding_grad_window_k: {sliding_grad_window_k}")
 
             if np.linalg.norm(sliding_window_grads) <= l2_grad_thresh:
                 print(f"Reached threshold of {l2_grad_thresh} after {i} steps. DONE!")
