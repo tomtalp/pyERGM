@@ -118,6 +118,8 @@ class ERGM():
         """
         This is gamma hat from Geyer's handbook of mcmc.
         """
+        # TODO: it must be possible to vectorize this calculation and spare the for loop. Maybe somehow use the
+        #  convolution theorem and go back and forth to the frequency domain using FFT for calculating correlations.
         features_of_net_samples = self._calc_sample_statistics(networks_sample)
         features_mean_diff = features_of_net_samples - features_of_net_samples.mean(axis=1)[:, None]
         num_features = features_of_net_samples.shape[0]
@@ -125,24 +127,46 @@ class ERGM():
         auto_correlation_func = np.zeros((sample_size, num_features, num_features))
         for k in range(sample_size):
             auto_correlation_func[k] = 1 / sample_size * (
-                    features_mean_diff[:, :sample_size-k].T.reshape(sample_size - k, num_features, 1) @
+                    features_mean_diff[:, :sample_size - k].T.reshape(sample_size - k, num_features, 1) @
                     features_mean_diff[:, k:].T.reshape(sample_size - k, 1, num_features)
             ).sum(axis=0)
-
-        # cross_feature_mean_diff_across_samples = (
-        #         features_mean_diff.T.reshape(networks_sample.shape[1], features_of_net_samples.shape[0], 1) @
-        #         features_of_net_samples.T.reshape(networks_sample.shape[1], 1, features_of_net_samples.shape[0]))
-        # # Padding the cross features mean diffs to eliminate the effect of circular boundaries
-        # padded_cross_feature_mean_diff_across_samples = np.concatenate(
-        #     (cross_feature_mean_diff_across_samples, np.zeros(cross_feature_mean_diff_across_samples.shape)), axis=0)
-        # # Transform to the frequency domain
-        # padded_features_mean_diff_fft = np.fft.fft(padded_cross_feature_mean_diff_across_samples, axis=0)
-        # # Use the theorem of convolution - it is a product with the conjugate in the frequency domain. Then take the
-        # # first half of the resulting array (to take the sums without padding, only lags within the original array).
-        # auto_correlation_func = np.fft.ifft(padded_features_mean_diff_fft * np.conjugate(padded_features_mean_diff_fft),
-        #                                     axis=0).real[:networks_sample.shape[1]]
-        # auto_correlation_func /= networks_sample.shape[1]
         return auto_correlation_func
+
+    def covariance_matrix_estimation(self, networks_sample: np.ndarray, method='batch', num_batches=25) -> np.ndarray:
+        """
+        Approximate the covariance matrix of the model's features
+        Parameters
+        ----------
+        networks_sample
+            The sample using which the approximation is done. Of dimensions (num_nodes X num_nodes X sample_size)
+        method
+            the method to use for approximating the covariance matrix
+        TODO: implement a mechanism that allows to pass arguments that are customized for each method
+
+        Returns
+        -------
+        The covariance matrix estimation (num_features X num_features).
+        """
+        if method == 'batch':
+            features_of_net_samples = self._calc_sample_statistics(networks_sample)
+            num_features = features_of_net_samples.shape[0]
+            sample_size = networks_sample.shape[2]
+            # Verify that the sample is nicely divided into non-overlapping batches.
+            while sample_size % num_batches != 0:
+                num_batches += 1
+            sample_mean = features_of_net_samples.mean(axis=1)
+            batch_size = sample_size // num_batches
+            # Divide the sample into batches, and calculate the mean of each one of them
+            batches_means = features_of_net_samples.reshape(-1, num_features, batch_size).mean(axis=2)
+            diff_of_global_mean = batches_means - sample_mean[:, None]
+            # Average the outer products of the differences between batch means and the global mean
+            batches_cov_mat_est = np.mean(
+                diff_of_global_mean.T.reshape(num_batches, num_features, 1) @
+                diff_of_global_mean.T.reshape(num_batches, 1, num_features), axis=0)
+            # Multiply by the batch size to compensate for the aggregation into batches.
+            return batch_size * batches_cov_mat_est
+        else:
+            raise ValueError(f"{method} is an unsupported method for covariance matrix estimation")
 
     def _calc_sample_statistics(self, networks_sample: np.ndarray) -> np.ndarray:
         """

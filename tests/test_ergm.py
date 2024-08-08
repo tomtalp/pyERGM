@@ -221,3 +221,36 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(np.abs(expected_gamma_hat_0 - gammas[0]).max() < 10 ** -15)
         self.assertTrue(np.abs(expected_gamma_hat_1 - gammas[1]).max() < 10 ** -15)
         self.assertTrue(np.abs(expected_gamma_hat_2 - gammas[2]).max() < 10 ** -15)
+
+    def test_batches_covariance_estimation(self):
+        n = 3
+        sample_size = 4
+        W1 = np.array([[0, 1, 0],
+                       [0, 0, 1],
+                       [1, 1, 0]])
+
+        W2 = np.array([[0, 1, 0],
+                       [1, 0, 0],
+                       [0, 1, 0]])
+
+        W3 = np.array([[0, 0, 1],
+                       [0, 0, 1],
+                       [1, 1, 0]])
+
+        W4 = np.array([[0, 0, 1],
+                       [1, 0, 1],
+                       [1, 1, 0]])
+
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
+        sample[:, :, 1] = W2
+        sample[:, :, 2] = W3
+        sample[:, :, 3] = W4
+
+        expected_covariance_batch_estimation = 2 * 0.25 * np.ones((2, 2))
+
+        ergm = ERGM(n, [NumberOfEdgesDirected(), TotalReciprocity()], True)
+
+        batch_estimation = ergm.covariance_matrix_estimation(sample, method='batch', num_batches=2)
+
+        self.assertTrue(np.all(expected_covariance_batch_estimation == batch_estimation))
