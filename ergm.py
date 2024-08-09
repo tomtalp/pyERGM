@@ -296,6 +296,7 @@ class ERGM():
                     self.sample_size *= (1 + sample_pct_growth)
                     self.sample_size = np.min(
                         [int(self.sample_size), max_nets_for_sample])
+                    print(f"\t Sample size increased at step {i+1} to {self.sample_size}")
                 
                     if convergence_criterion == "hotelling":
                         hotelling_critical_value = f.ppf(1-hotelling_confidence, num_of_features, self.sample_size - num_of_features) # F(p, n-p) TODO - doc this better
@@ -328,16 +329,23 @@ class ERGM():
             idx_for_sliding_grad = np.max([0, i - sliding_grad_window_k + 1])
             sliding_window_grads = grads[idx_for_sliding_grad:i + 1].mean()
 
-            if i % 100 == 0:
+            if i % steps_for_decay == 0:
                 delta_t = time.time() - self.optimization_start_time
-                print(
-                    f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
+                # print(f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
+                print(f"Step {i+1} - lr: {lr:.10f}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
 
             if convergence_criterion == "hotelling":
                 estimated_cov_matrix = self.covariance_matrix_estimation(features_of_net_samples, method=cov_matrix_estimation_method, num_batches=cov_matrix_num_batches)
+                try:
+                    inv_estimated_cov_matrix = np.linalg.inv(estimated_cov_matrix)
+                except np.linalg.LinAlgError:
+                    print("The estimated_cov_matrix is not invertible")
+                    inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
                 mean_features = np.mean(features_of_net_samples, axis=1) # TODO - this is calculated in `_calculate_optimization_step()` and covariance estimation, consider sharing the two
 
-                dist = mahalanobis(observed_features, mean_features, estimated_cov_matrix)
+                # dist = mahalanobis(observed_features, mean_features, inv_estimated_cov_matrix)
+                dist = mahalanobis(observed_features, mean_features, inv_hessian)
+                
 
                 hotelling_t_statistic = self.sample_size * dist * dist
 
@@ -348,12 +356,14 @@ class ERGM():
                     "dist": dist,
                     "hotelling_t": hotelling_t_statistic,
                     "hotelling_F": hotelling_as_f_statistic,
-                    "critical_val": hotelling_critical_value
+                    "critical_val": hotelling_critical_value,
+                    "inv_cov_norm": np.linalg.norm(inv_estimated_cov_matrix),
+                    "hessian_norm": np.linalg.norm(hessian)
                 })
 
                 if hotelling_as_f_statistic <= hotelling_critical_value:
-                    print(f"hotelling - {hotelling_as_f_statistic}, hotelling_critical_value={hotelling_critical_value}")
                     print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
+                    print(f"hotelling - {hotelling_as_f_statistic}, hotelling_critical_value={hotelling_critical_value}")
                     grads = grads[:i]
                     break
                 
