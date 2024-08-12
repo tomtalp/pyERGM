@@ -164,7 +164,8 @@ class ERGM():
                 batches_means[:, i] = features_of_net_samples[:, i*batch_size:(i+1)*batch_size].mean(axis=1)
 
                 
-            diff_of_global_mean = batches_means - sample_mean[:, None]
+            diff_of_global_mean = batches_means - sample_mean.reshape(num_features, 1)
+            
             # Average the outer products of the differences between batch means and the global mean
             batches_cov_mat_est = np.mean(
                 diff_of_global_mean.T.reshape(num_batches, num_features, 1) @
@@ -287,6 +288,8 @@ class ERGM():
 
         grads = np.zeros((opt_steps, num_of_features))
         hotelling_statistics = []
+        
+        prev_cov_matrix = np.ones((num_of_features, num_of_features))
 
         for i in range(opt_steps):
             if ((i + 1) % steps_for_decay) == 0:
@@ -313,11 +316,12 @@ class ERGM():
             grad, hessian = self._calculate_optimization_step(observed_features, features_of_net_samples, optimization_method)
 
             if optimization_method == "newton_raphson":
-                try:
-                    inv_hessian = np.linalg.inv(hessian)
-                except np.linalg.LinAlgError:
-                    print("The hessian is not invertible")
-                    inv_hessian = np.linalg.pinv(hessian)
+                inv_hessian = np.linalg.pinv(hessian)
+                # try:
+                #     inv_hessian = np.linalg.inv(hessian)
+                # except np.linalg.LinAlgError:
+                #     print("The hessian is not invertible")
+                #     inv_hessian = np.linalg.pinv(hessian)
 
                 self._thetas = self._thetas - lr * inv_hessian @ grad
             
@@ -336,15 +340,15 @@ class ERGM():
 
             if convergence_criterion == "hotelling":
                 estimated_cov_matrix = self.covariance_matrix_estimation(features_of_net_samples, method=cov_matrix_estimation_method, num_batches=cov_matrix_num_batches)
-                try:
-                    inv_estimated_cov_matrix = np.linalg.inv(estimated_cov_matrix)
-                except np.linalg.LinAlgError:
-                    print("The estimated_cov_matrix is not invertible")
-                    inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
+                inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
+                # try:
+                #     inv_estimated_cov_matrix = np.linalg.inv(estimated_cov_matrix)
+                # except np.linalg.LinAlgError:
+                #     print("The estimated_cov_matrix is not invertible")
+                #     inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
                 mean_features = np.mean(features_of_net_samples, axis=1) # TODO - this is calculated in `_calculate_optimization_step()` and covariance estimation, consider sharing the two
 
-                # dist = mahalanobis(observed_features, mean_features, inv_estimated_cov_matrix)
-                dist = mahalanobis(observed_features, mean_features, inv_hessian)
+                dist = mahalanobis(observed_features, mean_features, inv_estimated_cov_matrix)
                 
 
                 hotelling_t_statistic = self.sample_size * dist * dist
@@ -354,12 +358,20 @@ class ERGM():
 
                 hotelling_statistics.append({
                     "dist": dist,
-                    "hotelling_t": hotelling_t_statistic,
+                    # "hotelling_t": hotelling_t_statistic,
                     "hotelling_F": hotelling_as_f_statistic,
                     "critical_val": hotelling_critical_value,
                     "inv_cov_norm": np.linalg.norm(inv_estimated_cov_matrix),
-                    "hessian_norm": np.linalg.norm(hessian)
+                    # "hessian_norm": np.linalg.norm(hessian)
                 })
+
+                # FOR DEBUG ONLY - 
+                if np.linalg.norm(inv_estimated_cov_matrix) / np.linalg.norm(prev_cov_matrix) > 10**6:
+                    print(f"Covariance matrix decreased in iteration {i}")
+                    print(f"Prev inv_cov matrix norm - {np.linalg.norm(prev_cov_matrix)}")
+                    print(f"Current inv_cov matrix norm - {np.linalg.norm(inv_estimated_cov_matrix)}")
+
+                prev_cov_matrix = inv_estimated_cov_matrix
 
                 if hotelling_as_f_statistic <= hotelling_critical_value:
                     print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
