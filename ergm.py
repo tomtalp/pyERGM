@@ -54,7 +54,7 @@ class ERGM():
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
-        self._network_statistics = MetricsCollection(network_statistics, self._is_directed)
+        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes)
 
         if initial_thetas is not None:
             self._thetas = initial_thetas
@@ -93,14 +93,16 @@ class ERGM():
 
     def _get_random_thetas(self, sampling_method="uniform"):
         if sampling_method == "uniform":
-            return np.random.uniform(-1, 1, self._network_statistics.get_num_of_features(self._n_nodes))
+            return np.random.uniform(-1, 1, self._network_statistics.num_of_features)
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
-    def generate_networks_for_sample(self, replace=True):
+    def generate_networks_for_sample(self, seed_network=None, replace=True):
         sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics)
-        G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
-        seed_network = nx.to_numpy_array(G)
+
+        if seed_network is None:
+            G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
+            seed_network = nx.to_numpy_array(G)
 
         return sampler.sample(seed_network, self.sample_size, replace=replace)
 
@@ -122,7 +124,7 @@ class ERGM():
         """
         # TODO: it must be possible to vectorize this calculation and spare the for loop. Maybe somehow use the
         #  convolution theorem and go back and forth to the frequency domain using FFT for calculating correlations.
-        features_of_net_samples = self._calc_sample_statistics(networks_sample)
+        features_of_net_samples = self._network_statistics.calculate_sample_statistics(networks_sample)
         features_mean_diff = features_of_net_samples - features_of_net_samples.mean(axis=1)[:, None]
         num_features = features_of_net_samples.shape[0]
         sample_size = networks_sample.shape[2]
@@ -175,29 +177,8 @@ class ERGM():
         else:
             raise ValueError(f"{method} is an unsupported method for covariance matrix estimation")
 
-    def _calc_sample_statistics(self, networks_sample: np.ndarray) -> np.ndarray:
-        """
-        Calculate the statistics over a sample of networks
-        # TODO: there are many Metrics for which this can be calculated more efficiently (without looping). E.g. number
-            of edges is just summing up along the 2 first axes of the sample array. Maybe we should export this to
-            MetricsCollection and perform it more efficiently when possible (like with the calculation of change_score).
-        Parameters
-        ----------
-        networks_sample
-            The networks sample - an array of n X n X sample_size
-        Returns
-        -------
-        an array of the statistics vector per sample (num_features X sample_size)
-        """
-        features_of_net_samples = np.zeros(
-            (self._network_statistics.get_num_of_features(self._n_nodes), networks_sample.shape[2]))
-        for i in range(networks_sample.shape[2]):
-            features_of_net_samples[:, i] = self._network_statistics.calculate_statistics(
-                networks_sample[:, :, i])
-        return features_of_net_samples
-
     def _calculate_optimization_step(self, observed_features, features_of_net_samples, optimization_method):
-        num_of_features = self._network_statistics.get_num_of_features(self._n_nodes)
+        num_of_features = self._network_statistics.num_of_features
 
         mean_features = np.mean(features_of_net_samples, axis=1)
 
@@ -281,7 +262,7 @@ class ERGM():
         print("optimization started")
 
         self.optimization_start_time = time.time()
-        num_of_features = self._network_statistics.get_num_of_features(self._n_nodes)
+        num_of_features = self._network_statistics.num_of_features
         
         if convergence_criterion == "hotelling":
             hotelling_critical_value = f.ppf(1-hotelling_confidence, num_of_features, self.sample_size - num_of_features) # F(p, n-p) TODO - doc this better
@@ -290,6 +271,8 @@ class ERGM():
         hotelling_statistics = []
         
         prev_cov_matrix = np.ones((num_of_features, num_of_features))
+
+        seed_network = None
 
         for i in range(opt_steps):
             if ((i + 1) % steps_for_decay) == 0:
@@ -309,8 +292,10 @@ class ERGM():
                     sliding_grad_window_k = np.min(
                         [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
-            networks_for_sample = self.generate_networks_for_sample()
-            features_of_net_samples = self._calc_sample_statistics(networks_for_sample)
+            networks_for_sample = self.generate_networks_for_sample(seed_network=seed_network)
+            seed_network = networks_for_sample[:, :, -1]
+
+            features_of_net_samples = self._network_statistics.calculate_sample_statistics(networks_for_sample)
             observed_features = self._network_statistics.calculate_statistics(observed_network)
 
             grad, hessian = self._calculate_optimization_step(observed_features, features_of_net_samples, optimization_method)
@@ -330,7 +315,7 @@ class ERGM():
             if i % steps_for_decay == 0:
                 delta_t = time.time() - self.optimization_start_time
                 # print(f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
-                print(f"Step {i+1} - lr: {lr:.10f}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
+                print(f"Step {i+1} - lr: {lr:.10f}, time from start: {delta_t:.2f}, window_grad: {sliding_window_grads:.2f}")
 
             if convergence_criterion == "hotelling":
                 estimated_cov_matrix = self.covariance_matrix_estimation(features_of_net_samples, method=cov_matrix_estimation_method, num_batches=cov_matrix_num_batches)
@@ -338,6 +323,8 @@ class ERGM():
                 mean_features = np.mean(features_of_net_samples, axis=1) # TODO - this is calculated in `_calculate_optimization_step()` and covariance estimation, consider sharing the two
 
                 dist = mahalanobis(observed_features, mean_features, inv_estimated_cov_matrix)
+                # dist = mahalanobis(observed_features, mean_features, inv_hessian)
+                
                 
 
                 hotelling_t_statistic = self.sample_size * dist * dist
@@ -351,7 +338,7 @@ class ERGM():
                     "hotelling_F": hotelling_as_f_statistic,
                     "critical_val": hotelling_critical_value,
                     "inv_cov_norm": np.linalg.norm(inv_estimated_cov_matrix),
-                    # "hessian_norm": np.linalg.norm(hessian)
+                    # "inv_hessian_norm": np.linalg.norm(inv_hessian)
                 })
 
                 # FOR DEBUG ONLY - 

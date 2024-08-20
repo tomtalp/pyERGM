@@ -56,7 +56,7 @@ elif args.type == "big_network":
 
     W = big_network_df.values
 
-    W = W[:100, :100]
+    W = W[:50, :50]
 
     n = W.shape[0]
     is_directed = True
@@ -65,13 +65,13 @@ elif args.type == "big_network":
 
     metrics = [NumberOfEdgesDirected(), TotalReciprocity()]
 
-    fitted_model = ERGM(n, metrics, is_directed=is_directed, sample_size=5000, n_mcmc_steps=n, seed_MCMC_proba=estimated_p_seed)
+    fitted_model = ERGM(n, metrics, is_directed=is_directed, sample_size=10000, n_mcmc_steps=n, seed_MCMC_proba=estimated_p_seed)
 
     # # convergence_criterion = "zero_grad_norm"
     convergence_criterion = "hotelling"
 
     hotelling_conf = 0.9
-    grads, hotelling = fitted_model.fit(W, lr=0.05, opt_steps=25, 
+    grads, hotelling = fitted_model.fit(W, lr=0.05, opt_steps=100, 
                             lr_decay_pct=0.1, steps_for_decay=25,
                             sliding_grad_window_k=20, sample_pct_growth=0.05, 
                             convergence_criterion=convergence_criterion, 
