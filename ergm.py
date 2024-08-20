@@ -338,7 +338,7 @@ class ERGM():
                     "hotelling_F": hotelling_as_f_statistic,
                     "critical_val": hotelling_critical_value,
                     "inv_cov_norm": np.linalg.norm(inv_estimated_cov_matrix),
-                    "inv_hessian_norm": np.linalg.norm(inv_hessian)
+                    # "inv_hessian_norm": np.linalg.norm(inv_hessian)
                 })
 
                 # FOR DEBUG ONLY - 
