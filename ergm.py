@@ -317,12 +317,6 @@ class ERGM():
 
             if optimization_method == "newton_raphson":
                 inv_hessian = np.linalg.pinv(hessian)
-                # try:
-                #     inv_hessian = np.linalg.inv(hessian)
-                # except np.linalg.LinAlgError:
-                #     print("The hessian is not invertible")
-                #     inv_hessian = np.linalg.pinv(hessian)
-
                 self._thetas = self._thetas - lr * inv_hessian @ grad
             
             elif optimization_method == "gradient_descent":
@@ -341,11 +335,6 @@ class ERGM():
             if convergence_criterion == "hotelling":
                 estimated_cov_matrix = self.covariance_matrix_estimation(features_of_net_samples, method=cov_matrix_estimation_method, num_batches=cov_matrix_num_batches)
                 inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
-                # try:
-                #     inv_estimated_cov_matrix = np.linalg.inv(estimated_cov_matrix)
-                # except np.linalg.LinAlgError:
-                #     print("The estimated_cov_matrix is not invertible")
-                #     inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
                 mean_features = np.mean(features_of_net_samples, axis=1) # TODO - this is calculated in `_calculate_optimization_step()` and covariance estimation, consider sharing the two
 
                 dist = mahalanobis(observed_features, mean_features, inv_estimated_cov_matrix)
