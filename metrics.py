@@ -25,19 +25,34 @@ class Metric(ABC):
         """
         return 1
 
-    def calc_change_score(self, net_1: np.ndarray | nx.Graph, net_2: np.ndarray | nx.Graph, indices: tuple):
+    def calc_change_score(self, current_network: np.ndarray | nx.Graph, indices: tuple):
         """
         The default naive way to calculate the change score (namely, the difference in statistics) of a pair of
         networks.
 
+        The newly proposed network is created by flipping the edge denoted by `indices`
+
         Returns
         -------
-        statistic of net_2 minus statistic of net_1.
+        statistic of proposed_network minus statistic of current_network.
         """
-        net_2_stat = self.calculate(net_2)
-        net_1_stat = self.calculate(net_1)
-        change_score = net_2_stat - net_1_stat
-        return change_score
+        if self.requires_graph:
+            proposed_network = current_network.copy() 
+            if proposed_network.has_edge(i, j):
+                proposed_network.remove_edge(i, j)
+            else:
+                proposed_network.add_edge(i, j)
+        else:
+            i, j = indices
+            proposed_network = current_network.copy()
+            proposed_network[i, j] = 1 - proposed_network[i, j]
+
+            if not self.network_stats_calculator.is_directed:
+                proposed_network[j, i] = 1 - proposed_network[j, i]
+        
+        proposed_network_stat = self.calculate(proposed_network)
+        current_network_stat = self.calculate(current_network)
+        return proposed_network_stat - current_network_stat
     
     def calculate_for_sample(self, networks_sample: np.ndarray | Collection[nx.Graph]):
         if self.requires_graph:
@@ -65,8 +80,8 @@ class NumberOfEdgesUndirected(Metric):
     def calculate(self, W: np.ndarray):
         return np.sum(W) // 2
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
-        return 1 if net_2[indices[0], indices[1]] else -1
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        return -1 if current_network[indices[0], indices[1]] else 1
     
     def calculate_for_sample(self, networks_sample: np.ndarray):
         """
@@ -85,8 +100,8 @@ class NumberOfEdgesDirected(Metric):
     def calculate(self, W: np.ndarray):
         return np.sum(W)
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
-        return 1 if net_2[indices[0], indices[1]] else -1
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        return -1 if current_network[indices[0], indices[1]] else 1
 
     def calculate_for_sample(self, networks_sample: np.ndarray):
         """
@@ -114,15 +129,15 @@ class NumberOfTriangles(Metric):
         # forming it), thus the division by 3.
         return (np.linalg.matrix_power(W, 3)).diagonal().sum() // (3 * 2)
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         # The triangles that are affected by the edge toggling are those that involve it, namely, if the (i,j)-th edge
         # is toggled, the change in absolute value equals to the number of nodes k for which the edges (i,k) and (j,k)
         # exist. This is equivalent to the number of 2-length paths from i to j, which is the (i,j)-th entry of W^2.
         # If the edge is turned on, the change is positive, and otherwise negative.
-        sign = 1 if net_2[indices[0], indices[1]] else -1
-        return sign * np.dot(net_1[indices[0]], net_1[:, indices[1]])
 
-    # TODO - Implement `calculate_for_sample` for this metric
+        sign = -1 if current_network[indices[0], indices[1]] else 1
+        return sign * np.dot(current_network[indices[0]], current_network[:, indices[1]])
+
 
 class BaseDegreeVector(Metric):
     """
@@ -151,12 +166,12 @@ class InDegree(BaseDegreeVector):
     def calculate(self, W: np.ndarray):
         return W.sum(axis=0)[self.base_idx:]
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
-        n = net_1.shape[0]
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        n = current_network.shape[0]
         diff = np.zeros(n)
         i, j = indices
 
-        sign = 1 if net_2[i, j] else -1
+        sign = -1 if current_network[i, j] else 1
 
         diff[j] = sign
         return diff[self.base_idx:]
@@ -177,12 +192,12 @@ class OutDegree(BaseDegreeVector):
     def calculate(self, W: np.ndarray):
         return W.sum(axis=1)[self.base_idx:]
     
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
-        n = net_1.shape[0]
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        n = current_network.shape[0]
         diff = np.zeros(n)
         i, j = indices
 
-        sign = 1 if net_2[i, j] else -1
+        sign = -1 if current_network[i, j] else 1
 
         diff[i] = sign
         return diff[self.base_idx:]
@@ -223,19 +238,20 @@ class Reciprocity(Metric):
         # n choose 2
         return n * (n - 1) // 2
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         # Note: we intentionally initialize the whole matrix and return np.triu_indices() by the end (rather than
         # initializing an array of zeros of size n choose 2) to ensure compliance with the indexing returned by
         # the calculate method.
-        all_changes = np.zeros(net_1.shape)
+        i, j = indices
+        all_changes = np.zeros(current_network.shape)
         min_idx = min(indices)
         max_idx = max(indices)
-        if net_1[indices[1], indices[0]] and net_2[indices[0], indices[1]]:
+
+        if current_network[j, i] and not current_network[i, j]:
             all_changes[min_idx, max_idx] = 1
-        elif net_1[indices[1], indices[0]] and not net_2[indices[0], indices[1]]:
+        elif current_network[j, i] and current_network[i, j]:
             all_changes[min_idx, max_idx] = -1
         return all_changes[np.triu_indices(all_changes.shape[0], 1)]
-
 
 class TotalReciprocity(Metric):
     """
@@ -251,10 +267,12 @@ class TotalReciprocity(Metric):
     def calculate(self, W: np.ndarray):
         return (W * W.T).sum() / 2
 
-    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
-        if net_1[indices[1], indices[0]] and net_2[indices[0], indices[1]]:
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        i, j = indices
+
+        if current_network[j, i] and not current_network[i, j]:
             return 1
-        elif net_1[indices[1], indices[0]] and not net_2[indices[0], indices[1]]:
+        elif current_network[j, i] and current_network[i, j]:
             return -1
         else:
             return 0
@@ -347,29 +365,24 @@ class MetricsCollection:
 
         return statistics
 
-    def calc_change_scores(self, W1: np.ndarray, W2: np.ndarray, indices: tuple):
+    def calc_change_scores(self, current_network: np.ndarray, indices: tuple):
         """
         Calculates the vector of change scores, namely g(net_2) - g(net_1)
         """
-        if W1.shape != W2.shape:
-            raise ValueError(f"The dimensions of the given networks do not match! {W1.shape}, {W2.shape}")
         if self.requires_graph:
-            G1 = connectivity_matrix_to_G(W1, directed=self.is_directed)
-            G2 = connectivity_matrix_to_G(W2, directed=self.is_directed)
+            G1 = connectivity_matrix_to_G(current_network, directed=self.is_directed)
 
         change_scores = np.zeros(self.num_of_features)
 
         feature_idx = 0
         for metric in self.metrics:
             if metric.requires_graph:
-                inputs = (G1, G2)
+                input = G1
             else:
-                inputs = (W1, W2)
+                input = current_network
 
             n_features_from_metric = metric.get_effective_feature_count(self.n_nodes)
-            change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(inputs[0],
-                                                                                                       inputs[1],
-                                                                                                       indices)
+            change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input, indices)
             feature_idx += n_features_from_metric
 
         return change_scores
