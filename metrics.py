@@ -124,6 +124,17 @@ class InDegree(BaseDegreeVector):
     def calculate(self, W: np.ndarray):
         return W.sum(axis=0)[self.base_idx:]
 
+    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
+        n = net_1.shape[0]
+        diff = np.zeros(n)
+        i, j = indices
+
+        sign = 1 if net_2[i, j] else -1
+
+        diff[j] = sign
+        return diff[self.base_idx:]
+
+
 class OutDegree(BaseDegreeVector):
     """
     Calculate the out-degree of each node in a directed graph.
@@ -136,6 +147,16 @@ class OutDegree(BaseDegreeVector):
     
     def calculate(self, W: np.ndarray):
         return W.sum(axis=1)[self.base_idx:]
+    
+    def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
+        n = net_1.shape[0]
+        diff = np.zeros(n)
+        i, j = indices
+
+        sign = 1 if net_2[i, j] else -1
+
+        diff[i] = sign
+        return diff[self.base_idx:]
 
 class UndirectedDegree(BaseDegreeVector):
     """
