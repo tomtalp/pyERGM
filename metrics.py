@@ -38,6 +38,20 @@ class Metric(ABC):
         net_1_stat = self.calculate(net_1)
         change_score = net_2_stat - net_1_stat
         return change_score
+    
+    def calculate_for_sample(self, networks_sample: np.ndarray | Collection[nx.Graph]):
+        if self.requires_graph:
+            n = networks_sample[0].number_of_nodes()
+        else:
+            n = networks_sample.shape[0]
+
+        num_of_samples = networks_sample.shape[2]
+
+        result = np.zeros((self.get_effective_feature_count(n), num_of_samples))
+        for i in range(num_of_samples):
+            network = networks_sample[i] if self.requires_graph else networks_sample[:, :, i]
+            result[:, i] = self.calculate(network)
+        return result
 
 
 class NumberOfEdgesUndirected(Metric):
@@ -53,7 +67,12 @@ class NumberOfEdgesUndirected(Metric):
 
     def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
         return 1 if net_2[indices[0], indices[1]] else -1
-
+    
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        """
+        Sum each matrix over all matrices in sample
+        """
+        return networks_sample.sum(axis=(0, 1)) // 2
 
 class NumberOfEdgesDirected(Metric):
     def __str__(self):
@@ -68,6 +87,12 @@ class NumberOfEdgesDirected(Metric):
 
     def calc_change_score(self, net_1: np.ndarray, net_2: np.ndarray, indices: tuple):
         return 1 if net_2[indices[0], indices[1]] else -1
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        """
+        Sum each matrix over all matrices in sample
+        """
+        return networks_sample.sum(axis=(0, 1))
 
 
 # TODO: change the name of this one to undirected and implement also a directed version?
@@ -96,6 +121,8 @@ class NumberOfTriangles(Metric):
         # If the edge is turned on, the change is positive, and otherwise negative.
         sign = 1 if net_2[indices[0], indices[1]] else -1
         return sign * np.dot(net_1[indices[0]], net_1[:, indices[1]])
+
+    # TODO - Implement `calculate_for_sample` for this metric
 
 class BaseDegreeVector(Metric):
     """
@@ -133,7 +160,9 @@ class InDegree(BaseDegreeVector):
 
         diff[j] = sign
         return diff[self.base_idx:]
-
+    
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return networks_sample.sum(axis=0)[self.base_idx:]
 
 class OutDegree(BaseDegreeVector):
     """
@@ -157,6 +186,9 @@ class OutDegree(BaseDegreeVector):
 
         diff[i] = sign
         return diff[self.base_idx:]
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return networks_sample.sum(axis=1)[self.base_idx:]
 
 class UndirectedDegree(BaseDegreeVector):
     """
@@ -226,6 +258,9 @@ class TotalReciprocity(Metric):
             return -1
         else:
             return 0
+    
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
 
 class MetricsCollection:
     def __init__(self, metrics: Collection[Metric], is_directed: bool, n_nodes: int, fix_collinearity=True):
@@ -297,7 +332,6 @@ class MetricsCollection:
         if self.requires_graph:
             G = connectivity_matrix_to_G(W, directed=self.is_directed)
 
-        n_nodes = W.shape[0]
         statistics = np.zeros(self.num_of_features)
 
         feature_idx = 0
@@ -307,7 +341,7 @@ class MetricsCollection:
             else:
                 input = W
 
-            n_features_from_metric = metric.get_effective_feature_count(n_nodes)
+            n_features_from_metric = metric.get_effective_feature_count(self.n_nodes)
             statistics[feature_idx:feature_idx + n_features_from_metric] = metric.calculate(input)
             feature_idx += n_features_from_metric
 
@@ -323,7 +357,6 @@ class MetricsCollection:
             G1 = connectivity_matrix_to_G(W1, directed=self.is_directed)
             G2 = connectivity_matrix_to_G(W2, directed=self.is_directed)
 
-        n_nodes = W1.shape[0]
         change_scores = np.zeros(self.num_of_features)
 
         feature_idx = 0
@@ -333,10 +366,43 @@ class MetricsCollection:
             else:
                 inputs = (W1, W2)
 
-            n_features_from_metric = metric.get_effective_feature_count(n_nodes)
+            n_features_from_metric = metric.get_effective_feature_count(self.n_nodes)
             change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(inputs[0],
                                                                                                        inputs[1],
                                                                                                        indices)
             feature_idx += n_features_from_metric
 
         return change_scores
+
+    def calculate_sample_statistics(self, networks_sample: np.ndarray) -> np.ndarray:
+        """
+        Calculate the statistics over a sample of networks
+
+        Parameters
+        ----------
+        networks_sample
+            The networks sample - an array of n X n X sample_size
+        Returns
+        -------
+        an array of the statistics vector per sample (num_features X sample_size)
+        """
+        num_of_samples = networks_sample.shape[2]
+        features_of_net_samples = np.zeros((self.num_of_features, num_of_samples))
+
+        if self.requires_graph:
+            networks_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in networks_sample]
+        
+        feature_idx = 0
+        for metric in self.metrics:
+            n_features_from_metric = metric.get_effective_feature_count(self.n_nodes)
+
+            if metric.requires_graph:
+                networks = networks_as_graphs
+            else:
+                networks = networks_sample
+            
+            features_of_net_samples[feature_idx:feature_idx + n_features_from_metric] = metric.calculate_for_sample(networks)
+            feature_idx += n_features_from_metric
+        
+        return features_of_net_samples
+    

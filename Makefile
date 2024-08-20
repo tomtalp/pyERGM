@@ -2,5 +2,4 @@ a unittest:
 	python -m unittest discover -s tests
 
 profile:
-	python -m cProfile -o p1_model_profile_num_of_features_removed.profile profiler.py --type=p1
-	#python -m cProfile -o big_network_example.profile profiler.py --type=big_network
+	python -m cProfile -o big_network_1_sample_statistics_no_loop.profile profiler.py --type=big_network

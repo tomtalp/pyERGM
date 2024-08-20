@@ -122,7 +122,7 @@ class ERGM():
         """
         # TODO: it must be possible to vectorize this calculation and spare the for loop. Maybe somehow use the
         #  convolution theorem and go back and forth to the frequency domain using FFT for calculating correlations.
-        features_of_net_samples = self._calc_sample_statistics(networks_sample)
+        features_of_net_samples = self._network_statistics.calculate_sample_statistics(networks_sample)
         features_mean_diff = features_of_net_samples - features_of_net_samples.mean(axis=1)[:, None]
         num_features = features_of_net_samples.shape[0]
         sample_size = networks_sample.shape[2]
@@ -174,27 +174,6 @@ class ERGM():
             return batch_size * batches_cov_mat_est
         else:
             raise ValueError(f"{method} is an unsupported method for covariance matrix estimation")
-
-    def _calc_sample_statistics(self, networks_sample: np.ndarray) -> np.ndarray:
-        """
-        Calculate the statistics over a sample of networks
-        # TODO: there are many Metrics for which this can be calculated more efficiently (without looping). E.g. number
-            of edges is just summing up along the 2 first axes of the sample array. Maybe we should export this to
-            MetricsCollection and perform it more efficiently when possible (like with the calculation of change_score).
-        Parameters
-        ----------
-        networks_sample
-            The networks sample - an array of n X n X sample_size
-        Returns
-        -------
-        an array of the statistics vector per sample (num_features X sample_size)
-        """
-        features_of_net_samples = np.zeros(
-            (self._network_statistics.num_of_features, networks_sample.shape[2]))
-        for i in range(networks_sample.shape[2]):
-            features_of_net_samples[:, i] = self._network_statistics.calculate_statistics(
-                networks_sample[:, :, i])
-        return features_of_net_samples
 
     def _calculate_optimization_step(self, observed_features, features_of_net_samples, optimization_method):
         num_of_features = self._network_statistics.num_of_features
@@ -310,7 +289,7 @@ class ERGM():
                         [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
             networks_for_sample = self.generate_networks_for_sample()
-            features_of_net_samples = self._calc_sample_statistics(networks_for_sample)
+            features_of_net_samples = self._network_statistics.calculate_sample_statistics(networks_for_sample)
             observed_features = self._network_statistics.calculate_statistics(observed_network)
 
             grad, hessian = self._calculate_optimization_step(observed_features, features_of_net_samples, optimization_method)

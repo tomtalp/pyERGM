@@ -261,7 +261,7 @@ class TestERGM(unittest.TestCase):
         expected_covariance_batch_estimation = np.ones((2,2)) * 4/9
 
         ergm = ERGM(n, [NumberOfEdgesDirected(), TotalReciprocity()], True)
-        features_of_sample = ergm._calc_sample_statistics(sample)
+        features_of_sample = ergm._network_statistics.calculate_sample_statistics(sample)
 
         batch_estimation = ergm.covariance_matrix_estimation(features_of_sample, method='batch', num_batches=3)
         print(batch_estimation)
