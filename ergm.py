@@ -97,10 +97,12 @@ class ERGM():
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
-    def generate_networks_for_sample(self, replace=True):
+    def generate_networks_for_sample(self, seed_network=None, replace=True):
         sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics)
-        G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
-        seed_network = nx.to_numpy_array(G)
+
+        if seed_network is None:
+            G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
+            seed_network = nx.to_numpy_array(G)
 
         return sampler.sample(seed_network, self.sample_size, replace=replace)
 
@@ -270,6 +272,8 @@ class ERGM():
         
         prev_cov_matrix = np.ones((num_of_features, num_of_features))
 
+        seed_network = None
+
         for i in range(opt_steps):
             if ((i + 1) % steps_for_decay) == 0:
                 lr *= (1 - lr_decay_pct)
@@ -288,7 +292,9 @@ class ERGM():
                     sliding_grad_window_k = np.min(
                         [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
-            networks_for_sample = self.generate_networks_for_sample()
+            networks_for_sample = self.generate_networks_for_sample(seed_network=seed_network)
+            seed_network = networks_for_sample[:, :, -1]
+
             features_of_net_samples = self._network_statistics.calculate_sample_statistics(networks_for_sample)
             observed_features = self._network_statistics.calculate_statistics(observed_network)
 
@@ -309,7 +315,7 @@ class ERGM():
             if i % steps_for_decay == 0:
                 delta_t = time.time() - self.optimization_start_time
                 # print(f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
-                print(f"Step {i+1} - lr: {lr:.10f}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
+                print(f"Step {i+1} - lr: {lr:.10f}, time from start: {delta_t:.2f}, window_grad: {sliding_window_grads:.2f}")
 
             if convergence_criterion == "hotelling":
                 estimated_cov_matrix = self.covariance_matrix_estimation(features_of_net_samples, method=cov_matrix_estimation_method, num_batches=cov_matrix_num_batches)
