@@ -67,7 +67,8 @@ class TestNumberOfTriangles(unittest.TestCase):
 class TestReciprocity(unittest.TestCase):
     def test_calculate(self):
         metrics = [Reciprocity()]
-        collection = MetricsCollection(metrics, is_directed=True)
+        n = 3
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
 
         matrices_to_test = [
             {
@@ -103,11 +104,13 @@ class TestReciprocity(unittest.TestCase):
             self.assertTrue(np.array_equal(g_y, expected_reciprocity_vector))
 
         n = 30
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
         W = np.random.randint(0, 2, (n, n))
 
         G = nx.from_numpy_array(W, create_using=nx.DiGraph)
 
         total_edges = np.sum(W)
+        
         reciprocity_vector = collection.calculate_statistics(W)
         total_reciprocity = np.sum(reciprocity_vector)
 
@@ -175,7 +178,7 @@ class TestDegreeMetrics(unittest.TestCase):
 class TestMetricsCollection(unittest.TestCase):
     def test_metrics_setup(self):
         metrics = [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()]
-        collection = MetricsCollection(metrics, is_directed=True)
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=3)
         
         expected_metric_names = tuple([str(NumberOfEdgesDirected()), str(TotalReciprocity()), str(InDegree())])
 
@@ -183,10 +186,10 @@ class TestMetricsCollection(unittest.TestCase):
 
         metrics = [InDegree(), UndirectedDegree()]
         with self.assertRaises(ValueError):
-            collection = MetricsCollection(metrics, is_directed=True) # Should fail because we have an undirected metric in a directed metrics collection
+            collection = MetricsCollection(metrics, is_directed=True, n_nodes=3) # Should fail because we have an undirected metric in a directed metrics collection
 
         with self.assertRaises(ValueError):
-            collection = MetricsCollection(metrics, is_directed=False) # Should fail because we have a directed metric in an undirected metrics collection
+            collection = MetricsCollection(metrics, is_directed=False, n_nodes=3) # Should fail because we have a directed metric in an undirected metrics collection
 
     def test_collinearity_fixer(self):
         n = 18
@@ -221,10 +224,10 @@ class TestMetricsCollection(unittest.TestCase):
         }
 
         for scenario_data in test_scenarios.values():
-            collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True)
+            collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True, n_nodes=n)
             
             # Check the general number of features matches the expectation
-            self.assertEqual(collection.get_num_of_features(n), scenario_data["expected_num_of_features"])
+            self.assertEqual(collection.num_of_features, scenario_data["expected_num_of_features"])
 
             # Check if the correct metrics were trimmed
             for metric in scenario_data["metrics"]:
@@ -236,7 +239,7 @@ class TestMetricsCollection(unittest.TestCase):
     def test_calculate_statistics(self):
         # Test undirected graphs
         metrics = [NumberOfEdgesUndirected(), NumberOfTriangles()]
-        collection = MetricsCollection(metrics, is_directed=False)
+        collection = MetricsCollection(metrics, is_directed=False, n_nodes=3)
 
         W = np.array([
             [0, 1, 1],
@@ -251,7 +254,7 @@ class TestMetricsCollection(unittest.TestCase):
 
         # Test directed graphs
         metrics = [NumberOfEdgesDirected()]
-        collection = MetricsCollection(metrics, is_directed=True)
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=3)
         W = np.array([
             [0, 1, 0],
             [1, 0, 1],
@@ -264,9 +267,10 @@ class TestMetricsCollection(unittest.TestCase):
         np.testing.assert_array_equal(stats, expected_stats)
 
     def test_get_num_of_features(self):
+        n = 4
         metrics = [NumberOfEdgesUndirected(), NumberOfTriangles()]
-        collection = MetricsCollection(metrics, is_directed=False)
-        num_of_features = collection.get_num_of_features(n=4)
+        collection = MetricsCollection(metrics, is_directed=False, n_nodes=n)
+        num_of_features = collection.num_of_features
 
         # NumberOfEdges and NumberOfTriangles each produce 1 features
         expected_num_of_features = 2
@@ -274,10 +278,9 @@ class TestMetricsCollection(unittest.TestCase):
         self.assertEqual(num_of_features, expected_num_of_features)
 
         metrics = [Reciprocity(), NumberOfEdgesDirected()]
-        collection = MetricsCollection(metrics, is_directed=True)
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
 
-        n = 4
-        num_of_features = collection.get_num_of_features(n)
+        num_of_features = collection.num_of_features
 
         expected_num_of_features = math.comb(n, 2) + 1
 
@@ -285,7 +288,7 @@ class TestMetricsCollection(unittest.TestCase):
     
     def test_calc_change_scores(self):
         metrics = [NumberOfEdgesDirected(), Reciprocity()]
-        collection = MetricsCollection(metrics, is_directed=True)
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=3)
 
         W1 = np.array([
             [0, 0, 1],

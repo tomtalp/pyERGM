@@ -54,7 +54,7 @@ class ERGM():
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
-        self._network_statistics = MetricsCollection(network_statistics, self._is_directed)
+        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes)
 
         if initial_thetas is not None:
             self._thetas = initial_thetas
@@ -93,7 +93,7 @@ class ERGM():
 
     def _get_random_thetas(self, sampling_method="uniform"):
         if sampling_method == "uniform":
-            return np.random.uniform(-1, 1, self._network_statistics.get_num_of_features(self._n_nodes))
+            return np.random.uniform(-1, 1, self._network_statistics.num_of_features)
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
@@ -190,14 +190,14 @@ class ERGM():
         an array of the statistics vector per sample (num_features X sample_size)
         """
         features_of_net_samples = np.zeros(
-            (self._network_statistics.get_num_of_features(self._n_nodes), networks_sample.shape[2]))
+            (self._network_statistics.num_of_features, networks_sample.shape[2]))
         for i in range(networks_sample.shape[2]):
             features_of_net_samples[:, i] = self._network_statistics.calculate_statistics(
                 networks_sample[:, :, i])
         return features_of_net_samples
 
     def _calculate_optimization_step(self, observed_features, features_of_net_samples, optimization_method):
-        num_of_features = self._network_statistics.get_num_of_features(self._n_nodes)
+        num_of_features = self._network_statistics.num_of_features
 
         mean_features = np.mean(features_of_net_samples, axis=1)
 
@@ -281,7 +281,7 @@ class ERGM():
         print("optimization started")
 
         self.optimization_start_time = time.time()
-        num_of_features = self._network_statistics.get_num_of_features(self._n_nodes)
+        num_of_features = self._network_statistics.num_of_features
         
         if convergence_criterion == "hotelling":
             hotelling_critical_value = f.ppf(1-hotelling_confidence, num_of_features, self.sample_size - num_of_features) # F(p, n-p) TODO - doc this better

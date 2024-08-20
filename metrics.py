@@ -21,7 +21,7 @@ class Metric(ABC):
 
     def get_effective_feature_count(self, n):
         """
-        How many features does this metric produce. Defaults to 1
+        How many features does this metric produce. Defaults to 1.
         """
         return 1
 
@@ -228,7 +228,7 @@ class TotalReciprocity(Metric):
             return 0
 
 class MetricsCollection:
-    def __init__(self, metrics: Collection[Metric], is_directed: bool, fix_collinearity=True):
+    def __init__(self, metrics: Collection[Metric], is_directed: bool, n_nodes: int, fix_collinearity=True):
         self.metrics = tuple([deepcopy(metric) for metric in metrics]) 
         self.metric_names = tuple([str(metric) for metric in self.metrics])
 
@@ -245,6 +245,12 @@ class MetricsCollection:
         self._fix_collinearity = fix_collinearity
         if self._fix_collinearity:
             self.collinearity_fixer()
+
+        self.n_nodes = n_nodes
+
+        # Returns the number of features that are being calculated. Since a single metric might return more than one feature, the length of the statistics vector might be larger than 
+        # the amount of metrics. Since it also depends on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count function
+        self.num_of_features = sum([metric.get_effective_feature_count(self.n_nodes) for metric in self.metrics])
 
     def get_metric(self, metric_name: str) -> Metric:
         """
@@ -274,25 +280,6 @@ class MetricsCollection:
             self.get_metric(indegree_name).base_idx = 1
 
     
-    def get_num_of_features(self, n: int):
-        """
-        Returns the number of features that are being calculated. Since a single metric might
-        return more than one feature, the length of the statistics vector might be larger than 
-        the amount of metrics. Since it also depends on the network size, n is a mandatory parameters.
-
-        Parameters
-        ----------
-        n : int
-            Number of nodes in network
-        
-        Returns
-        -------
-        num_of_features : int
-            How many features will be calculated for a network of size n
-        """
-        num_of_features = sum([metric.get_effective_feature_count(n) for metric in self.metrics])
-        return num_of_features
-
     def calculate_statistics(self, W: np.ndarray):
         """
         Calculate the statistics of a graph, formally written as g(y).
@@ -311,7 +298,7 @@ class MetricsCollection:
             G = connectivity_matrix_to_G(W, directed=self.is_directed)
 
         n_nodes = W.shape[0]
-        statistics = np.zeros(self.get_num_of_features(n_nodes))
+        statistics = np.zeros(self.num_of_features)
 
         feature_idx = 0
         for metric in self.metrics:
@@ -337,7 +324,7 @@ class MetricsCollection:
             G2 = connectivity_matrix_to_G(W2, directed=self.is_directed)
 
         n_nodes = W1.shape[0]
-        change_scores = np.zeros(self.get_num_of_features(n_nodes))
+        change_scores = np.zeros(self.num_of_features)
 
         feature_idx = 0
         for metric in self.metrics:

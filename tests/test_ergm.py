@@ -11,7 +11,7 @@ class TestERGM(unittest.TestCase):
         self.n_nodes = 3
 
         self.K = 100
-        self.thetas = np.ones(MetricsCollection(self.metrics, is_directed=False).get_num_of_features(self.n_nodes))
+        self.thetas = np.ones(MetricsCollection(self.metrics, is_directed=False, n_nodes=self.n_nodes).num_of_features)
 
     def test_calculate_weight(self):
         ergm = ERGM(self.n_nodes, self.metrics, initial_thetas=self.thetas, initial_normalization_factor=self.K)

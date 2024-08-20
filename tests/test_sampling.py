@@ -13,7 +13,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         pass
 
     def test_flip_network_edge(self):
-        stats_calculator = MetricsCollection([NumberOfEdgesUndirected()], is_directed=False)
+        stats_calculator = MetricsCollection([NumberOfEdgesUndirected()], is_directed=False, n_nodes=4)
         thetas = np.array([np.log(2)])
 
         # UNDIRECTED VERSION
@@ -53,7 +53,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         self.assertTrue(np.all(W_minus == expected_W))
 
         # DIRECTED VERSION
-        stats_calculator = MetricsCollection([NumberOfEdgesDirected()], is_directed=True)
+        stats_calculator = MetricsCollection([NumberOfEdgesDirected()], is_directed=True, n_nodes=2)
         sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
 
         test_W = np.array([[0, 1], [0, 0]])
@@ -75,7 +75,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         """
         Test the change score calculation for an undirected graph, based on a single variable - num_edges
         """
-        stats_calculator = MetricsCollection([NumberOfEdgesUndirected()], is_directed=False)
+        stats_calculator = MetricsCollection([NumberOfEdgesUndirected()], is_directed=False, n_nodes=3)
 
         theta_edges = 0.5
         thetas = np.array([theta_edges])
@@ -102,7 +102,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         """
         Test the change score calculation for a undirected graph, based on two variables - num_edges & num_triangles
         """
-        stats_calculator = MetricsCollection([NumberOfEdgesUndirected(), NumberOfTriangles()], is_directed=False)
+        stats_calculator = MetricsCollection([NumberOfEdgesUndirected(), NumberOfTriangles()], is_directed=False, n_nodes=3)
 
         theta_edges = 2
         theta_triangles = 0.5
@@ -134,7 +134,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         """
         Test the change score calculation for a directed graph, based on num_edges
         """
-        stats_calculator = MetricsCollection([NumberOfEdgesDirected()], is_directed=True)
+        stats_calculator = MetricsCollection([NumberOfEdgesDirected()], is_directed=True, n_nodes=3)
 
         theta_edges = -1
         thetas = np.array([theta_edges])
