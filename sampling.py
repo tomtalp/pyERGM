@@ -53,6 +53,7 @@ class NaiveMetropolisHastings(Sampler):
         change_score = self.network_stats_calculator.calc_change_scores(current_network, proposed_network, indices)
         return np.dot(self.thetas, change_score)
 
+
     def sample(self, initial_state, num_of_nets, replace=True):
         """
         Sample networks using the Metropolis-Hastings algorithm.
@@ -74,11 +75,15 @@ class NaiveMetropolisHastings(Sampler):
 
         sampled_networks = np.zeros((net_size, net_size, num_of_nets))
 
+        
+        edges_to_flip = get_random_edges_to_flip(net_size, self.burn_in + (num_of_nets * self.steps_per_sample)) 
+
+
         networks_count = 0
         mcmc_iter_count = 0
 
         while networks_count != num_of_nets:
-            random_entry = get_random_nondiagonal_matrix_entry(current_network.shape[0])
+            random_entry = edges_to_flip[:, mcmc_iter_count % edges_to_flip.shape[1]]
 
             proposed_network = self.flip_network_edge(current_network, random_entry[0], random_entry[1])
 
