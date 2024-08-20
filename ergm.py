@@ -317,6 +317,8 @@ class ERGM():
                 mean_features = np.mean(features_of_net_samples, axis=1) # TODO - this is calculated in `_calculate_optimization_step()` and covariance estimation, consider sharing the two
 
                 dist = mahalanobis(observed_features, mean_features, inv_estimated_cov_matrix)
+                # dist = mahalanobis(observed_features, mean_features, inv_hessian)
+                
                 
 
                 hotelling_t_statistic = self.sample_size * dist * dist
@@ -330,7 +332,7 @@ class ERGM():
                     "hotelling_F": hotelling_as_f_statistic,
                     "critical_val": hotelling_critical_value,
                     "inv_cov_norm": np.linalg.norm(inv_estimated_cov_matrix),
-                    # "hessian_norm": np.linalg.norm(hessian)
+                    "inv_hessian_norm": np.linalg.norm(inv_hessian)
                 })
 
                 # FOR DEBUG ONLY - 

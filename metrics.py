@@ -4,6 +4,8 @@ from copy import deepcopy
 
 import numpy as np
 import networkx as nx
+from numba import njit
+
 
 from utils import *
 
@@ -100,14 +102,20 @@ class NumberOfEdgesDirected(Metric):
     def calculate(self, W: np.ndarray):
         return np.sum(W)
 
-    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+    @staticmethod
+    @njit
+    def calc_change_score(current_network: np.ndarray, indices: tuple):
         return -1 if current_network[indices[0], indices[1]] else 1
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
+    @staticmethod
+    @njit
+    def calculate_for_sample(networks_sample: np.ndarray):
         """
         Sum each matrix over all matrices in sample
         """
-        return networks_sample.sum(axis=(0, 1))
+        n = networks_sample.shape[0]
+        reshaped_networks_sample = networks_sample.reshape(n**2, networks_sample.shape[2])
+        return np.sum(reshaped_networks_sample, axis=0)
 
 
 # TODO: change the name of this one to undirected and implement also a directed version?
@@ -253,6 +261,7 @@ class Reciprocity(Metric):
             all_changes[min_idx, max_idx] = -1
         return all_changes[np.triu_indices(all_changes.shape[0], 1)]
 
+
 class TotalReciprocity(Metric):
     """
     Calculates how many reciprocal connections exist in a network  
@@ -262,12 +271,14 @@ class TotalReciprocity(Metric):
 
     def __init__(self):
         super().__init__(requires_graph=False)
-        self._is_directed = True
+        self._is_directed = True    
 
     def calculate(self, W: np.ndarray):
         return (W * W.T).sum() / 2
 
-    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+    @staticmethod
+    @njit
+    def calc_change_score(current_network: np.ndarray, indices: tuple):
         i, j = indices
 
         if current_network[j, i] and not current_network[i, j]:
@@ -277,7 +288,9 @@ class TotalReciprocity(Metric):
         else:
             return 0
     
-    def calculate_for_sample(self, networks_sample: np.ndarray):
+    @staticmethod
+    # @njit
+    def calculate_for_sample(networks_sample: np.ndarray):
         return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
 
 class MetricsCollection:

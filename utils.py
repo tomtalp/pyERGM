@@ -1,6 +1,9 @@
 import numpy as np
 import networkx as nx
+from numba import njit
+
 import random
+
 
 def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
     perturbed_net = network.copy()
@@ -133,13 +136,14 @@ def get_greatest_convex_minorant(xs: np.ndarray, ys: np.ndarray):
 
     return cur_proposed_minorant
 
+@njit
 def get_random_edges_to_flip(num_nodes, num_pairs):
     """
     Create a matrix of size (2 x num_pairs), where each column represents a pair of nodes.
     These nodes represent the edge we wish to flip.
     """
 
-    edges_to_flip = np.zeros((2, num_pairs))
+    edges_to_flip = np.zeros((2, num_pairs), dtype=np.int32)
 
     edges_to_flip[0, :] = np.random.choice(num_nodes, size=num_pairs)
 
@@ -147,6 +151,6 @@ def get_random_edges_to_flip(num_nodes, num_pairs):
 
     edges_to_flip[1, :] = (edges_to_flip[0, :] - diff) % num_nodes
 
-    return edges_to_flip.astype(int)
+    return edges_to_flip
 
 

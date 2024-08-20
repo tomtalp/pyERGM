@@ -48,9 +48,25 @@ class NaiveMetropolisHastings(Sampler):
         NOTE! This function changes the network that is passed by reference
         """
         current_network[i, j] = 1 - current_network[i, j]
-
         if not self.network_stats_calculator.is_directed:
             current_network[j, i] = 1 - current_network[j, i]
+
+
+    # def _flip_network_edge(self, current_network, i, j):
+    #     """
+    #     Flip the edge between nodes i, j. If it's an undirected network, we flip entries W_i,j and W_j,i.
+    #     NOTE! This function changes the network that is passed by reference
+    #     """
+    #     _is_directed = self.network_stats_calculator.is_directed
+    #     self._static_flip_edge(current_network, i, j, _is_directed)
+    
+    # @staticmethod
+    # @njit
+    # def _static_flip_edge(current_network, i, j, _is_directed):
+    #     current_network[i, j] = 1 - current_network[i, j]
+
+    #     if not _is_directed:
+    #         current_network[j, i] = 1 - current_network[j, i]
 
     def sample(self, initial_state, num_of_nets, replace=True):
         """
@@ -75,6 +91,7 @@ class NaiveMetropolisHastings(Sampler):
 
         
         edges_to_flip = get_random_edges_to_flip(net_size, self.burn_in + (num_of_nets * self.steps_per_sample)) 
+        random_nums_for_change_acceptance = np.random.rand(self.burn_in + (num_of_nets * self.steps_per_sample))
 
 
         networks_count = 0
@@ -85,14 +102,17 @@ class NaiveMetropolisHastings(Sampler):
 
             change_score = self._calculate_weighted_change_score(current_network, random_entry)
             
-            perform_change = change_score >= 1 or np.random.rand() <= min(1, np.exp(change_score))
+            rand_num = random_nums_for_change_acceptance[mcmc_iter_count % edges_to_flip.shape[1]]
+            perform_change = change_score >= 1 or rand_num <= min(1, np.exp(change_score))
             if perform_change:
                 self._flip_network_edge(current_network, random_entry[0], random_entry[1])
 
             if (mcmc_iter_count - self.burn_in) % self.steps_per_sample == 0:
                 sampled_networks[:, :, networks_count] = current_network
 
-                if not replace:
+                if not replace: 
+                    ## TODO - Since we're flipping coins in the beginning, we're reusing them in case of the non-replacement (since we might need more coin flips that num of networks).
+                    ## Consider reflipping coins to get better "pseudorandom properties", in the case that we run out of pre-flipped coins
                     if np.unique(sampled_networks[:, :, :networks_count + 1], axis=2).shape[2] == networks_count + 1:
                         networks_count += 1
                     else:
