@@ -257,9 +257,18 @@ class ERGM():
 
             # Now we find the farthest idx after first_pos_def_idx fir which the sequence of determinants is strictly
             # monotonically increasing.
-            # TODO: it might be faster to run in a loop and each time calculate a single determinant, and stop when it
-            #  is smaller than the previous one, rather than computing all of them upfront.
-            determinants = np.linalg.det(possible_cov_mat_ests[first_pos_def_idx:])
+            # TODO: this try-catch intends to catch a bug that hasn't reproduced, consider removing
+            try:
+                # TODO: it might be faster to run in a loop and each time calculate a single determinant, and stop when it
+                #  is smaller than the previous one, rather than computing all of them upfront.
+                determinants = np.linalg.det(possible_cov_mat_ests[first_pos_def_idx:])
+            except IndexError:
+                print(f"shape of features_of_net_samples: {features_of_net_samples.shape}\n"
+                      f"shape of auto_corr_funcs: {auto_corr_funcs.shape}\n"
+                      f"shape of capital_gammas: {capital_gammas.shape}\n"
+                      f"shape of possible_cov_mat_ests: {possible_cov_mat_ests.shape}\n"
+                      f"first_post_def_idx: {first_pos_def_idx}")
+                raise
             tail_cut_idx = first_pos_def_idx + np.where(np.diff(determinants) < 0)[0][0]
 
             return possible_cov_mat_ests[tail_cut_idx]
@@ -287,6 +296,12 @@ class ERGM():
                 f"Optimization method {optimization_method} not defined")  # TODO - throw this error in fit()
 
         return nll_grad, nll_hessian
+
+    @staticmethod
+    def do_estimate_covariance_matrix(optimization_method, convergence_criterion):
+        if optimization_method == "newton_raphson" or convergence_criterion == "hotelling":
+            return True
+        return False
 
     def fit(self, observed_network,
             lr=0.001,
@@ -393,7 +408,12 @@ class ERGM():
 
             grad, hessian = self._calculate_optimization_step(observed_features, features_of_net_samples,
                                                               optimization_method)
+            # if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):
+            #     estimated_cov_matrix = ERGM.covariance_matrix_estimation(features_of_net_samples,
+            #                                                              method=cov_matrix_estimation_method,
+            #                                                              num_batches=cov_matrix_num_batches)
             if optimization_method == "newton_raphson":
+                # hessian = estimated_cov_matrix
                 inv_hessian = np.linalg.pinv(hessian)
                 self._thetas = self._thetas - lr * inv_hessian @ grad
 
@@ -413,8 +433,8 @@ class ERGM():
 
             if convergence_criterion == "hotelling":
                 estimated_cov_matrix = ERGM.covariance_matrix_estimation(features_of_net_samples,
-                                                                    method=cov_matrix_estimation_method,
-                                                                    num_batches=cov_matrix_num_batches)
+                                                                         method=cov_matrix_estimation_method,
+                                                                         num_batches=cov_matrix_num_batches)
                 inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
                 mean_features = np.mean(features_of_net_samples,
                                         axis=1)  # TODO - this is calculated in `_calculate_optimization_step()` and covariance estimation, consider sharing the two
