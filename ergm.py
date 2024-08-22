@@ -3,6 +3,7 @@ import networkx as nx
 from scipy.optimize import minimize, OptimizeResult
 from scipy.spatial.distance import mahalanobis
 from scipy.stats import f
+# from scipy.sparse.linalg import eigsh
 import time
 from typing import Collection
 import sampling
@@ -71,6 +72,10 @@ class ERGM():
         self.optimization_iter = 0
         self.optimization_start_time = None
 
+        # This is because we assume the sample size is even when estimating the covariance matrix (in
+        # calc_capital_gammas).
+        if sample_size % 2 != 0:
+            sample_size += 1
         self.sample_size = sample_size
         self.n_mcmc_steps = n_mcmc_steps
         self.verbose = verbose
@@ -118,16 +123,17 @@ class ERGM():
 
         # print(f"Finished generating networks for Z, which is estimated at {self._normalization_factor}")
 
-    def approximate_auto_correlation_function(self, networks_sample: np.ndarray) -> np.ndarray:
+    @staticmethod
+    # @njit
+    def approximate_auto_correlation_function(features_of_net_samples: np.ndarray) -> np.ndarray:
         """
-        This is gamma hat from Geyer's handbook of mcmc.
+        This is gamma hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
         """
         # TODO: it must be possible to vectorize this calculation and spare the for loop. Maybe somehow use the
         #  convolution theorem and go back and forth to the frequency domain using FFT for calculating correlations.
-        features_of_net_samples = self._network_statistics.calculate_sample_statistics(networks_sample)
         features_mean_diff = features_of_net_samples - features_of_net_samples.mean(axis=1)[:, None]
         num_features = features_of_net_samples.shape[0]
-        sample_size = networks_sample.shape[2]
+        sample_size = features_of_net_samples.shape[1]
         auto_correlation_func = np.zeros((sample_size, num_features, num_features))
         for k in range(sample_size):
             auto_correlation_func[k] = 1 / sample_size * (
@@ -136,22 +142,67 @@ class ERGM():
             ).sum(axis=0)
         return auto_correlation_func
 
-    def covariance_matrix_estimation(self, features_of_net_samples: np.ndarray, method='batch', num_batches=25) -> np.ndarray:
+    @staticmethod
+    # @njit
+    def calc_capital_gammas(auto_corr_funcs: np.ndarray) -> np.ndarray:
+        """
+        This is the capital gammas hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
+        They are simply summations over pairs of consecutive even and odd indices of the auto correlation function (gammas).
+        """
+        # From Dai and Jones 2017 - a mean of gamma with its transpose (which corresponds to the negative index with the
+        # same abs value).
+        gamma_tilde = (auto_corr_funcs + np.transpose(auto_corr_funcs, [0, 2, 1])) / 2
+
+        # Note - we assume here an even sample_size, it is forced elsewhere (everytime the sample size is updated).
+        sample_size = gamma_tilde.shape[0]
+        return (gamma_tilde[np.arange(0, sample_size - 1, 2, dtype=int)] +
+                gamma_tilde[np.arange(1, sample_size, 2, dtype=int)])
+
+    @staticmethod
+    # TODO: all the static methods in this class should be eorted to utils to avoid calling them with ERGM, and then
+    #  maybe they can be precompiled using numba. Tried, and numba doesn't support in axis parameter to np.mean. There
+    #  are workarounds, think if it's worth the headache.
+    # @njit
+    def covariance_matrix_estimation(features_of_net_samples: np.ndarray, method='batch',
+                                     num_batches=25) -> np.ndarray:
         """
         Approximate the covariance matrix of the model's features
         Parameters
         ----------
         features_of_net_samples
-            The calculated features of the networks that are used for the approximation. Of dimensions (num_features X sample_size)
+            The calculated features of the networks that are used for the approximation. Of dimensions
+            (num_features X sample_size)
         method
             the method to use for approximating the covariance matrix
+            currently supported options are:
+                naive
+                    A naive estimation from the sample: E[gi*gj] - E[gi]E[gj]
+                batch
+                    based on difference of means of sample batches from the total mean, as in Geyer's handbook of
+                    MCMC (there it is stated for the univariate case, but the generalization is straight forward).
+                multivariate_initial_sequence
+                    Following Dai and Jones 2017 - the first estimator in section 3.1 (denoted mIS).
         TODO: implement a mechanism that allows to pass arguments that are customized for each method
 
         Returns
         -------
         The covariance matrix estimation (num_features X num_features).
         """
-        if method == 'batch':
+        if method == 'naive':
+            num_features = features_of_net_samples.shape[0]
+            sample_size = features_of_net_samples.shape[1]
+            mean_features = np.mean(features_of_net_samples, axis=1)
+            # An outer product of the means (E[gi]E[gj])
+            cross_prod_mean_features = (mean_features.reshape(num_features, 1) @
+                                        mean_features.T.reshape(1, num_features))
+            # A mean of the outer products of the sample (E[gi*gj])
+            mean_features_cross_prod = np.mean(
+                features_of_net_samples.T.reshape(sample_size, num_features, 1) @
+                features_of_net_samples.T.reshape(sample_size, 1, num_features), axis=0)
+
+            return mean_features_cross_prod - cross_prod_mean_features
+
+        elif method == 'batch':
             num_features = features_of_net_samples.shape[0]
             sample_size = features_of_net_samples.shape[1]
             # Verify that the sample is nicely divided into non-overlapping batches.
@@ -159,49 +210,83 @@ class ERGM():
                 num_batches += 1
             sample_mean = features_of_net_samples.mean(axis=1)
             batch_size = sample_size // num_batches
-            
+
             # Divide the sample into batches, and calculate the mean of each one of them
             batches_means = np.zeros((num_features, num_batches))
             for i in range(num_batches):
-                batches_means[:, i] = features_of_net_samples[:, i*batch_size:(i+1)*batch_size].mean(axis=1)
+                batches_means[:, i] = features_of_net_samples[:, i * batch_size:(i + 1) * batch_size].mean(axis=1)
 
-                
             diff_of_global_mean = batches_means - sample_mean.reshape(num_features, 1)
-            
+
             # Average the outer products of the differences between batch means and the global mean
             batches_cov_mat_est = np.mean(
                 diff_of_global_mean.T.reshape(num_batches, num_features, 1) @
                 diff_of_global_mean.T.reshape(num_batches, 1, num_features), axis=0)
             # Multiply by the batch size to compensate for the aggregation into batches.
             return batch_size * batches_cov_mat_est
+
+        elif method == "multivariate_initial_sequence":
+            auto_corr_funcs = ERGM.approximate_auto_correlation_function(features_of_net_samples)
+            capital_gammas = ERGM.calc_capital_gammas(auto_corr_funcs)
+
+            # In this method, we sum up capital gammas, and choose where to cut the tail (which corresponds to estimates
+            # of auto-correlations with large lags within the chain. Naturally, as the lag increases the estimation
+            # becomes worse, so the magic here is to determine where to cut). So we first calculate all possible
+            # estimators using np.cumsum, and then perform the calculations they specified to determine where to cut.
+            possible_cov_mat_ests = -auto_corr_funcs[0] + 2 * np.cumsum(capital_gammas, axis=0)
+
+            # The first condition is to have an index where the estimation is positive-definite, namely all eigen-values
+            # are positive. As the both gamma_0 (which is auto_corr_funcs[0]) and the capital gammas are symmetric, all
+            # the sum of them is allways symmetric, which ensures real eigen values, and we can simply calculate the
+            # eigen value with the smallest algebraic value to determine whether all of them are positive.
+            is_positive = False
+            first_pos_def_idx = 0
+            while not is_positive:
+                if first_pos_def_idx == possible_cov_mat_ests.shape[0]:
+                    # TODO: ValueError? probably should throw something else. And maybe it is better to try alone some
+                    #  of the remediations suggested here and just notify the user...
+                    raise ValueError("Got a sample with no valid multivariate_initial_sequence covariance matrix "
+                                     "estimation (no possibility is positive-definite). Consider increasing sample size"
+                                     " or using a different covariance matrix estimation method.")
+                cur_smallest_eigen_val = eigsh(possible_cov_mat_ests[first_pos_def_idx], k=1, which='SA',
+                                               return_eigenvectors=False)[0]
+                if cur_smallest_eigen_val > 0:
+                    is_positive = True
+                else:
+                    first_pos_def_idx += 1
+
+            # Now we find the farthest idx after first_pos_def_idx fir which the sequence of determinants is strictly
+            # monotonically increasing.
+            # TODO: it might be faster to run in a loop and each time calculate a single determinant, and stop when it
+            #  is smaller than the previous one, rather than computing all of them upfront.
+            determinants = np.linalg.det(possible_cov_mat_ests[first_pos_def_idx:])
+            tail_cut_idx = first_pos_def_idx + np.where(np.diff(determinants) < 0)[0][0]
+
+            return possible_cov_mat_ests[tail_cut_idx]
+
         else:
             raise ValueError(f"{method} is an unsupported method for covariance matrix estimation")
 
-    def _calculate_optimization_step(self, observed_features, features_of_net_samples, optimization_method):
-        num_of_features = self._network_statistics.num_of_features
-
+    @staticmethod
+    # @njit
+    def _calculate_optimization_step(observed_features, features_of_net_samples, optimization_method):
         mean_features = np.mean(features_of_net_samples, axis=1)
 
         nll_grad = mean_features - observed_features
 
         if optimization_method == "gradient_descent":
             nll_hessian = None
-            
-        elif optimization_method == "newton_raphson":
-            # # An outer product of the means (E[gi]E[gj])
-            cross_prod_mean_features = (mean_features.reshape(num_of_features, 1) @
-                                        mean_features.T.reshape(1, num_of_features))
-            # A mean of the outer products of the sample (E[gi*gj])
-            mean_features_cross_prod = np.mean(
-                features_of_net_samples.T.reshape(self.sample_size, num_of_features, 1) @
-                features_of_net_samples.T.reshape(self.sample_size, 1, num_of_features), axis=0)
 
-            nll_hessian = mean_features_cross_prod - cross_prod_mean_features
-        else: 
-            raise ValueError(f"Optimization method {optimization_method} not defined") # TODO - throw this error in fit()
+        elif optimization_method == "newton_raphson":
+            # TODO: mean_features is calculated again inside this method, so it can be spared, but it makes more sense
+            #  to use this design. And in general, maybe it is better to have only one method for estimating the
+            #  covariance matrix and use the same estimation everywhere (if a single method can work for all needs).
+            nll_hessian = ERGM.covariance_matrix_estimation(features_of_net_samples, method='naive')
+        else:
+            raise ValueError(
+                f"Optimization method {optimization_method} not defined")  # TODO - throw this error in fit()
 
         return nll_grad, nll_hessian
-
 
     def fit(self, observed_network,
             lr=0.001,
@@ -225,51 +310,56 @@ class ERGM():
         ----------
         observed_network : np.ndarray
             The adjacency matrix of the observed network.
-        
+
         lr : float
             The learning rate for the optimization.
-        
+
         opt_steps : int
             The number of optimization steps to run.
-        
+
         steps_for_decay : int
             The number of steps after which to decay the optimization params. (## TODO - Pick a different step value for different params? Right now all params are decayed with the same interval)
-        
+
         lr_decay_pct : float
             The decay factor for the learning rate
-        
+
         l2_grad_thresh : float
             The threshold for the L2 norm of the gradient to stop the optimization.
-        
+
         sliding_grad_window_k : int
             The size of the sliding window for the gradient, for which we use to calculate the mean gradient norm. This value is then tested against l2_grad_thresh to decide whether optimization halts.
-        
+
         max_sliding_window_size : int
             The maximum size of the sliding window for the gradient.
-        
+
         max_nets_for_sample : int
             The maximum number of networks to sample when approximating the expected network statistics (i.e. E[g(y)])
-        
+
         sample_pct_growth : float
             The percentage growth of the number of networks to sample, which we want to increase over time
-    
-            
+
+
         """
+        # As in the constructor, the sample size must be even.
+        if max_nets_for_sample % 2 != 0:
+            max_nets_for_sample += 1
+
         self._thetas = self._get_random_thetas(sampling_method="uniform")
         self.optimization_iter = 0
-      
+
         print(f"Initial thetas - {self._thetas}")
         print("optimization started")
 
         self.optimization_start_time = time.time()
         num_of_features = self._network_statistics.num_of_features
-        
+
         if convergence_criterion == "hotelling":
-            hotelling_critical_value = f.ppf(1-hotelling_confidence, num_of_features, self.sample_size - num_of_features) # F(p, n-p) TODO - doc this better
+            hotelling_critical_value = f.ppf(1 - hotelling_confidence, num_of_features,
+                                             self.sample_size - num_of_features)  # F(p, n-p) TODO - doc this better
 
         grads = np.zeros((opt_steps, num_of_features))
         hotelling_statistics = []
-        
+
         prev_cov_matrix = np.ones((num_of_features, num_of_features))
 
         seed_network = None
@@ -280,12 +370,15 @@ class ERGM():
 
                 if self.sample_size < max_nets_for_sample:
                     self.sample_size *= (1 + sample_pct_growth)
-                    self.sample_size = np.min(
-                        [int(self.sample_size), max_nets_for_sample])
-                    print(f"\t Sample size increased at step {i+1} to {self.sample_size}")
-                
+                    self.sample_size = np.min([int(self.sample_size), max_nets_for_sample])
+                    # As in the constructor, the sample size must be even.
+                    if self.sample_size % 2 != 0:
+                        self.sample_size += 1
+                    print(f"\t Sample size increased at step {i + 1} to {self.sample_size}")
+
                     if convergence_criterion == "hotelling":
-                        hotelling_critical_value = f.ppf(1-hotelling_confidence, num_of_features, self.sample_size - num_of_features) # F(p, n-p) TODO - doc this better
+                        hotelling_critical_value = f.ppf(1 - hotelling_confidence, num_of_features,
+                                                         self.sample_size - num_of_features)  # F(p, n-p) TODO - doc this better
 
                 if sliding_grad_window_k < max_sliding_window_size:
                     sliding_grad_window_k *= (1 + sample_pct_growth)
@@ -298,12 +391,12 @@ class ERGM():
             features_of_net_samples = self._network_statistics.calculate_sample_statistics(networks_for_sample)
             observed_features = self._network_statistics.calculate_statistics(observed_network)
 
-            grad, hessian = self._calculate_optimization_step(observed_features, features_of_net_samples, optimization_method)
-
+            grad, hessian = self._calculate_optimization_step(observed_features, features_of_net_samples,
+                                                              optimization_method)
             if optimization_method == "newton_raphson":
                 inv_hessian = np.linalg.pinv(hessian)
                 self._thetas = self._thetas - lr * inv_hessian @ grad
-            
+
             elif optimization_method == "gradient_descent":
                 self._thetas = self._thetas - lr * grad
 
@@ -315,22 +408,25 @@ class ERGM():
             if i % steps_for_decay == 0:
                 delta_t = time.time() - self.optimization_start_time
                 # print(f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
-                print(f"Step {i+1} - lr: {lr:.10f}, time from start: {delta_t:.2f}, window_grad: {sliding_window_grads:.2f}")
+                print(
+                    f"Step {i + 1} - lr: {lr:.10f}, time from start: {delta_t:.2f}, window_grad: {sliding_window_grads:.2f}")
 
             if convergence_criterion == "hotelling":
-                estimated_cov_matrix = self.covariance_matrix_estimation(features_of_net_samples, method=cov_matrix_estimation_method, num_batches=cov_matrix_num_batches)
+                estimated_cov_matrix = ERGM.covariance_matrix_estimation(features_of_net_samples,
+                                                                    method=cov_matrix_estimation_method,
+                                                                    num_batches=cov_matrix_num_batches)
                 inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
-                mean_features = np.mean(features_of_net_samples, axis=1) # TODO - this is calculated in `_calculate_optimization_step()` and covariance estimation, consider sharing the two
+                mean_features = np.mean(features_of_net_samples,
+                                        axis=1)  # TODO - this is calculated in `_calculate_optimization_step()` and covariance estimation, consider sharing the two
 
                 dist = mahalanobis(observed_features, mean_features, inv_estimated_cov_matrix)
                 # dist = mahalanobis(observed_features, mean_features, inv_hessian)
-                
-                
 
                 hotelling_t_statistic = self.sample_size * dist * dist
 
                 # (n-p / p(n-1))* t^2 ~ F_p, n-p  (#TODO - give reference for this)
-                hotelling_as_f_statistic = ((self.sample_size - num_of_features) / (num_of_features * (self.sample_size - 1))) * hotelling_t_statistic
+                hotelling_as_f_statistic = ((self.sample_size - num_of_features) / (
+                        num_of_features * (self.sample_size - 1))) * hotelling_t_statistic
 
                 hotelling_statistics.append({
                     "dist": dist,
@@ -341,8 +437,8 @@ class ERGM():
                     # "inv_hessian_norm": np.linalg.norm(inv_hessian)
                 })
 
-                # FOR DEBUG ONLY - 
-                if np.linalg.norm(inv_estimated_cov_matrix) / np.linalg.norm(prev_cov_matrix) > 10**6:
+                # FOR DEBUG ONLY -
+                if np.linalg.norm(inv_estimated_cov_matrix) / np.linalg.norm(prev_cov_matrix) > 10 ** 6:
                     print(f"Covariance matrix decreased in iteration {i}")
                     print(f"Prev inv_cov matrix norm - {np.linalg.norm(prev_cov_matrix)}")
                     print(f"Current inv_cov matrix norm - {np.linalg.norm(inv_estimated_cov_matrix)}")
@@ -351,10 +447,11 @@ class ERGM():
 
                 if hotelling_as_f_statistic <= hotelling_critical_value:
                     print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
-                    print(f"hotelling - {hotelling_as_f_statistic}, hotelling_critical_value={hotelling_critical_value}")
+                    print(
+                        f"hotelling - {hotelling_as_f_statistic}, hotelling_critical_value={hotelling_critical_value}")
                     grads = grads[:i]
                     break
-                
+
 
             elif convergence_criterion == "zero_grad_norm":
                 if np.linalg.norm(sliding_window_grads) <= l2_grad_thresh:
@@ -362,19 +459,19 @@ class ERGM():
                     grads = grads[:i]
                     break
             else:
-                raise ValueError(f"Convergence criterion {convergence_criterion} not defined")   
+                raise ValueError(f"Convergence criterion {convergence_criterion} not defined")
 
         return grads, hotelling_statistics
 
     def calculate_probability(self, W: np.ndarray):
         """
         Calculate the probability of a graph under the ERGM model.
-        
+
         Parameters
         ----------
         W : np.ndarray
             A connectivity matrix.
-        
+
         Returns
         -------
         prob : float
@@ -392,7 +489,7 @@ class ERGM():
     def sample_network(self, sampling_method="NaiveMetropolisHastings", seed_network=None, steps=500):
         """
         Sample a network from the ERGM model using MCMC methods
-        
+
         Parameters
         ----------
         sampling_method : str
@@ -401,7 +498,7 @@ class ERGM():
             A seed connectivity matrix to start the MCMC sampler from.
         steps : int
             The number of steps to run the MCMC sampler.
-        
+
         Returns
         -------
         W : np.ndarray

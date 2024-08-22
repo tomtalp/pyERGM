@@ -1,6 +1,7 @@
 import numpy as np
 import networkx as nx
 from numba import njit
+from scipy.sparse.linalg import eigsh
 
 import random
 
@@ -136,6 +137,7 @@ def get_greatest_convex_minorant(xs: np.ndarray, ys: np.ndarray):
 
     return cur_proposed_minorant
 
+
 @njit
 def get_random_edges_to_flip(num_nodes, num_pairs):
     """
@@ -147,10 +149,8 @@ def get_random_edges_to_flip(num_nodes, num_pairs):
 
     edges_to_flip[0, :] = np.random.choice(num_nodes, size=num_pairs)
 
-    diff = np.random.choice(num_nodes-1, size=num_pairs)+1
+    diff = np.random.choice(num_nodes - 1, size=num_pairs) + 1
 
     edges_to_flip[1, :] = (edges_to_flip[0, :] - diff) % num_nodes
 
     return edges_to_flip
-
-
