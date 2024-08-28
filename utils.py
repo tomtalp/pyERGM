@@ -2,7 +2,7 @@ import numpy as np
 import networkx as nx
 from numba import njit
 from scipy.sparse.linalg import eigsh
-
+from typing import Collection
 import random
 
 
@@ -154,3 +154,151 @@ def get_random_edges_to_flip(num_nodes, num_pairs):
     edges_to_flip[1, :] = (edges_to_flip[0, :] - diff) % num_nodes
 
     return edges_to_flip
+
+def benchmark_generator(W, metrics, is_directed, **kwargs):
+    """
+    Takes an example of a network and a set of metrics, and generates a benchmark dataset by performing
+    a grid-search across many different optimization parameters, which can be passed as kwargs.
+
+    Parameters
+    ----
+    W : np.ndarray
+        The adjacency matrix of the network.
+    metrics : Collection[Metric]
+        A collection of metrics to be used in the ERGM.
+    
+    expected_thetas: dict
+        A collection of parameter names and their expected values.
+        e.g. {edges": 0.5, "sender_1": 0.1, "sender_2": -0.2}
+    
+    results_path: str
+        The path to save the benchmark results to.
+    """
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import pandas as pd
+
+    import time, datetime
+    import os
+    import itertools
+
+    from ergm import ERGM
+    
+    dt = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    path_name = kwargs.get("results_path", f"benchmarks/{dt}")
+    os.makedirs(os.path.dirname(path_name), exist_ok=True)
+    print(f"Saving benchmark results to {path_name}")
+
+    n = W.shape[0]
+    parameters = {
+        "opt_steps": [30],
+        "sample_size": [1000, 5000, 10000, 20000],
+        "n_mcmc_steps": [n],
+        "convergence_criterion": ["hotelling", "zero_grad_norm"],
+        "hotelling_conf": [0.99],
+        "lr": [0.001, 0.01, 0.1, 0.5, 1],
+        "lr_decay_pct": [0.1, 0.01],
+        "cov_matrix_estimation_method": ["naive", "batch", "multivariate_initial_sequence"],
+        "estimated_p_seed": [np.sum(W) / (n * (n - 1))],
+        "optimization_method": "newton_raphson",
+        "steps_for_decay": 1,
+        "sliding_grad_window_k": 5,
+        "sample_pct_growth": 0.05,
+    }
+
+    expected_thetas = kwargs.get("expected_thetas", None)
+
+    all_params = list(itertools.product(*parameters.values()))
+
+    data = []
+    for i, param_values in enumerate(all_params):
+        params = {p: v for p, v in zip(parameters.keys(), param_values)}
+        print(f"{i+1}/{len(all_params)} Working on parameters - ")
+        print(params)
+
+        start_time = time.time()
+        model = ERGM(n, 
+                    metrics,
+                    is_directed=is_directed, 
+                    sample_size=params["sample_size"], 
+                    n_mcmc_steps=params["n_mcmc_steps"],
+                    seed_MCMC_proba=params["estimated_p_seed"]
+                )
+    
+        grads, hotelling_statistics = model.fit(W, 
+                                lr=params["lr"], 
+                                lr_decay_pct=params["lr_decay_pct"],
+                                opt_steps=params["opt_steps"],
+                                convergence_criterion=params["convergence_criterion"],
+                                hotelling_confidence=params["hotelling_conf"],
+                                cov_matrix_estimation_method=params["cov_matrix_estimation_method"],
+                                optimization_method=params["optimization_method"],
+                                steps_for_decay=params["steps_for_decay"],
+                                sliding_grad_window_k=params["sliding_grad_window_k"],
+                                sample_pct_growth=params["sample_pct_growth"],
+                                )
+    
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        converged = model._converged
+        print(f"Finished in {elapsed_time} seconds, converged = {converged}")
+
+        output_data = params.copy()
+        output_data["elapsed_time"] = elapsed_time
+        output_data["converged"] = converged
+        output_data["thetas"] = model._thetas
+
+        params_path_name = f"{path_name}/params_{i+1}.txt"
+        with open(params_path_name, "w") as f:
+            f.write(str(params))
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        sns.scatterplot(grads, ax=ax, legend=False)
+        ax.set(xlabel='Steps', ylabel='Gradients')
+        ax.set_title("Gradients over time (Colors represent metrics)")
+        plt.savefig(f"gradients_{i}.png")
+
+        
+        hotelling_df = pd.DataFrame(hotelling_statistics)
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        sns.scatterplot(hotelling_df["hotelling_F"])
+        sns.scatterplot(hotelling_df["dist"])
+        sns.scatterplot(hotelling_df["inv_cov_norm"])
+        sns.scatterplot(hotelling_df["critical_val"])
+        ax.set_yscale("log")
+
+        ax.legend(["F value (Hotelling)", "Mahalanobis dist.", "inv_cov_norm", "critical_val", ], loc="upper right")
+        ax.set(xlabel='Iteration', ylabel='convergence metric (logscale)')
+        ax.set_title("Convergence metrics over time")
+        plt.savefig(f"hotelling_{i}.png")
+
+        if expected_thetas:
+            true_predictions = list(expected_thetas.values())
+            fitted_thetas = model._thetas
+            mse = np.mean((np.array(true_predictions) - np.array(fitted_thetas)) ** 2)            
+            output_data["mse"] = mse
+
+            fig, ax = plt.subplots(figsize=(8, 6))
+            sns.scatterplot(x=true_predictions, y=fitted_thetas)
+
+            min_x = min(min(true_predictions), min(fitted_thetas))
+            max_x = max(max(true_predictions), max(fitted_thetas))
+
+            sns.lineplot(x=[min_x, max_x], y=[min_x, max_x], color="red", linestyle="--", alpha=0.5)
+            ax.set(xlabel='R thetas', ylabel='pyERGM thetas')
+            ax.set_title(f"Comparison of pyERGM & R thetas. MSE = {mse}")
+
+            plt.savefig(f"thetas_comparison_{i}.png")
+
+
+
+        break
+    # Expected usage - 
+    # W = ...
+    # metrics = ...
+
+    # from utils import benchmark_generator
+    # benchmark = benchmark_generator(W, metrics)
+    # benchmark.to_csv()
+

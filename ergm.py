@@ -361,6 +361,7 @@ class ERGM():
 
         self._thetas = self._get_random_thetas(sampling_method="uniform")
         self.optimization_iter = 0
+        self._converged = False
 
         print(f"Initial thetas - {self._thetas}")
         print("optimization started")
@@ -470,6 +471,8 @@ class ERGM():
                     print(
                         f"hotelling - {hotelling_as_f_statistic}, hotelling_critical_value={hotelling_critical_value}")
                     grads = grads[:i]
+
+                    self._converged = True
                     break
 
 
