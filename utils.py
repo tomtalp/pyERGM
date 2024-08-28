@@ -177,44 +177,50 @@ def benchmark_generator(W, metrics, is_directed, **kwargs):
     import seaborn as sns
     import matplotlib.pyplot as plt
     import pandas as pd
-
-    import time, datetime
-    import os
-    import itertools
-
+    import time, datetime, pickle, os, itertools, json
     from ergm import ERGM
+
+    plt.ioff() # Why doesn't this work?
     
     dt = datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
     path_name = kwargs.get("results_path", f"benchmarks/{dt}")
-    os.makedirs(os.path.dirname(path_name), exist_ok=True)
+    os.makedirs(path_name, exist_ok=True)
     print(f"Saving benchmark results to {path_name}")
 
     n = W.shape[0]
+    # TODO - read from a config file or something?
     parameters = {
-        "opt_steps": [30],
-        "sample_size": [1000, 5000, 10000, 20000],
+        "opt_steps": [50],
+        "sample_size": [1000, 5000, 10000],
         "n_mcmc_steps": [n],
+
         "convergence_criterion": ["hotelling", "zero_grad_norm"],
+
         "hotelling_conf": [0.99],
-        "lr": [0.001, 0.01, 0.1, 0.5, 1],
-        "lr_decay_pct": [0.1, 0.01],
-        "cov_matrix_estimation_method": ["naive", "batch", "multivariate_initial_sequence"],
+
+        "lr": [0.2, 0.5, 1],
+        "lr_decay_pct": [0.1],
+
+
+        "cov_matrix_estimation_method": ["naive", "batch"],
+        # "cov_matrix_estimation_method": ["naive", "batch", "multivariate_initial_sequence"],
+
         "estimated_p_seed": [np.sum(W) / (n * (n - 1))],
-        "optimization_method": "newton_raphson",
-        "steps_for_decay": 1,
-        "sliding_grad_window_k": 5,
-        "sample_pct_growth": 0.05,
+        "optimization_method": ["newton_raphson"],
+        "steps_for_decay": [1],
+        "sliding_grad_window_k": [5],
+        "sample_pct_growth": [0.05],
     }
 
     expected_thetas = kwargs.get("expected_thetas", None)
 
     all_params = list(itertools.product(*parameters.values()))
 
-    data = []
+    all_data = []
     for i, param_values in enumerate(all_params):
         params = {p: v for p, v in zip(parameters.keys(), param_values)}
         print(f"{i+1}/{len(all_params)} Working on parameters - ")
-        print(params)
+        
 
         start_time = time.time()
         model = ERGM(n, 
@@ -241,59 +247,64 @@ def benchmark_generator(W, metrics, is_directed, **kwargs):
         end_time = time.time()
         elapsed_time = end_time - start_time
         converged = model._converged
-        print(f"Finished in {elapsed_time} seconds, converged = {converged}")
+        print(f"\tFinished in {elapsed_time} seconds, converged = {converged}")
 
         output_data = params.copy()
         output_data["elapsed_time"] = elapsed_time
         output_data["converged"] = converged
+        output_data["final_opt_steps"] = len(grads)
         output_data["thetas"] = model._thetas
+        output_data["idx"] = i+1
 
-        params_path_name = f"{path_name}/params_{i+1}.txt"
-        with open(params_path_name, "w") as f:
-            f.write(str(params))
+        fig, ax = plt.subplots(figsize=(12, 5), ncols=3, nrows=1)
+        plt.tight_layout()
 
-        fig, ax = plt.subplots(figsize=(10, 8))
-        sns.scatterplot(grads, ax=ax, legend=False)
-        ax.set(xlabel='Steps', ylabel='Gradients')
-        ax.set_title("Gradients over time (Colors represent metrics)")
-        plt.savefig(f"gradients_{i}.png")
+        formatted_params = f""" {output_data["idx"]}: converged={output_data["converged"]}, lr={output_data["lr"]}, lr_decay_pct={output_data["lr_decay_pct"]}, sample_size={output_data["sample_size"]}, n_mcmc_steps={output_data["n_mcmc_steps"]}, \n opt_steps={output_data["opt_steps"]}, hotelling_conf={output_data["hotelling_conf"]}, cov_matrix_estimation_method={output_data["cov_matrix_estimation_method"]}"""
+        suptitle = plt.suptitle(formatted_params, fontsize=12, y=-0.1)
 
-        
-        hotelling_df = pd.DataFrame(hotelling_statistics)
 
-        fig, ax = plt.subplots(figsize=(8, 6))
-        sns.scatterplot(hotelling_df["hotelling_F"])
-        sns.scatterplot(hotelling_df["dist"])
-        sns.scatterplot(hotelling_df["inv_cov_norm"])
-        sns.scatterplot(hotelling_df["critical_val"])
-        ax.set_yscale("log")
+        sns.scatterplot(grads, ax=ax[0], legend=False)
+        ax[0].set(xlabel='Steps', ylabel='Gradients')
+        ax[0].set_title(f"Gradient over time")
 
-        ax.legend(["F value (Hotelling)", "Mahalanobis dist.", "inv_cov_norm", "critical_val", ], loc="upper right")
-        ax.set(xlabel='Iteration', ylabel='convergence metric (logscale)')
-        ax.set_title("Convergence metrics over time")
-        plt.savefig(f"hotelling_{i}.png")
+        if params["convergence_criterion"] == "hotelling":
+            hotelling_df = pd.DataFrame(hotelling_statistics)
+            sns.scatterplot(hotelling_df["hotelling_F"], ax=ax[1])
+            sns.scatterplot(hotelling_df["dist"], ax=ax[1])
+            sns.scatterplot(hotelling_df["inv_cov_norm"], ax=ax[1])
+            sns.scatterplot(hotelling_df["critical_val"], ax=ax[1])
+            ax[1].set_yscale("log")
+
+            ax[1].legend(["F value (Hotelling)", "Mahalanobis dist.", "inv_cov_norm", "critical_val", ], loc="upper right")
+            ax[1].set(xlabel='Iteration', ylabel='convergence metric (logscale)')
+            ax[1].set_title(f"Convergence metrics")
 
         if expected_thetas:
             true_predictions = list(expected_thetas.values())
             fitted_thetas = model._thetas
             mse = np.mean((np.array(true_predictions) - np.array(fitted_thetas)) ** 2)            
             output_data["mse"] = mse
-
-            fig, ax = plt.subplots(figsize=(8, 6))
-            sns.scatterplot(x=true_predictions, y=fitted_thetas)
+            print(f"\tMSE with true thetas = {mse}")
+            sns.scatterplot(x=true_predictions, y=fitted_thetas, ax=ax[2])
 
             min_x = min(min(true_predictions), min(fitted_thetas))
             max_x = max(max(true_predictions), max(fitted_thetas))
 
-            sns.lineplot(x=[min_x, max_x], y=[min_x, max_x], color="red", linestyle="--", alpha=0.5)
-            ax.set(xlabel='R thetas', ylabel='pyERGM thetas')
-            ax.set_title(f"Comparison of pyERGM & R thetas. MSE = {mse}")
+            sns.lineplot(x=[min_x, max_x], y=[min_x, max_x], color="red", linestyle="--", alpha=0.5, ax=ax[2])
+            ax[2].set(xlabel='Real thetas', ylabel='Model thetas')
+            ax[2].set_title(f"MSE = {mse}")
 
-            plt.savefig(f"thetas_comparison_{i}.png")
-
-
-
+        plt.savefig(f"{path_name}/{i+1}.png", bbox_inches='tight',bbox_extra_artists=[suptitle])
+        # plt.savefig(f"{path_name}/{i+1}.png")
+        final_output_path = f"{path_name}/metadata_{i+1}.pkl"
+        with open(final_output_path, "wb") as f:
+            pickle.dump(output_data, f)
+        
+        all_data.append(output_data)
         break
+
+    return all_data
+    
     # Expected usage - 
     # W = ...
     # metrics = ...

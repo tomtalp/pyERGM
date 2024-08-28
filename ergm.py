@@ -317,7 +317,8 @@ class ERGM():
             convergence_criterion="hotelling",
             cov_matrix_estimation_method="batch",
             cov_matrix_num_batches=25,
-            hotelling_confidence=0.99):
+            hotelling_confidence=0.99,
+            verbose=False):
         """
         Fit an ERGM model to a given network.
 
@@ -353,6 +354,9 @@ class ERGM():
         sample_pct_growth : float
             The percentage growth of the number of networks to sample, which we want to increase over time
 
+        verbose : bool
+            Whether to print verbose output during optimization.
+
 
         """
         # As in the constructor, the sample size must be even.
@@ -363,8 +367,8 @@ class ERGM():
         self.optimization_iter = 0
         self._converged = False
 
-        print(f"Initial thetas - {self._thetas}")
-        print("optimization started")
+        if verbose:
+            print("optimization started")
 
         self.optimization_start_time = time.time()
         num_of_features = self._network_statistics.num_of_features
@@ -376,7 +380,6 @@ class ERGM():
         grads = np.zeros((opt_steps, num_of_features))
         hotelling_statistics = []
 
-        prev_cov_matrix = np.ones((num_of_features, num_of_features))
 
         seed_network = None
 
@@ -426,12 +429,21 @@ class ERGM():
             idx_for_sliding_grad = np.max([0, i - sliding_grad_window_k + 1])
             sliding_window_grads = grads[idx_for_sliding_grad:i + 1].mean()
 
-            if i % steps_for_decay == 0:
+            if i % steps_for_decay == 0 and verbose:
                 delta_t = time.time() - self.optimization_start_time
                 # print(f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
                 print(
                     f"Step {i + 1} - lr: {lr:.10f}, time from start: {delta_t:.2f}, window_grad: {sliding_window_grads:.2f}")
 
+            
+            # TODO - this is a hack for benchmarking. Implement a smarter way to do this
+            # Detect exploding gradients
+            # if i >= 10:
+            #     if np.linalg.norm(grads[i]) > np.linalg.norm(grads[i-1]) and np.linalg.norm(grads[i-1]) > np.linalg.norm(grads[i-2]) and np.linalg.norm(grads[i-2]) > np.linalg.norm(grads[i-3]):
+            #         print("Exploding gradients")
+            #         self._converged = False
+            #         break
+            
             if convergence_criterion == "hotelling":
                 estimated_cov_matrix = ERGM.covariance_matrix_estimation(features_of_net_samples,
                                                                          method=cov_matrix_estimation_method,
@@ -457,15 +469,6 @@ class ERGM():
                     "inv_cov_norm": np.linalg.norm(inv_estimated_cov_matrix),
                     # "inv_hessian_norm": np.linalg.norm(inv_hessian)
                 })
-
-                # FOR DEBUG ONLY -
-                if np.linalg.norm(inv_estimated_cov_matrix) / np.linalg.norm(prev_cov_matrix) > 10 ** 6:
-                    print(f"Covariance matrix decreased in iteration {i}")
-                    print(f"Prev inv_cov matrix norm - {np.linalg.norm(prev_cov_matrix)}")
-                    print(f"Current inv_cov matrix norm - {np.linalg.norm(inv_estimated_cov_matrix)}")
-
-                prev_cov_matrix = inv_estimated_cov_matrix
-
                 if hotelling_as_f_statistic <= hotelling_critical_value:
                     print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
                     print(
