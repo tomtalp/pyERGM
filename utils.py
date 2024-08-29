@@ -2,7 +2,7 @@ import numpy as np
 import networkx as nx
 from numba import njit
 from scipy.sparse.linalg import eigsh
-
+import torch
 import random
 
 
@@ -154,3 +154,36 @@ def get_random_edges_to_flip(num_nodes, num_pairs):
     edges_to_flip[1, :] = (edges_to_flip[0, :] - diff) % num_nodes
 
     return edges_to_flip
+
+def np_tensor_to_sparse_matrix(np_tensor: np.ndarray) -> torch.Tensor:
+    """
+    Receives a numpy tensor and converts it to a sparse Tensor, using Torch.
+    TODO - Support different types of Sparse Matrix data structures? More efficient conversion?
+    """
+    return torch.from_numpy(np_tensor).to_sparse()
+
+def transpose_sparse_sample_matrices(sparse_tensor: torch.Tensor) -> torch.Tensor:
+    """
+    Transpose a sparse tensor that represents k matrices of dimension n x n.
+    The transpose operation occurs along the dimension of sample (i.e. each matrix is transposed separately)
+
+    Parameters
+    ----------
+    sparse_tensor: torch.Tensor
+        A sparse tensor of dimension (n, n, k) representing k matrices of dim (n,n)
+
+    Returns
+    -------
+    transposed_tensor: torch.Tensor
+        The same tensor but matrices are transposed
+
+    """
+    n = sparse_tensor.shape[0]
+    k = sparse_tensor.shape[2]
+    
+    indices = sparse_tensor.indices().type(torch.int64)
+    transposed_indices = torch.stack([indices[1], indices[0], indices[2]])
+    values = sparse_tensor.values()
+
+    return torch.sparse_coo_tensor(transposed_indices, values, (n, n, k))
+

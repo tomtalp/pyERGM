@@ -3,6 +3,7 @@ from typing import Collection
 from copy import deepcopy
 
 import numpy as np
+import torch
 import networkx as nx
 from numba import njit
 
@@ -84,7 +85,7 @@ class NumberOfEdgesUndirected(Metric):
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         return -1 if current_network[indices[0], indices[1]] else 1
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
+    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         """
         Sum each matrix over all matrices in sample
         """
@@ -108,14 +109,18 @@ class NumberOfEdgesDirected(Metric):
         return -1 if current_network[indices[0], indices[1]] else 1
 
     @staticmethod
-    @njit
-    def calculate_for_sample(networks_sample: np.ndarray):
+    # @njit
+    def calculate_for_sample(networks_sample: np.ndarray | torch.Tensor):
         """
         Sum each matrix over all matrices in sample
         """
-        n = networks_sample.shape[0]
-        reshaped_networks_sample = networks_sample.reshape(n ** 2, networks_sample.shape[2])
-        return np.sum(reshaped_networks_sample, axis=0)
+        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
+            return networks_sample.sum(axis=(0, 1))
+        elif isinstance(networks_sample, np.ndarray):
+            n = networks_sample.shape[0]
+            reshaped_networks_sample = networks_sample.reshape(n ** 2, networks_sample.shape[2])
+            return np.sum(reshaped_networks_sample, axis=0)
+        
 
 
 # TODO: change the name of this one to undirected and implement also a directed version?
@@ -187,7 +192,7 @@ class InDegree(BaseDegreeVector):
         diff[j] = sign
         return diff[self.base_idx:]
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
+    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         return networks_sample.sum(axis=0)[self.base_idx:]
 
 
@@ -215,7 +220,7 @@ class OutDegree(BaseDegreeVector):
         diff[i] = sign
         return diff[self.base_idx:]
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
+    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         return networks_sample.sum(axis=1)[self.base_idx:]
 
 
@@ -300,8 +305,12 @@ class TotalReciprocity(Metric):
 
     @staticmethod
     # @njit
-    def calculate_for_sample(networks_sample: np.ndarray):
-        return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
+    def calculate_for_sample(networks_sample: np.ndarray | torch.Tensor):
+        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
+            transposed_sparse_tensor = transpose_sparse_sample_matrices(networks_sample)
+            return torch.sum(networks_sample * transposed_sparse_tensor, axis=(0,1))
+        elif isinstance(networks_sample, np.ndarray):
+            return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
 
 
 class MetricsCollection:
@@ -434,10 +443,16 @@ class MetricsCollection:
             if metric.requires_graph:
                 networks = networks_as_graphs
             else:
+                # networks = np_tensor_to_sparse_matrix(networks_sample)
                 networks = networks_sample
 
-            features_of_net_samples[feature_idx:feature_idx + n_features_from_metric] = metric.calculate_for_sample(
-                networks)
+            features = metric.calculate_for_sample(networks)
+            if isinstance(features, torch.Tensor):
+                if features.is_sparse:
+                    features = features.to_dense()
+                features = features.numpy()
+
+            features_of_net_samples[feature_idx:feature_idx + n_features_from_metric] = features
             feature_idx += n_features_from_metric
 
         return features_of_net_samples
