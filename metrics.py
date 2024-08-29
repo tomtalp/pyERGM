@@ -444,7 +444,7 @@ class MetricsCollection:
                 networks = networks_as_graphs
             else:
                 # networks = networks_sample
-                networks = np_tensor_to_sparse_matrix(networks_sample)
+                networks = np_tensor_to_sparse_tensor(networks_sample)
                 
 
             features = metric.calculate_for_sample(networks)

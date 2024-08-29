@@ -155,7 +155,7 @@ def get_random_edges_to_flip(num_nodes, num_pairs):
 
     return edges_to_flip
 
-def np_tensor_to_sparse_matrix(np_tensor: np.ndarray) -> torch.Tensor:
+def np_tensor_to_sparse_tensor(np_tensor: np.ndarray) -> torch.Tensor:
     """
     Receives a numpy tensor and converts it to a sparse Tensor, using Torch.
     TODO - Support different types of Sparse Matrix data structures? More efficient conversion?

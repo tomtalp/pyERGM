@@ -127,7 +127,7 @@ class TestSparseTensorUtilities(unittest.TestCase):
         np_tensor = np.random.choice([0, 1],  size=(5, 5, 1), p=[0.8, 0.2])
         expected_np_tensor_T = np.transpose(np_tensor, axes=(1, 0, 2)) 
 
-        sparse_tensor = np_tensor_to_sparse_matrix(np_tensor)
+        sparse_tensor = np_tensor_to_sparse_tensor(np_tensor)
 
         self.assertTrue(sparse_tensor.is_sparse)
 
