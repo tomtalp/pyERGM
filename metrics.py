@@ -308,7 +308,7 @@ class TotalReciprocity(Metric):
     def calculate_for_sample(networks_sample: np.ndarray | torch.Tensor):
         if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
             transposed_sparse_tensor = transpose_sparse_sample_matrices(networks_sample)
-            return torch.sum(networks_sample * transposed_sparse_tensor, axis=(0,1))
+            return torch.sum(networks_sample * transposed_sparse_tensor, axis=(0,1)) / 2
         elif isinstance(networks_sample, np.ndarray):
             return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
 
@@ -436,6 +436,8 @@ class MetricsCollection:
         if self.requires_graph:
             networks_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in networks_sample]
 
+        networks_as_sparse_tensor = np_tensor_to_sparse_tensor(networks_sample)
+
         feature_idx = 0
         for metric in self.metrics:
             n_features_from_metric = metric.get_effective_feature_count(self.n_nodes)
@@ -444,9 +446,8 @@ class MetricsCollection:
                 networks = networks_as_graphs
             else:
                 # networks = networks_sample
-                networks = np_tensor_to_sparse_tensor(networks_sample)
+                networks = networks_as_sparse_tensor
                 
-
             features = metric.calculate_for_sample(networks)
             if isinstance(features, torch.Tensor):
                 if features.is_sparse:
