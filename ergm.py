@@ -11,6 +11,7 @@ import sampling
 from utils import *
 from metrics import *
 
+import gc
 
 class ERGM():
     def __init__(self,
@@ -424,7 +425,7 @@ class ERGM():
 
             idx_for_sliding_grad = np.max([0, i - sliding_grad_window_k + 1])
             sliding_window_grads = grads[idx_for_sliding_grad:i + 1].mean()
-
+            
             if i % steps_for_decay == 0:
                 delta_t = time.time() - self.optimization_start_time
                 # print(f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
@@ -480,6 +481,11 @@ class ERGM():
                     break
             else:
                 raise ValueError(f"Convergence criterion {convergence_criterion} not defined")
+
+        del networks_for_sample
+        del features_of_net_samples
+        del observed_features
+        gc.collect()
 
         return grads, hotelling_statistics
 

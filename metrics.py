@@ -89,6 +89,9 @@ class NumberOfEdgesUndirected(Metric):
         """
         Sum each matrix over all matrices in sample
         """
+        if isinstance(networks_sample, torch.Tensor):
+            return networks_sample.sum(axis=(0, 1)) // 2
+        
         return networks_sample.sum(axis=(0, 1)) // 2
 
 
