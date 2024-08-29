@@ -443,8 +443,9 @@ class MetricsCollection:
             if metric.requires_graph:
                 networks = networks_as_graphs
             else:
-                # networks = np_tensor_to_sparse_matrix(networks_sample)
-                networks = networks_sample
+                # networks = networks_sample
+                networks = np_tensor_to_sparse_matrix(networks_sample)
+                
 
             features = metric.calculate_for_sample(networks)
             if isinstance(features, torch.Tensor):
