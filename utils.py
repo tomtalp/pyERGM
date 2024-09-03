@@ -154,3 +154,40 @@ def get_random_edges_to_flip(num_nodes, num_pairs):
     edges_to_flip[1, :] = (edges_to_flip[0, :] - diff) % num_nodes
 
     return edges_to_flip
+
+@njit
+def approximate_auto_correlation_function(features_of_net_samples: np.ndarray) -> np.ndarray:
+    """
+    This is gamma hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
+    """
+    # TODO: it must be possible to vectorize this calculation and spare the for loop. Maybe somehow use the
+    #  convolution theorem and go back and forth to the frequency domain using FFT for calculating correlations.
+    features_sample_mean = features_of_net_samples.sum(axis=1) / features_of_net_samples.shape[1]
+    num_features = features_sample_mean.shape[0]
+    features_mean_diff = features_of_net_samples - np.reshape(features_sample_mean.copy(), (num_features, 1))
+    sample_size = features_of_net_samples.shape[1]
+    auto_correlation_func = np.zeros((sample_size, num_features, num_features))
+    for k in range(sample_size):
+        cur_head = features_mean_diff[:, k:].T.copy()
+        cur_tail = features_mean_diff[:, :sample_size - k].T.copy()
+        auto_correlation_func[k] = 1 / sample_size * (
+                np.reshape(cur_tail, (sample_size - k, num_features, 1)) @
+                np.reshape(cur_head, (sample_size - k, 1, num_features))
+        ).sum(axis=0)
+    return auto_correlation_func
+
+
+@njit
+def calc_capital_gammas(auto_corr_funcs: np.ndarray) -> np.ndarray:
+    """
+    This is the capital gammas hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
+    They are simply summations over pairs of consecutive even and odd indices of the auto correlation function (gammas).
+    """
+    # From Dai and Jones 2017 - a mean of gamma with its transpose (which corresponds to the negative index with the
+    # same abs value).
+    gamma_tilde = (auto_corr_funcs + np.transpose(auto_corr_funcs, [0, 2, 1])) / 2
+
+    # Note - we assume here an even sample_size, it is forced elsewhere (everytime the sample size is updated).
+    sample_size = gamma_tilde.shape[0]
+    return (gamma_tilde[np.arange(0, sample_size - 1, 2, dtype=int)] +
+            gamma_tilde[np.arange(1, sample_size, 2, dtype=int)])

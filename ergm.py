@@ -123,40 +123,40 @@ class ERGM():
 
         # print(f"Finished generating networks for Z, which is estimated at {self._normalization_factor}")
 
-    @staticmethod
-    # @njit
-    def approximate_auto_correlation_function(features_of_net_samples: np.ndarray) -> np.ndarray:
-        """
-        This is gamma hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
-        """
-        # TODO: it must be possible to vectorize this calculation and spare the for loop. Maybe somehow use the
-        #  convolution theorem and go back and forth to the frequency domain using FFT for calculating correlations.
-        features_mean_diff = features_of_net_samples - features_of_net_samples.mean(axis=1)[:, None]
-        num_features = features_of_net_samples.shape[0]
-        sample_size = features_of_net_samples.shape[1]
-        auto_correlation_func = np.zeros((sample_size, num_features, num_features))
-        for k in range(sample_size):
-            auto_correlation_func[k] = 1 / sample_size * (
-                    features_mean_diff[:, :sample_size - k].T.reshape(sample_size - k, num_features, 1) @
-                    features_mean_diff[:, k:].T.reshape(sample_size - k, 1, num_features)
-            ).sum(axis=0)
-        return auto_correlation_func
+    # @staticmethod
+    # # @njit
+    # def approximate_auto_correlation_function(features_of_net_samples: np.ndarray) -> np.ndarray:
+    #     """
+    #     This is gamma hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
+    #     """
+    #     # TODO: it must be possible to vectorize this calculation and spare the for loop. Maybe somehow use the
+    #     #  convolution theorem and go back and forth to the frequency domain using FFT for calculating correlations.
+    #     features_mean_diff = features_of_net_samples - features_of_net_samples.mean(axis=1)[:, None]
+    #     num_features = features_of_net_samples.shape[0]
+    #     sample_size = features_of_net_samples.shape[1]
+    #     auto_correlation_func = np.zeros((sample_size, num_features, num_features))
+    #     for k in range(sample_size):
+    #         auto_correlation_func[k] = 1 / sample_size * (
+    #                 features_mean_diff[:, :sample_size - k].T.reshape(sample_size - k, num_features, 1) @
+    #                 features_mean_diff[:, k:].T.reshape(sample_size - k, 1, num_features)
+    #         ).sum(axis=0)
+    #     return auto_correlation_func
 
-    @staticmethod
-    # @njit
-    def calc_capital_gammas(auto_corr_funcs: np.ndarray) -> np.ndarray:
-        """
-        This is the capital gammas hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
-        They are simply summations over pairs of consecutive even and odd indices of the auto correlation function (gammas).
-        """
-        # From Dai and Jones 2017 - a mean of gamma with its transpose (which corresponds to the negative index with the
-        # same abs value).
-        gamma_tilde = (auto_corr_funcs + np.transpose(auto_corr_funcs, [0, 2, 1])) / 2
-
-        # Note - we assume here an even sample_size, it is forced elsewhere (everytime the sample size is updated).
-        sample_size = gamma_tilde.shape[0]
-        return (gamma_tilde[np.arange(0, sample_size - 1, 2, dtype=int)] +
-                gamma_tilde[np.arange(1, sample_size, 2, dtype=int)])
+    # @staticmethod
+    # # @njit
+    # def calc_capital_gammas(auto_corr_funcs: np.ndarray) -> np.ndarray:
+    #     """
+    #     This is the capital gammas hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
+    #     They are simply summations over pairs of consecutive even and odd indices of the auto correlation function (gammas).
+    #     """
+    #     # From Dai and Jones 2017 - a mean of gamma with its transpose (which corresponds to the negative index with the
+    #     # same abs value).
+    #     gamma_tilde = (auto_corr_funcs + np.transpose(auto_corr_funcs, [0, 2, 1])) / 2
+    #
+    #     # Note - we assume here an even sample_size, it is forced elsewhere (everytime the sample size is updated).
+    #     sample_size = gamma_tilde.shape[0]
+    #     return (gamma_tilde[np.arange(0, sample_size - 1, 2, dtype=int)] +
+    #             gamma_tilde[np.arange(1, sample_size, 2, dtype=int)])
 
     @staticmethod
     # TODO: all the static methods in this class should be eorted to utils to avoid calling them with ERGM, and then
@@ -226,8 +226,10 @@ class ERGM():
             return batch_size * batches_cov_mat_est
 
         elif method == "multivariate_initial_sequence":
-            auto_corr_funcs = ERGM.approximate_auto_correlation_function(features_of_net_samples)
-            capital_gammas = ERGM.calc_capital_gammas(auto_corr_funcs)
+            # auto_corr_funcs = ERGM.approximate_auto_correlation_function(features_of_net_samples)
+            # capital_gammas = ERGM.calc_capital_gammas(auto_corr_funcs)
+            auto_corr_funcs = approximate_auto_correlation_function(features_of_net_samples)
+            capital_gammas = calc_capital_gammas(auto_corr_funcs)
 
             # In this method, we sum up capital gammas, and choose where to cut the tail (which corresponds to estimates
             # of auto-correlations with large lags within the chain. Naturally, as the lag increases the estimation
