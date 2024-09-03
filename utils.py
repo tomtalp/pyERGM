@@ -155,29 +155,37 @@ def get_random_edges_to_flip(num_nodes, num_pairs):
 
     return edges_to_flip
 
-@njit
+
 def approximate_auto_correlation_function(features_of_net_samples: np.ndarray) -> np.ndarray:
     """
     This is gamma hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
     """
     # TODO: it must be possible to vectorize this calculation and spare the for loop. Maybe somehow use the
     #  convolution theorem and go back and forth to the frequency domain using FFT for calculating correlations.
-    features_sample_mean = features_of_net_samples.sum(axis=1) / features_of_net_samples.shape[1]
-    num_features = features_sample_mean.shape[0]
-    features_mean_diff = features_of_net_samples - np.reshape(features_sample_mean.copy(), (num_features, 1))
+    features_mean_diff = features_of_net_samples - features_of_net_samples.mean(axis=1)[:, None]
+    num_features = features_of_net_samples.shape[0]
     sample_size = features_of_net_samples.shape[1]
     auto_correlation_func = np.zeros((sample_size, num_features, num_features))
     for k in range(sample_size):
-        cur_head = features_mean_diff[:, k:].T.copy()
-        cur_tail = features_mean_diff[:, :sample_size - k].T.copy()
         auto_correlation_func[k] = 1 / sample_size * (
-                np.reshape(cur_tail, (sample_size - k, num_features, 1)) @
-                np.reshape(cur_head, (sample_size - k, 1, num_features))
+                features_mean_diff[:, :sample_size - k].T.reshape(sample_size - k, num_features, 1) @
+                features_mean_diff[:, k:].T.reshape(sample_size - k, 1, num_features)
         ).sum(axis=0)
     return auto_correlation_func
 
 
 @njit
+def approximate_kth_auto_correlation_function(features_mean_diff: np.ndarray, lag: int) -> np.ndarray:
+    num_features = features_mean_diff.shape[0]
+    sample_size = features_mean_diff.shape[1]
+    head = features_mean_diff[:, :sample_size - lag]
+    tail = features_mean_diff[:, lag:]
+    mean_feat_diff_outer_prods = np.zeros((num_features, num_features, sample_size - lag))
+    for i in range(sample_size - lag):
+        mean_feat_diff_outer_prods[:, :, i] = np.outer(head[:, i], tail[:, i])
+    return 1 / sample_size * mean_feat_diff_outer_prods.sum(axis=2)
+
+
 def calc_capital_gammas(auto_corr_funcs: np.ndarray) -> np.ndarray:
     """
     This is the capital gammas hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
@@ -191,3 +199,136 @@ def calc_capital_gammas(auto_corr_funcs: np.ndarray) -> np.ndarray:
     sample_size = gamma_tilde.shape[0]
     return (gamma_tilde[np.arange(0, sample_size - 1, 2, dtype=int)] +
             gamma_tilde[np.arange(1, sample_size, 2, dtype=int)])
+
+
+@njit
+def calc_kth_capital_gamma(features_mean_diff: np.ndarray, k: int) -> np.ndarray:
+    two_k_gamma_hat = approximate_kth_auto_correlation_function(features_mean_diff, 2 * k)
+    two_k_plus_one_gamma_hat = approximate_kth_auto_correlation_function(features_mean_diff, 2 * k + 1)
+    return (two_k_gamma_hat + two_k_gamma_hat.T + two_k_plus_one_gamma_hat + two_k_plus_one_gamma_hat.T) / 2
+
+
+@njit
+def covariance_matrix_estimation(features_of_net_samples: np.ndarray, mean_features_of_net_samples: np.ndarray,
+                                 method='batch', num_batches=25) -> np.ndarray:
+    """
+    Approximate the covariance matrix of the model's features
+    Parameters
+    ----------
+    features_of_net_samples
+        The calculated features of the networks that are used for the approximation. Of dimensions
+        (num_features X sample_size)
+    mean_features_of_net_samples
+        The mean of the features across the samples (a vector of size num_features)
+    method
+        the method to use for approximating the covariance matrix
+        currently supported options are:
+            naive
+                A naive estimation from the sample: E[gi*gj] - E[gi]E[gj]
+            batch
+                based on difference of means of sample batches from the total mean, as in Geyer's handbook of
+                MCMC (there it is stated for the univariate case, but the generalization is straight forward).
+            multivariate_initial_sequence
+                Following Dai and Jones 2017 - the first estimator in section 3.1 (denoted mIS).
+    TODO: implement a mechanism that allows to pass arguments that are customized for each method
+
+    Returns
+    -------
+    The covariance matrix estimation (num_features X num_features).
+    """
+    num_features = features_of_net_samples.shape[0]
+    sample_size = features_of_net_samples.shape[1]
+    if method == 'naive':
+        # An outer product of the means (E[gi]E[gj])
+        cross_prod_mean_features = (mean_features_of_net_samples.reshape(num_features, 1) @
+                                    mean_features_of_net_samples.T.reshape(1, num_features))
+        # A mean of the outer products of the sample (E[gi*gj])
+        features_cross_prods = np.zeros((sample_size, num_features, num_features))
+        for i in range(sample_size):
+            features_cross_prods[i] = np.outer(features_of_net_samples[:, i], features_of_net_samples[:, i])
+        mean_features_cross_prod = features_cross_prods.sum(axis=0) / sample_size
+
+        return mean_features_cross_prod - cross_prod_mean_features
+
+    elif method == 'batch':
+        # Verify that the sample is nicely divided into non-overlapping batches.
+        while sample_size % num_batches != 0:
+            num_batches += 1
+        batch_size = sample_size // num_batches
+
+        # Divide the sample into batches, and calculate the mean of each one of them
+        batches_means = np.zeros((num_features, num_batches))
+        for i in range(num_batches):
+            batches_means[:, i] = features_of_net_samples[:, i * batch_size:(i + 1) * batch_size].sum(
+                axis=1) / batch_size
+
+        diff_of_global_mean = batches_means - mean_features_of_net_samples.reshape(num_features, 1)
+
+        # Average the outer products of the differences between batch means and the global mean and multiply by the
+        # batch size to compensate for the aggregation into batches
+        diff_of_global_mean_outer_prods = np.zeros((num_batches, num_features, num_features))
+        for i in range(num_batches):
+            diff_of_global_mean_outer_prods[i] = np.outer(diff_of_global_mean[:, i], diff_of_global_mean[:, i])
+        batches_cov_mat_est = batch_size * diff_of_global_mean_outer_prods.sum(axis=0) / num_batches
+
+        return batches_cov_mat_est
+
+    elif method == "multivariate_initial_sequence":
+        features_mean_diff = features_of_net_samples - mean_features_of_net_samples.reshape(num_features, 1)
+
+        # In this method, we sum up capital gammas, and choose where to cut the tail (which corresponds to estimates
+        # of auto-correlations with large lags within the chain. Naturally, as the lag increases the estimation
+        # becomes worse, so the magic here is to determine where to cut). So we calculate the estimates one by one and
+        # evaluate the conditions for cutting.
+        # The first condition is to have an index where the estimation is positive-definite, namely all eigen-values
+        # are positive. As both gamma_0 (which is auto_corr_funcs[0]) and the capital gammas are symmetric, all
+        # the sum of them is allways symmetric, which ensures real eigen values, and we can simply calculate the
+        # eigen value with the smallest algebraic value to determine whether all of them are positive.
+        is_positive = False
+        first_pos_def_idx = 0
+        possible_cov_mat_ests = np.zeros((sample_size // 2, num_features, num_features))
+        gamma_hat_0 = approximate_kth_auto_correlation_function(features_mean_diff, 0)
+        while not is_positive:
+            if first_pos_def_idx == possible_cov_mat_ests.shape[0]:
+                # TODO: ValueError? probably should throw something else. And maybe it is better to try alone some
+                #  of the remediations suggested here and just notify the user...
+                raise ValueError("Got a sample with no valid multivariate_initial_sequence covariance matrix "
+                                 "estimation (no possibility is positive-definite). Consider increasing sample size"
+                                 " or using a different covariance matrix estimation method.")
+            cur_capital_gamma = calc_kth_capital_gamma(features_mean_diff, first_pos_def_idx)
+            if first_pos_def_idx == 0:
+                possible_cov_mat_ests[first_pos_def_idx] = -gamma_hat_0 + 2 * cur_capital_gamma
+            else:
+                possible_cov_mat_ests[first_pos_def_idx] = (
+                        possible_cov_mat_ests[first_pos_def_idx - 1] + 2 * cur_capital_gamma)
+            cur_smallest_eigen_val = np.linalg.eigvalsh(possible_cov_mat_ests[first_pos_def_idx])[0]
+            if cur_smallest_eigen_val > 0:
+                is_positive = True
+            else:
+                first_pos_def_idx += 1
+
+        # Now we find the farthest idx after first_pos_def_idx for which the sequence of determinants is strictly
+        # monotonically increasing.
+        do_dets_increase = True
+        cutting_idx = first_pos_def_idx
+        cur_det = np.linalg.det(possible_cov_mat_ests[first_pos_def_idx])
+        while do_dets_increase:
+            cur_capital_gamma = calc_kth_capital_gamma(features_mean_diff, cutting_idx + 1)
+            possible_cov_mat_ests[cutting_idx + 1] = (
+                    possible_cov_mat_ests[cutting_idx] + 2 * cur_capital_gamma)
+            next_det = np.linalg.det(possible_cov_mat_ests[cutting_idx + 1])
+            if next_det <= cur_det:
+                do_dets_increase = False
+            else:
+                cutting_idx += 1
+                cur_det = next_det
+
+        return possible_cov_mat_ests[cutting_idx]
+
+    else:
+        raise ValueError(f"{method} is an unsupported method for covariance matrix estimation")
+
+
+@njit
+def calc_nll_gradient(observed_features, mean_features_of_net_samples):
+    return mean_features_of_net_samples - observed_features

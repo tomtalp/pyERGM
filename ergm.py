@@ -3,7 +3,7 @@ import networkx as nx
 from scipy.optimize import minimize, OptimizeResult
 from scipy.spatial.distance import mahalanobis
 from scipy.stats import f
-# from scipy.sparse.linalg import eigsh
+import sys
 import time
 from typing import Collection
 import sampling
@@ -125,179 +125,24 @@ class ERGM():
 
     # @staticmethod
     # # @njit
-    # def approximate_auto_correlation_function(features_of_net_samples: np.ndarray) -> np.ndarray:
-    #     """
-    #     This is gamma hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
-    #     """
-    #     # TODO: it must be possible to vectorize this calculation and spare the for loop. Maybe somehow use the
-    #     #  convolution theorem and go back and forth to the frequency domain using FFT for calculating correlations.
-    #     features_mean_diff = features_of_net_samples - features_of_net_samples.mean(axis=1)[:, None]
-    #     num_features = features_of_net_samples.shape[0]
-    #     sample_size = features_of_net_samples.shape[1]
-    #     auto_correlation_func = np.zeros((sample_size, num_features, num_features))
-    #     for k in range(sample_size):
-    #         auto_correlation_func[k] = 1 / sample_size * (
-    #                 features_mean_diff[:, :sample_size - k].T.reshape(sample_size - k, num_features, 1) @
-    #                 features_mean_diff[:, k:].T.reshape(sample_size - k, 1, num_features)
-    #         ).sum(axis=0)
-    #     return auto_correlation_func
-
-    # @staticmethod
-    # # @njit
-    # def calc_capital_gammas(auto_corr_funcs: np.ndarray) -> np.ndarray:
-    #     """
-    #     This is the capital gammas hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
-    #     They are simply summations over pairs of consecutive even and odd indices of the auto correlation function (gammas).
-    #     """
-    #     # From Dai and Jones 2017 - a mean of gamma with its transpose (which corresponds to the negative index with the
-    #     # same abs value).
-    #     gamma_tilde = (auto_corr_funcs + np.transpose(auto_corr_funcs, [0, 2, 1])) / 2
+    # def _calculate_optimization_step(observed_features, features_of_net_samples, optimization_method):
+    #     mean_features = np.mean(features_of_net_samples, axis=1)
     #
-    #     # Note - we assume here an even sample_size, it is forced elsewhere (everytime the sample size is updated).
-    #     sample_size = gamma_tilde.shape[0]
-    #     return (gamma_tilde[np.arange(0, sample_size - 1, 2, dtype=int)] +
-    #             gamma_tilde[np.arange(1, sample_size, 2, dtype=int)])
-
-    @staticmethod
-    # TODO: all the static methods in this class should be eorted to utils to avoid calling them with ERGM, and then
-    #  maybe they can be precompiled using numba. Tried, and numba doesn't support in axis parameter to np.mean. There
-    #  are workarounds, think if it's worth the headache.
-    # @njit
-    def covariance_matrix_estimation(features_of_net_samples: np.ndarray, method='batch',
-                                     num_batches=25) -> np.ndarray:
-        """
-        Approximate the covariance matrix of the model's features
-        Parameters
-        ----------
-        features_of_net_samples
-            The calculated features of the networks that are used for the approximation. Of dimensions
-            (num_features X sample_size)
-        method
-            the method to use for approximating the covariance matrix
-            currently supported options are:
-                naive
-                    A naive estimation from the sample: E[gi*gj] - E[gi]E[gj]
-                batch
-                    based on difference of means of sample batches from the total mean, as in Geyer's handbook of
-                    MCMC (there it is stated for the univariate case, but the generalization is straight forward).
-                multivariate_initial_sequence
-                    Following Dai and Jones 2017 - the first estimator in section 3.1 (denoted mIS).
-        TODO: implement a mechanism that allows to pass arguments that are customized for each method
-
-        Returns
-        -------
-        The covariance matrix estimation (num_features X num_features).
-        """
-        if method == 'naive':
-            num_features = features_of_net_samples.shape[0]
-            sample_size = features_of_net_samples.shape[1]
-            mean_features = np.mean(features_of_net_samples, axis=1)
-            # An outer product of the means (E[gi]E[gj])
-            cross_prod_mean_features = (mean_features.reshape(num_features, 1) @
-                                        mean_features.T.reshape(1, num_features))
-            # A mean of the outer products of the sample (E[gi*gj])
-            mean_features_cross_prod = np.mean(
-                features_of_net_samples.T.reshape(sample_size, num_features, 1) @
-                features_of_net_samples.T.reshape(sample_size, 1, num_features), axis=0)
-
-            return mean_features_cross_prod - cross_prod_mean_features
-
-        elif method == 'batch':
-            num_features = features_of_net_samples.shape[0]
-            sample_size = features_of_net_samples.shape[1]
-            # Verify that the sample is nicely divided into non-overlapping batches.
-            while sample_size % num_batches != 0:
-                num_batches += 1
-            sample_mean = features_of_net_samples.mean(axis=1)
-            batch_size = sample_size // num_batches
-
-            # Divide the sample into batches, and calculate the mean of each one of them
-            batches_means = np.zeros((num_features, num_batches))
-            for i in range(num_batches):
-                batches_means[:, i] = features_of_net_samples[:, i * batch_size:(i + 1) * batch_size].mean(axis=1)
-
-            diff_of_global_mean = batches_means - sample_mean.reshape(num_features, 1)
-
-            # Average the outer products of the differences between batch means and the global mean
-            batches_cov_mat_est = np.mean(
-                diff_of_global_mean.T.reshape(num_batches, num_features, 1) @
-                diff_of_global_mean.T.reshape(num_batches, 1, num_features), axis=0)
-            # Multiply by the batch size to compensate for the aggregation into batches.
-            return batch_size * batches_cov_mat_est
-
-        elif method == "multivariate_initial_sequence":
-            # auto_corr_funcs = ERGM.approximate_auto_correlation_function(features_of_net_samples)
-            # capital_gammas = ERGM.calc_capital_gammas(auto_corr_funcs)
-            auto_corr_funcs = approximate_auto_correlation_function(features_of_net_samples)
-            capital_gammas = calc_capital_gammas(auto_corr_funcs)
-
-            # In this method, we sum up capital gammas, and choose where to cut the tail (which corresponds to estimates
-            # of auto-correlations with large lags within the chain. Naturally, as the lag increases the estimation
-            # becomes worse, so the magic here is to determine where to cut). So we first calculate all possible
-            # estimators using np.cumsum, and then perform the calculations they specified to determine where to cut.
-            possible_cov_mat_ests = -auto_corr_funcs[0] + 2 * np.cumsum(capital_gammas, axis=0)
-
-            # The first condition is to have an index where the estimation is positive-definite, namely all eigen-values
-            # are positive. As the both gamma_0 (which is auto_corr_funcs[0]) and the capital gammas are symmetric, all
-            # the sum of them is allways symmetric, which ensures real eigen values, and we can simply calculate the
-            # eigen value with the smallest algebraic value to determine whether all of them are positive.
-            is_positive = False
-            first_pos_def_idx = 0
-            while not is_positive:
-                if first_pos_def_idx == possible_cov_mat_ests.shape[0]:
-                    # TODO: ValueError? probably should throw something else. And maybe it is better to try alone some
-                    #  of the remediations suggested here and just notify the user...
-                    raise ValueError("Got a sample with no valid multivariate_initial_sequence covariance matrix "
-                                     "estimation (no possibility is positive-definite). Consider increasing sample size"
-                                     " or using a different covariance matrix estimation method.")
-                cur_smallest_eigen_val = eigsh(possible_cov_mat_ests[first_pos_def_idx], k=1, which='SA',
-                                               return_eigenvectors=False)[0]
-                if cur_smallest_eigen_val > 0:
-                    is_positive = True
-                else:
-                    first_pos_def_idx += 1
-
-            # Now we find the farthest idx after first_pos_def_idx fir which the sequence of determinants is strictly
-            # monotonically increasing.
-            # TODO: this try-catch intends to catch a bug that hasn't reproduced, consider removing
-            try:
-                # TODO: it might be faster to run in a loop and each time calculate a single determinant, and stop when it
-                #  is smaller than the previous one, rather than computing all of them upfront.
-                determinants = np.linalg.det(possible_cov_mat_ests[first_pos_def_idx:])
-            except IndexError:
-                print(f"shape of features_of_net_samples: {features_of_net_samples.shape}\n"
-                      f"shape of auto_corr_funcs: {auto_corr_funcs.shape}\n"
-                      f"shape of capital_gammas: {capital_gammas.shape}\n"
-                      f"shape of possible_cov_mat_ests: {possible_cov_mat_ests.shape}\n"
-                      f"first_post_def_idx: {first_pos_def_idx}")
-                raise
-            tail_cut_idx = first_pos_def_idx + np.where(np.diff(determinants) < 0)[0][0]
-
-            return possible_cov_mat_ests[tail_cut_idx]
-
-        else:
-            raise ValueError(f"{method} is an unsupported method for covariance matrix estimation")
-
-    @staticmethod
-    # @njit
-    def _calculate_optimization_step(observed_features, features_of_net_samples, optimization_method):
-        mean_features = np.mean(features_of_net_samples, axis=1)
-
-        nll_grad = mean_features - observed_features
-
-        if optimization_method == "gradient_descent":
-            nll_hessian = None
-
-        elif optimization_method == "newton_raphson":
-            # TODO: mean_features is calculated again inside this method, so it can be spared, but it makes more sense
-            #  to use this design. And in general, maybe it is better to have only one method for estimating the
-            #  covariance matrix and use the same estimation everywhere (if a single method can work for all needs).
-            nll_hessian = ERGM.covariance_matrix_estimation(features_of_net_samples, method='naive')
-        else:
-            raise ValueError(
-                f"Optimization method {optimization_method} not defined")  # TODO - throw this error in fit()
-
-        return nll_grad, nll_hessian
+    #     nll_grad = mean_features - observed_features
+    #
+    #     if optimization_method == "gradient_descent":
+    #         nll_hessian = None
+    #
+    #     elif optimization_method == "newton_raphson":
+    #         # TODO: mean_features is calculated again inside this method, so it can be spared, but it makes more sense
+    #         #  to use this design. And in general, maybe it is better to have only one method for estimating the
+    #         #  covariance matrix and use the same estimation everywhere (if a single method can work for all needs).
+    #         nll_hessian = ERGM.covariance_matrix_estimation(features_of_net_samples, method='naive')
+    #     else:
+    #         raise ValueError(
+    #             f"Optimization method {optimization_method} not defined")  # TODO - throw this error in fit()
+    #
+    #     return nll_grad, nll_hessian
 
     @staticmethod
     def do_estimate_covariance_matrix(optimization_method, convergence_criterion):
@@ -406,18 +251,20 @@ class ERGM():
             seed_network = networks_for_sample[:, :, -1]
 
             features_of_net_samples = self._network_statistics.calculate_sample_statistics(networks_for_sample)
+            mean_features = np.mean(features_of_net_samples, axis=1)
             observed_features = self._network_statistics.calculate_statistics(observed_network)
 
-            grad, hessian = self._calculate_optimization_step(observed_features, features_of_net_samples,
-                                                              optimization_method)
-            # if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):
-            #     estimated_cov_matrix = ERGM.covariance_matrix_estimation(features_of_net_samples,
-            #                                                              method=cov_matrix_estimation_method,
-            #                                                              num_batches=cov_matrix_num_batches)
+            grad = calc_nll_gradient(observed_features, mean_features)
+            if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):
+                # This is for allowing numba to compile and pickle the large function
+                sys.setrecursionlimit(2000)
+                estimated_cov_matrix = covariance_matrix_estimation(features_of_net_samples,
+                                                                    mean_features,
+                                                                    method=cov_matrix_estimation_method,
+                                                                    num_batches=cov_matrix_num_batches)
+                inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
             if optimization_method == "newton_raphson":
-                # hessian = estimated_cov_matrix
-                inv_hessian = np.linalg.pinv(hessian)
-                self._thetas = self._thetas - lr * inv_hessian @ grad
+                self._thetas = self._thetas - lr * inv_estimated_cov_matrix @ grad
 
             elif optimization_method == "gradient_descent":
                 self._thetas = self._thetas - lr * grad
@@ -434,13 +281,6 @@ class ERGM():
                     f"Step {i + 1} - lr: {lr:.10f}, time from start: {delta_t:.2f}, window_grad: {sliding_window_grads:.2f}")
 
             if convergence_criterion == "hotelling":
-                estimated_cov_matrix = ERGM.covariance_matrix_estimation(features_of_net_samples,
-                                                                         method=cov_matrix_estimation_method,
-                                                                         num_batches=cov_matrix_num_batches)
-                inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
-                mean_features = np.mean(features_of_net_samples,
-                                        axis=1)  # TODO - this is calculated in `_calculate_optimization_step()` and covariance estimation, consider sharing the two
-
                 dist = mahalanobis(observed_features, mean_features, inv_estimated_cov_matrix)
                 # dist = mahalanobis(observed_features, mean_features, inv_hessian)
 
