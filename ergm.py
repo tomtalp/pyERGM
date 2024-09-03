@@ -123,27 +123,6 @@ class ERGM():
 
         # print(f"Finished generating networks for Z, which is estimated at {self._normalization_factor}")
 
-    # @staticmethod
-    # # @njit
-    # def _calculate_optimization_step(observed_features, features_of_net_samples, optimization_method):
-    #     mean_features = np.mean(features_of_net_samples, axis=1)
-    #
-    #     nll_grad = mean_features - observed_features
-    #
-    #     if optimization_method == "gradient_descent":
-    #         nll_hessian = None
-    #
-    #     elif optimization_method == "newton_raphson":
-    #         # TODO: mean_features is calculated again inside this method, so it can be spared, but it makes more sense
-    #         #  to use this design. And in general, maybe it is better to have only one method for estimating the
-    #         #  covariance matrix and use the same estimation everywhere (if a single method can work for all needs).
-    #         nll_hessian = ERGM.covariance_matrix_estimation(features_of_net_samples, method='naive')
-    #     else:
-    #         raise ValueError(
-    #             f"Optimization method {optimization_method} not defined")  # TODO - throw this error in fit()
-    #
-    #     return nll_grad, nll_hessian
-
     @staticmethod
     def do_estimate_covariance_matrix(optimization_method, convergence_criterion):
         if optimization_method == "newton_raphson" or convergence_criterion == "hotelling":
