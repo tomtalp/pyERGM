@@ -286,10 +286,10 @@ def covariance_matrix_estimation(features_of_net_samples: np.ndarray, mean_featu
         # eigen value with the smallest algebraic value to determine whether all of them are positive.
         is_positive = False
         first_pos_def_idx = 0
-        possible_cov_mat_ests = np.zeros((sample_size // 2, num_features, num_features))
+        cur_pos_cov_mat_est = np.zeros((num_features, num_features))
         gamma_hat_0 = approximate_kth_auto_correlation_function(features_mean_diff, 0)
         while not is_positive:
-            if first_pos_def_idx == possible_cov_mat_ests.shape[0]:
+            if first_pos_def_idx == sample_size // 2:
                 # TODO: ValueError? probably should throw something else. And maybe it is better to try alone some
                 #  of the remediations suggested here and just notify the user...
                 raise ValueError("Got a sample with no valid multivariate_initial_sequence covariance matrix "
@@ -297,11 +297,10 @@ def covariance_matrix_estimation(features_of_net_samples: np.ndarray, mean_featu
                                  " or using a different covariance matrix estimation method.")
             cur_capital_gamma = calc_kth_capital_gamma(features_mean_diff, first_pos_def_idx)
             if first_pos_def_idx == 0:
-                possible_cov_mat_ests[first_pos_def_idx] = -gamma_hat_0 + 2 * cur_capital_gamma
+                cur_pos_cov_mat_est = -gamma_hat_0 + 2 * cur_capital_gamma
             else:
-                possible_cov_mat_ests[first_pos_def_idx] = (
-                        possible_cov_mat_ests[first_pos_def_idx - 1] + 2 * cur_capital_gamma)
-            cur_smallest_eigen_val = np.linalg.eigvalsh(possible_cov_mat_ests[first_pos_def_idx])[0]
+                cur_pos_cov_mat_est += 2 * cur_capital_gamma
+            cur_smallest_eigen_val = np.linalg.eigvalsh(cur_pos_cov_mat_est)[0]
             if cur_smallest_eigen_val > 0:
                 is_positive = True
             else:
@@ -311,19 +310,19 @@ def covariance_matrix_estimation(features_of_net_samples: np.ndarray, mean_featu
         # monotonically increasing.
         do_dets_increase = True
         cutting_idx = first_pos_def_idx
-        cur_det = np.linalg.det(possible_cov_mat_ests[first_pos_def_idx])
-        while do_dets_increase:
+        cur_det = np.linalg.det(cur_pos_cov_mat_est)
+        while do_dets_increase and cutting_idx < sample_size // 2:
             cur_capital_gamma = calc_kth_capital_gamma(features_mean_diff, cutting_idx + 1)
-            possible_cov_mat_ests[cutting_idx + 1] = (
-                    possible_cov_mat_ests[cutting_idx] + 2 * cur_capital_gamma)
-            next_det = np.linalg.det(possible_cov_mat_ests[cutting_idx + 1])
+            next_pos_cov_mat_est = cur_pos_cov_mat_est + 2 * cur_capital_gamma
+            next_det = np.linalg.det(next_pos_cov_mat_est)
             if next_det <= cur_det:
                 do_dets_increase = False
             else:
                 cutting_idx += 1
+                cur_pos_cov_mat_est = next_pos_cov_mat_est
                 cur_det = next_det
 
-        return possible_cov_mat_ests[cutting_idx]
+        return cur_pos_cov_mat_est
 
     else:
         raise ValueError(f"{method} is an unsupported method for covariance matrix estimation")
