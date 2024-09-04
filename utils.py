@@ -187,3 +187,11 @@ def transpose_sparse_sample_matrices(sparse_tensor: torch.Tensor) -> torch.Tenso
 
     return torch.sparse_coo_tensor(transposed_indices, values, (n, n, k))
 
+def calc_for_sample_njit():
+    def wrapper(func):
+        def inner(sample):
+            if isinstance(sample, np.ndarray):
+                return njit(func)(sample)
+            return func(sample)
+        return inner
+    return wrapper

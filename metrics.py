@@ -8,7 +8,7 @@ import networkx as nx
 from numba import njit
 
 from utils import *
-
+import time
 
 class Metric(ABC):
     def __init__(self, requires_graph=False):
@@ -89,9 +89,6 @@ class NumberOfEdgesUndirected(Metric):
         """
         Sum each matrix over all matrices in sample
         """
-        if isinstance(networks_sample, torch.Tensor):
-            return networks_sample.sum(axis=(0, 1)) // 2
-        
         return networks_sample.sum(axis=(0, 1)) // 2
 
 
@@ -112,19 +109,12 @@ class NumberOfEdgesDirected(Metric):
         return -1 if current_network[indices[0], indices[1]] else 1
 
     @staticmethod
-    # @njit
+    @calc_for_sample_njit()
     def calculate_for_sample(networks_sample: np.ndarray | torch.Tensor):
         """
         Sum each matrix over all matrices in sample
         """
-        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
-            return networks_sample.sum(axis=(0, 1))
-        elif isinstance(networks_sample, np.ndarray):
-            n = networks_sample.shape[0]
-            reshaped_networks_sample = networks_sample.reshape(n ** 2, networks_sample.shape[2])
-            return np.sum(reshaped_networks_sample, axis=0)
-        
-
+        return networks_sample.sum(axis=0).sum(axis=0)
 
 # TODO: change the name of this one to undirected and implement also a directed version?
 class NumberOfTriangles(Metric):
@@ -307,17 +297,25 @@ class TotalReciprocity(Metric):
             return 0
 
     @staticmethod
-    # @njit
+    # @njit # Not supporting neither np.einsum and sparse torch
     def calculate_for_sample(networks_sample: np.ndarray | torch.Tensor):
         if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
             transposed_sparse_tensor = transpose_sparse_sample_matrices(networks_sample)
-            return torch.sum(networks_sample * transposed_sparse_tensor, axis=(0,1)) / 2
+            return torch.sum(networks_sample * transposed_sparse_tensor, axis=(0, 1)) / 2
         elif isinstance(networks_sample, np.ndarray):
             return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
+        else:
+            raise ValueError(f"Unsupported type of sample: {type(networks_sample)}! Supported types are np.ndarray and "
+                             f"torch.Tensor with is_sparse=True")
 
 
 class MetricsCollection:
-    def __init__(self, metrics: Collection[Metric], is_directed: bool, n_nodes: int, fix_collinearity=True):
+    def __init__(self, 
+                 metrics: Collection[Metric], 
+                 is_directed: bool, 
+                 n_nodes: int, 
+                 fix_collinearity=True, 
+                 use_sparse_matrix=False):
         self.metrics = tuple([deepcopy(metric) for metric in metrics])
         self.metric_names = tuple([str(metric) for metric in self.metrics])
 
@@ -340,6 +338,8 @@ class MetricsCollection:
         # Returns the number of features that are being calculated. Since a single metric might return more than one feature, the length of the statistics vector might be larger than 
         # the amount of metrics. Since it also depends on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count function
         self.num_of_features = sum([metric.get_effective_feature_count(self.n_nodes) for metric in self.metrics])
+
+        self.use_sparse_matrix = use_sparse_matrix
 
     def get_metric(self, metric_name: str) -> Metric:
         """
@@ -439,7 +439,8 @@ class MetricsCollection:
         if self.requires_graph:
             networks_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in networks_sample]
 
-        networks_as_sparse_tensor = np_tensor_to_sparse_tensor(networks_sample)
+        if self.use_sparse_matrix:
+            networks_as_sparse_tensor = np_tensor_to_sparse_tensor(networks_sample)
 
         feature_idx = 0
         for metric in self.metrics:
@@ -447,16 +448,18 @@ class MetricsCollection:
 
             if metric.requires_graph:
                 networks = networks_as_graphs
-            else:
-                # networks = networks_sample
+            elif self.use_sparse_matrix:
                 networks = networks_as_sparse_tensor
-                
+            else:
+                networks = networks_sample
+            
             features = metric.calculate_for_sample(networks)
+            
             if isinstance(features, torch.Tensor):
                 if features.is_sparse:
                     features = features.to_dense()
                 features = features.numpy()
-
+            
             features_of_net_samples[feature_idx:feature_idx + n_features_from_metric] = features
             feature_idx += n_features_from_metric
 
