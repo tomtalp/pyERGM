@@ -37,6 +37,7 @@ class Metric(ABC):
         -------
         statistic of proposed_network minus statistic of current_network.
         """
+        i, j = indices
         if self.requires_graph:
             proposed_network = current_network.copy()
             if proposed_network.has_edge(i, j):
@@ -44,7 +45,6 @@ class Metric(ABC):
             else:
                 proposed_network.add_edge(i, j)
         else:
-            i, j = indices
             proposed_network = current_network.copy()
             proposed_network[i, j] = 1 - proposed_network[i, j]
 
@@ -303,6 +303,120 @@ class TotalReciprocity(Metric):
     def calculate_for_sample(networks_sample: np.ndarray):
         return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
 
+
+class ExWeightNumEdges(Metric):
+    """
+    Weighted sum of the number of edges, based on exogenous attributes.
+    """
+
+    # TODO: Collection doesn't necessarily support __getitem__, find a typing hint of a sized Iterable that does.
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(requires_graph=False)
+        self.exogenous_attr = exogenous_attr
+        self.num_weight_mats = self._get_num_weight_mats()
+        self.edge_weights = None
+        self._calc_edge_weights()
+
+    @abstractmethod
+    def _calc_edge_weights(self):
+        ...
+
+    @abstractmethod
+    def _get_num_weight_mats(self):
+        ...
+
+    def get_effective_feature_count(self, n):
+        return self.num_weight_mats
+
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        sign = -1 if current_network[indices[0], indices[1]] else 1
+        return sign * self.edge_weights[:, indices[0], indices[1]]
+
+    def calculate(self, input: np.ndarray):
+        res = np.einsum('ij,kij->k', input, self.edge_weights)
+        if not self._is_directed:
+            res = res / 2
+        return res
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        res = np.einsum('ijk,mij->mk', networks_sample, self.edge_weights)
+        if not self._is_directed:
+            res = res / 2
+        return res
+
+
+class NumberOfEdgesTypesDirected(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(exogenous_attr)
+        self._is_directed = True
+        
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        unique_types = sorted(set(self.exogenous_attr))
+        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        weight_mat_idx = 0
+        for pre_type in unique_types:
+            for post_type in unique_types:
+                for i in range(num_nodes):
+                    for j in range(num_nodes):
+                        if i == j:
+                            continue
+                        if self.exogenous_attr[i] == pre_type and self.exogenous_attr[j] == post_type:
+                            self.edge_weights[weight_mat_idx, i, j] = 1
+                weight_mat_idx += 1
+
+    def _get_num_weight_mats(self):
+        return len(set(self.exogenous_attr)) ** 2
+
+
+class NodeAttrSum(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection, is_directed: bool):
+        super().__init__(exogenous_attr)
+        self._is_directed = is_directed
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                if i == j:
+                    continue
+                self.edge_weights[0, i, j] = self.exogenous_attr[i] + self.exogenous_attr[j]
+
+    def _get_num_weight_mats(self):
+        return 1
+
+
+class NodeAttrSumOut(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(exogenous_attr)
+        self._is_directed = True
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        for i in range(num_nodes):
+            self.edge_weights[0, i, :] = self.exogenous_attr[i] * np.ones(num_nodes)
+            self.edge_weights[0, i, i] = 0
+
+    def _get_num_weight_mats(self):
+        return 1
+
+
+class NodeAttrSumIn(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(exogenous_attr)
+        self._is_directed = True
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        for j in range(num_nodes):
+            self.edge_weights[0, :, j] = self.exogenous_attr[j] * np.ones(num_nodes)
+            self.edge_weights[0, j, j] = 0
+
+    def _get_num_weight_mats(self):
+        return 1
 
 class MetricsCollection:
     def __init__(self, metrics: Collection[Metric], is_directed: bool, n_nodes: int, fix_collinearity=True):
