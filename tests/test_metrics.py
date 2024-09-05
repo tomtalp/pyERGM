@@ -187,7 +187,7 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         metric = NumberOfEdgesTypesDirected(neuronal_types)
         self.assertTrue(metric.num_weight_mats == 9)
 
-    def test_calc_syn_weights(self):
+    def test_calc_edge_weights(self):
         neuronal_types = ['A', 'B', 'B', 'A']
         expected_edge_weights = np.array([
             # A->A connections
@@ -294,6 +294,128 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         calculated_change_score = metric.calc_change_score(W2, (1, 2))
         expected_change_score = np.array([0, 0, 1, 0])
         self.assertTrue(np.all(expected_change_score == calculated_change_score))
+
+
+class TestNodeAttrSums(unittest.TestCase):
+    def test_calc_edge_weights(self):
+        node_attr = np.array([1, 2, 3, 4])
+        metric_both = NodeAttrSum(node_attr)
+        expected_edge_weights = np.array([
+            [0, 3, 4, 5],
+            [3, 0, 5, 6],
+            [4, 5, 0, 7],
+            [5, 6, 7, 0]
+        ])
+        self.assertTrue(np.all(expected_edge_weights == metric_both.edge_weights))
+
+        metric_out = NodeAttrSumOut(node_attr)
+        expected_edge_weights = np.array([
+            [0, 1, 1, 1],
+            [2, 0, 2, 2],
+            [3, 3, 0, 3],
+            [4, 4, 4, 0]
+        ])
+        self.assertTrue(np.all(expected_edge_weights == metric_out.edge_weights))
+
+        metric_in = NodeAttrSumIn(node_attr)
+        self.assertTrue(np.all(expected_edge_weights.T == metric_in.edge_weights))
+
+    def test_calculate(self):
+        W = np.array([
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 1, 0]
+        ])
+
+        node_attr = np.array([1, 2, 3, 4])
+        metric_both = NodeAttrSum(node_attr)
+        expected_statistic = 3 + 4 + 6 + 4 + 6 + 7
+        self.assertEqual(expected_statistic, metric_both.calculate(W)[0])
+
+        metric_out = NodeAttrSumOut(node_attr)
+        expected_statistic = 1 + 1 + 2 + 3 + 4 + 4
+        self.assertEqual(expected_statistic, metric_out.calculate(W)[0])
+
+        metric_in = NodeAttrSumIn(node_attr)
+        expected_statistic = 1 + 2 + 2 + 3 + 3 + 4
+        self.assertEqual(expected_statistic, metric_in.calculate(W)[0])
+
+    def test_calculate_for_sample(self):
+        n = 3
+        sample_size = 3
+
+        W1 = np.array([
+            [0, 1, 0],
+            [1, 0, 1],
+            [1, 0, 0]
+        ])
+        W2 = np.array([
+            [0, 0, 1],
+            [1, 0, 0],
+            [1, 1, 0]
+        ])
+        W3 = np.array([
+            [0, 0, 0],
+            [1, 0, 0],
+            [0, 1, 0]
+        ])
+
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
+        sample[:, :, 1] = W2
+        sample[:, :, 2] = W3
+
+        node_attributes = np.array([2, 1, 1])
+
+        metric_both = NodeAttrSum(node_attributes)
+        expected_stats_sample = np.array([11, 11, 5])
+        calculated_stats_sample = metric_both.calculate_for_sample(sample)
+        self.assertTrue(np.all(expected_stats_sample == calculated_stats_sample))
+
+        metric_out = NodeAttrSumOut(node_attributes)
+        expected_stats_sample = np.array([5, 5, 2])
+        calculated_stats_sample = metric_out.calculate_for_sample(sample)
+        self.assertTrue(np.all(expected_stats_sample == calculated_stats_sample))
+
+        metric_in = NodeAttrSumIn(node_attributes)
+        expected_stats_sample = np.array([6, 6, 3])
+        calculated_stats_sample = metric_in.calculate_for_sample(sample)
+        self.assertTrue(np.all(expected_stats_sample == calculated_stats_sample))
+
+    def test_calc_change_score(self):
+        W_off = np.zeros((3, 3))
+        W_on = np.ones((3, 3))
+
+        node_attributes = np.array([1, 0.5, 2])
+
+        metric_both = NodeAttrSum(node_attributes)
+        metric_out = NodeAttrSumOut(node_attributes)
+        metric_in = NodeAttrSumIn(node_attributes)
+
+        calculated_change_score = metric_both.calc_change_score(W_off, (2, 1))
+        expected_change_score = 2.5
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+        calculated_change_score = metric_both.calc_change_score(W_on, (2, 0))
+        expected_change_score = -3
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+        calculated_change_score = metric_out.calc_change_score(W_off, (1, 0))
+        expected_change_score = 0.5
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+        calculated_change_score = metric_out.calc_change_score(W_on, (0, 2))
+        expected_change_score = -1
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+        calculated_change_score = metric_in.calc_change_score(W_off, (0, 1))
+        expected_change_score = 0.5
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+        calculated_change_score = metric_in.calc_change_score(W_on, (1, 2))
+        expected_change_score = -2
+        self.assertEqual(expected_change_score, calculated_change_score)
 
 
 class TestMetricsCollection(unittest.TestCase):
