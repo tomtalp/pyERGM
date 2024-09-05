@@ -370,6 +370,10 @@ class NumberOfEdgesTypesDirected(ExWeightNumEdges):
 
 
 class NodeAttrSum(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection, is_directed: bool):
+        super().__init__(exogenous_attr)
+        self._is_directed = is_directed
+
     def _calc_edge_weights(self):
         num_nodes = len(self.exogenous_attr)
         self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))

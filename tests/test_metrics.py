@@ -299,7 +299,7 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
 class TestNodeAttrSums(unittest.TestCase):
     def test_calc_edge_weights(self):
         node_attr = np.array([1, 2, 3, 4])
-        metric_both = NodeAttrSum(node_attr)
+        metric_both = NodeAttrSum(node_attr, is_directed=True)
         expected_edge_weights = np.array([
             [0, 3, 4, 5],
             [3, 0, 5, 6],
@@ -329,7 +329,7 @@ class TestNodeAttrSums(unittest.TestCase):
         ])
 
         node_attr = np.array([1, 2, 3, 4])
-        metric_both = NodeAttrSum(node_attr)
+        metric_both = NodeAttrSum(node_attr, is_directed=True)
         expected_statistic = 3 + 4 + 6 + 4 + 6 + 7
         self.assertEqual(expected_statistic, metric_both.calculate(W)[0])
 
@@ -368,7 +368,7 @@ class TestNodeAttrSums(unittest.TestCase):
 
         node_attributes = np.array([2, 1, 1])
 
-        metric_both = NodeAttrSum(node_attributes)
+        metric_both = NodeAttrSum(node_attributes, is_directed=True)
         expected_stats_sample = np.array([11, 11, 5])
         calculated_stats_sample = metric_both.calculate_for_sample(sample)
         self.assertTrue(np.all(expected_stats_sample == calculated_stats_sample))
@@ -389,7 +389,7 @@ class TestNodeAttrSums(unittest.TestCase):
 
         node_attributes = np.array([1, 0.5, 2])
 
-        metric_both = NodeAttrSum(node_attributes)
+        metric_both = NodeAttrSum(node_attributes, is_directed=True)
         metric_out = NodeAttrSumOut(node_attributes)
         metric_in = NodeAttrSumIn(node_attributes)
 
