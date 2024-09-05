@@ -15,6 +15,7 @@ class Metric(ABC):
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
         self._is_directed = None
+        self._is_dyadic_independent = True
 
     @abstractmethod
     def calculate(self, input: np.ndarray | nx.Graph):
@@ -77,6 +78,7 @@ class NumberOfEdgesUndirected(Metric):
     def __init__(self):
         super().__init__(requires_graph=False)
         self._is_directed = False
+        self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
         return np.sum(W) // 2
@@ -98,6 +100,7 @@ class NumberOfEdgesDirected(Metric):
     def __init__(self):
         super().__init__(requires_graph=False)
         self._is_directed = True
+        self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
         return np.sum(W)
@@ -126,6 +129,7 @@ class NumberOfTriangles(Metric):
     def __init__(self):
         super().__init__(requires_graph=False)
         self._is_directed = False
+        self._is_dyadic_independent = False
 
     def calculate(self, W: np.ndarray):
         if not np.all(W.T == W):
@@ -173,6 +177,7 @@ class InDegree(BaseDegreeVector):
 
     def __init__(self, base_idx=0):
         super().__init__(requires_graph=False, is_directed=True, base_idx=base_idx)
+        self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
         return W.sum(axis=0)[self.base_idx:]
@@ -201,6 +206,7 @@ class OutDegree(BaseDegreeVector):
 
     def __init__(self, base_idx=0):
         super().__init__(requires_graph=False, is_directed=True, base_idx=base_idx)
+        self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
         return W.sum(axis=1)[self.base_idx:]
@@ -229,6 +235,7 @@ class UndirectedDegree(BaseDegreeVector):
 
     def __init__(self, base_idx=0):
         super().__init__(requires_graph=False, is_directed=False, base_idx=base_idx)
+        self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
         return W.sum(axis=0)[self.base_idx:]
@@ -247,6 +254,7 @@ class Reciprocity(Metric):
     def __init__(self):
         super().__init__(requires_graph=False)
         self._is_directed = True
+        self._is_dyadic_independent = False
 
     def calculate(self, W: np.ndarray):
         return (W * W.T)[np.triu_indices(W.shape[0], 1)]
@@ -282,6 +290,7 @@ class TotalReciprocity(Metric):
     def __init__(self):
         super().__init__(requires_graph=False)
         self._is_directed = True
+        self._is_dyadic_independent = False
 
     def calculate(self, W: np.ndarray):
         return (W * W.T).sum() / 2
@@ -328,6 +337,8 @@ class MetricsCollection:
         # Returns the number of features that are being calculated. Since a single metric might return more than one feature, the length of the statistics vector might be larger than 
         # the amount of metrics. Since it also depends on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count function
         self.num_of_features = sum([metric.get_effective_feature_count(self.n_nodes) for metric in self.metrics])
+
+        self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
 
     def get_metric(self, metric_name: str) -> Metric:
         """

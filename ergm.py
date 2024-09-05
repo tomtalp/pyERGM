@@ -3,6 +3,7 @@ import networkx as nx
 from scipy.optimize import minimize, OptimizeResult
 from scipy.spatial.distance import mahalanobis
 from scipy.stats import f
+from sklearn.linear_model import LogisticRegression
 import sys
 import time
 from typing import Collection
@@ -69,7 +70,6 @@ class ERGM():
 
         self._seed_MCMC_proba = seed_MCMC_proba
 
-        self.optimization_iter = 0
         self.optimization_start_time = None
 
         # This is because we assume the sample size is even when estimating the covariance matrix (in
@@ -129,6 +129,53 @@ class ERGM():
             return True
         return False
 
+    def _mple_fit(self, observed_network):
+        """
+        Perform MPLE estimation of the ERGM parameters.
+        This is done by fitting a logistic regression model, where the X values are the change statistics
+        calculated for every edge in the observed network, and the predicted values are the presence of the edge.
+
+        More precisely, we create a train dataset with (X_{i, j}, y_{i,j}) where -
+            X_{i, j} = g(y_{i,j}^+) - g(y_{i, j}^-)
+            y_{i, j} = 1 if there is an edge between i and j, 0 otherwise
+
+        Parameters
+        ----------
+        observed_network : np.ndarray
+            The adjacency matrix of the observed network.
+        
+        Returns
+        -------
+        thetas: np.ndarray
+            The estimated coefficients of the ERGM.
+        """
+        
+        Xs = np.zeros((self._n_nodes**2 - self._n_nodes, self._network_statistics.num_of_features))
+        ys = np.zeros((self._n_nodes**2 - self._n_nodes))
+
+        row_idx = 0
+        for i in range(self._n_nodes):
+            for j in range(self._n_nodes):
+                if i == j:
+                    continue
+            
+                y = observed_network[i, j]
+                W_minus = np.copy(observed_network)
+                W_minus[i, j] = 0
+
+                ys[row_idx] = y
+                Xs[row_idx, :] = self._network_statistics.calc_change_scores(W_minus, (i, j))
+
+                row_idx += 1
+        
+        clf = LogisticRegression(fit_intercept=False, penalty=None).fit(Xs, ys)
+        return clf.coef_[0]
+    
+    def _do_MPLE(self, theta_init_method):
+        if not self._network_statistics._has_dyadic_dependent_metrics or theta_init_method == "mple":
+            return True
+        return False
+            
     def fit(self, observed_network,
             lr=0.001,
             opt_steps=1000,
@@ -143,7 +190,8 @@ class ERGM():
             convergence_criterion="hotelling",
             cov_matrix_estimation_method="batch",
             cov_matrix_num_batches=25,
-            hotelling_confidence=0.99):
+            hotelling_confidence=0.99,
+            theta_init_method="mple"):
         """
         Fit an ERGM model to a given network.
 
@@ -181,12 +229,23 @@ class ERGM():
 
 
         """
+
+        if self._do_MPLE(theta_init_method):
+            self._thetas = self._mple_fit(observed_network)
+        
+            if not self._network_statistics._has_dyadic_dependent_metrics:
+                print(f"Model is dyadic independent - using only MPLE instead of MCMLE")
+                return None, None # TODO - Remove this in the future. Grads are returned only for debug
+
+        elif theta_init_method == "uniform":
+            self._thetas = self._get_random_thetas(sampling_method="uniform")  
+        
+        else:
+            raise ValueError(f"Theta initialization method {theta_init_method} not supported")            
+            
         # As in the constructor, the sample size must be even.
         if max_nets_for_sample % 2 != 0:
             max_nets_for_sample += 1
-
-        self._thetas = self._get_random_thetas(sampling_method="uniform")
-        self.optimization_iter = 0
 
         print(f"Initial thetas - {self._thetas}")
         print("optimization started")
@@ -203,7 +262,7 @@ class ERGM():
 
         prev_cov_matrix = np.ones((num_of_features, num_of_features))
 
-        seed_network = None
+        seed_network = observed_network
 
         for i in range(opt_steps):
             if ((i + 1) % steps_for_decay) == 0:
