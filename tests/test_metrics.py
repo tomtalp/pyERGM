@@ -64,6 +64,7 @@ class TestNumberOfTriangles(unittest.TestCase):
 
         self.assertEqual(result, expected_result)
 
+
 class TestReciprocity(unittest.TestCase):
     def test_calculate(self):
         metrics = [Reciprocity()]
@@ -110,7 +111,7 @@ class TestReciprocity(unittest.TestCase):
         G = nx.from_numpy_array(W, create_using=nx.DiGraph)
 
         total_edges = np.sum(W)
-        
+
         reciprocity_vector = collection.calculate_statistics(W)
         total_reciprocity = np.sum(reciprocity_vector)
 
@@ -118,6 +119,7 @@ class TestReciprocity(unittest.TestCase):
 
         nx_reciprocity = nx.algorithms.reciprocity(G) / 2  # nx counts each reciprocity twice
         self.assertEqual(reciprocty_fraction, nx_reciprocity)
+
 
 class TestDegreeMetrics(unittest.TestCase):
     def test_get_effective_feature_count(self):
@@ -127,7 +129,7 @@ class TestDegreeMetrics(unittest.TestCase):
 
         receiver = InDegree(base_idx=1)
         n = 18
-        self.assertEqual(receiver.get_effective_feature_count(n), n-1)
+        self.assertEqual(receiver.get_effective_feature_count(n), n - 1)
 
         sender = OutDegree()
         n = 18
@@ -135,8 +137,8 @@ class TestDegreeMetrics(unittest.TestCase):
 
         sender = OutDegree(base_idx=1)
         n = 18
-        self.assertEqual(sender.get_effective_feature_count(n), n-1)
-    
+        self.assertEqual(sender.get_effective_feature_count(n), n - 1)
+
     def test_calculate(self):
         W = np.array([
             [0, 1, 0, 1],
@@ -169,27 +171,148 @@ class TestDegreeMetrics(unittest.TestCase):
         ])
 
         G = nx.from_numpy_array(W)
-        
+
         degrees = undirected_degree.calculate(W)
         expected_degrees = list(dict(G.degree()).values())
         self.assertTrue(all(degrees == expected_degrees))
+
+
+class TestNumberOfEdgesTypesDirected(unittest.TestCase):
+    def test_get_num_weight_mats(self):
+        neuronal_types = ['A', 'B', 'C']
+        metric = NumberOfEdgesTypesDirected(neuronal_types)
+        self.assertTrue(metric.num_weight_mats == 9)
+
+        neuronal_types = ['A', 'B', 'C', 'A', 'B', 'C']
+        metric = NumberOfEdgesTypesDirected(neuronal_types)
+        self.assertTrue(metric.num_weight_mats == 9)
+
+    def test_calc_syn_weights(self):
+        neuronal_types = ['A', 'B', 'B', 'A']
+        expected_edge_weights = np.array([
+            # A->A connections
+            [[0, 0, 0, 1],
+             [0, 0, 0, 0],
+             [0, 0, 0, 0],
+             [1, 0, 0, 0]],
+
+            # A->B connections
+            [[0, 1, 1, 0],
+             [0, 0, 0, 0],
+             [0, 0, 0, 0],
+             [0, 1, 1, 0]],
+
+            # B->A connections
+            [[0, 0, 0, 0],
+             [1, 0, 0, 1],
+             [1, 0, 0, 1],
+             [0, 0, 0, 0]],
+
+            # B->B connections
+            [[0, 0, 0, 0],
+             [0, 0, 1, 0],
+             [0, 1, 0, 0],
+             [0, 0, 0, 0]]
+        ])
+
+        metric = NumberOfEdgesTypesDirected(neuronal_types)
+
+        self.assertTrue(np.all(metric.edge_weights == expected_edge_weights))
+
+    def test_calculate(self):
+        W = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [1, 1, 0, 0],
+            [0, 0, 1, 0]
+        ])
+
+        neuronal_types = ['A', 'B', 'A', 'B']
+        expected_num_edges = np.array([1, 2, 2, 1])
+        metric = NumberOfEdgesTypesDirected(neuronal_types)
+        calculated_num_edges = metric.calculate(W)
+        self.assertTrue(np.all(expected_num_edges == calculated_num_edges))
+
+    def test_calculate_for_sample(self):
+        n = 4
+        sample_size = 2
+        W1 = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [1, 1, 0, 0],
+            [0, 0, 1, 0]
+        ])
+        W2 = np.array([
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 1, 0]
+        ])
+
+        neuronal_types = ['A', 'B', 'A', 'B']
+        expected_num_edges = np.array([
+            [1, 2, 2, 1],
+            [2, 1, 1, 2]
+        ]).T
+
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
+        sample[:, :, 1] = W2
+        metric = NumberOfEdgesTypesDirected(neuronal_types)
+        calculated_num_edges = metric.calculate_for_sample(sample)
+        self.assertTrue(np.all(expected_num_edges == calculated_num_edges))
+
+    def test_calc_change_score(self):
+        W1 = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [1, 1, 0, 0],
+            [0, 0, 1, 0]
+        ])
+        W2 = np.array([
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 1, 0]
+        ])
+
+        neuronal_types = ['A', 'B', 'A', 'B']
+        metric = NumberOfEdgesTypesDirected(neuronal_types)
+
+        calculated_change_score = metric.calc_change_score(W1, (0, 1))
+        expected_change_score = np.array([0, -1, 0, 0])
+        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+
+        calculated_change_score = metric.calc_change_score(W1, (2, 3))
+        expected_change_score = np.array([0, 1, 0, 0])
+        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+
+        calculated_change_score = metric.calc_change_score(W2, (0, 2))
+        expected_change_score = np.array([-1, 0, 0, 0])
+        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+
+        calculated_change_score = metric.calc_change_score(W2, (1, 2))
+        expected_change_score = np.array([0, 0, 1, 0])
+        self.assertTrue(np.all(expected_change_score == calculated_change_score))
 
 
 class TestMetricsCollection(unittest.TestCase):
     def test_metrics_setup(self):
         metrics = [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()]
         collection = MetricsCollection(metrics, is_directed=True, n_nodes=3)
-        
+
         expected_metric_names = tuple([str(NumberOfEdgesDirected()), str(TotalReciprocity()), str(InDegree())])
 
         self.assertTrue(collection.metric_names == expected_metric_names)
 
         metrics = [InDegree(), UndirectedDegree()]
         with self.assertRaises(ValueError):
-            collection = MetricsCollection(metrics, is_directed=True, n_nodes=3) # Should fail because we have an undirected metric in a directed metrics collection
+            collection = MetricsCollection(metrics, is_directed=True,
+                                           n_nodes=3)  # Should fail because we have an undirected metric in a directed metrics collection
 
         with self.assertRaises(ValueError):
-            collection = MetricsCollection(metrics, is_directed=False, n_nodes=3) # Should fail because we have a directed metric in an undirected metrics collection
+            collection = MetricsCollection(metrics, is_directed=False,
+                                           n_nodes=3)  # Should fail because we have a directed metric in an undirected metrics collection
 
     def test_collinearity_fixer(self):
         n = 18
@@ -197,35 +320,36 @@ class TestMetricsCollection(unittest.TestCase):
         test_scenarios = {
             "num_edges__total_reciprocity__indegree": {
                 "metrics": [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()],
-                "expected_num_of_features": 1 + 1 + n-1, # InDegree is trimmed by 1 because of collinearity with num_of_edges
+                "expected_num_of_features": 1 + 1 + n - 1,
+                # InDegree is trimmed by 1 because of collinearity with num_of_edges
                 "expected_trimmed_metrics": [str(InDegree())]
             },
             "indegree": {
                 "metrics": [InDegree()],
-                "expected_num_of_features": n, # There is no collinearity since InDegree() is the only feature
+                "expected_num_of_features": n,  # There is no collinearity since InDegree() is the only feature
                 "expected_trimmed_metrics": []
             },
             "outdegree": {
                 "metrics": [OutDegree()],
-                "expected_num_of_features": n, # There is no collinearity since InDegree() is the only feature
+                "expected_num_of_features": n,  # There is no collinearity since InDegree() is the only feature
                 "expected_trimmed_metrics": []
             },
             "in_outdegree": {
                 "metrics": [InDegree(), OutDegree()],
-                "expected_num_of_features": n+n-1, # There is no collinearity since InDegree() is the only feature
+                "expected_num_of_features": n + n - 1,  # There is no collinearity since InDegree() is the only feature
                 "expected_trimmed_metrics": [str(InDegree())]
             },
             "num_edges__total_reciprocity__indegree_outdegree": {
                 "metrics": [NumberOfEdgesDirected(), TotalReciprocity(), InDegree(), OutDegree()],
-                "expected_num_of_features": 1 + 1 + n-1 + n-1,
+                "expected_num_of_features": 1 + 1 + n - 1 + n - 1,
                 "expected_trimmed_metrics": [str(InDegree()), str(OutDegree())]
             }
-            
+
         }
 
         for scenario_data in test_scenarios.values():
             collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True, n_nodes=n)
-            
+
             # Check the general number of features matches the expectation
             self.assertEqual(collection.num_of_features, scenario_data["expected_num_of_features"])
 
@@ -233,7 +357,8 @@ class TestMetricsCollection(unittest.TestCase):
             for metric in scenario_data["metrics"]:
                 if str(metric) in scenario_data["expected_trimmed_metrics"]:
                     self.assertEqual(collection.get_metric(str(metric)).base_idx, 1)
-                elif hasattr(metric, "base_idx"): # Only metrics with a base_idx can be trimmed. The others aren't tested
+                elif hasattr(metric,
+                             "base_idx"):  # Only metrics with a base_idx can be trimmed. The others aren't tested
                     self.assertEqual(collection.get_metric(str(metric)).base_idx, 0)
 
     def test_calculate_statistics(self):
@@ -285,7 +410,7 @@ class TestMetricsCollection(unittest.TestCase):
         expected_num_of_features = math.comb(n, 2) + 1
 
         self.assertEqual(num_of_features, expected_num_of_features)
-    
+
     def test_calc_change_scores(self):
         metrics = [NumberOfEdgesDirected(), Reciprocity()]
         collection = MetricsCollection(metrics, is_directed=True, n_nodes=3)
@@ -304,9 +429,8 @@ class TestMetricsCollection(unittest.TestCase):
 
         flipped_indices = (2, 0)
         result = collection.calc_change_scores(W1, indices=flipped_indices)
-        
+
         # 1st is -1 because we lost an edge, and 3rd entry is -1 because node #2 lost it's reciprocity
-        expected_result = [-1, 0, -1, 0] 
+        expected_result = [-1, 0, -1, 0]
 
         self.assertTrue(all(result == expected_result))
-
