@@ -22,6 +22,7 @@ class ERGM():
                  sample_size=100,
                  n_mcmc_steps=500,
                  verbose=True,
+                 use_sparse_matrix=False,
                  optimization_options={}):
         """
         An ERGM model object. 
@@ -54,7 +55,7 @@ class ERGM():
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
-        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes)
+        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes, use_sparse_matrix=use_sparse_matrix)
 
         if initial_thetas is not None:
             self._thetas = initial_thetas

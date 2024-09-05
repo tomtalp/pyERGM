@@ -186,7 +186,17 @@ class InDegree(BaseDegreeVector):
         return diff[self.base_idx:]
 
     def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
-        return networks_sample.sum(axis=0)[self.base_idx:]
+        summed_tensor = networks_sample.sum(axis=0)
+
+        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
+            n_nodes = networks_sample.shape[0]
+            n_samples = networks_sample.shape[2]
+
+            indices = summed_tensor.indices()[:, self.base_idx:]
+            values = summed_tensor.values()[self.base_idx:]
+            return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
+        else:
+            return summed_tensor[self.base_idx:]
 
 
 class OutDegree(BaseDegreeVector):
@@ -214,7 +224,17 @@ class OutDegree(BaseDegreeVector):
         return diff[self.base_idx:]
 
     def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
-        return networks_sample.sum(axis=1)[self.base_idx:]
+        summed_tensor = networks_sample.sum(axis=1)
+
+        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
+            n_nodes = networks_sample.shape[0]
+            n_samples = networks_sample.shape[2]
+
+            indices = summed_tensor.indices()[:, self.base_idx:]
+            values = summed_tensor.values()[self.base_idx:]
+            return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
+        else:
+            return summed_tensor[self.base_idx:]
 
 
 class UndirectedDegree(BaseDegreeVector):
