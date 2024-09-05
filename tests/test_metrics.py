@@ -34,6 +34,30 @@ class TestNumberOfEdgesDirected(unittest.TestCase):
         expected_result = 4
 
         self.assertEqual(result, expected_result)
+    
+    def test_num_of_edges_on_sample(self):
+        metric = NumberOfEdgesDirected()
+        n = 3
+        sample_size = 2
+        W1 = np.array([
+            [0, 1, 0],
+            [1, 0, 1],
+            [1, 0, 0]
+        ])
+        W2 = np.array([
+            [0, 0, 0],
+            [1, 0, 1],
+            [1, 0, 0]
+        ])
+
+        sample = np.zeros((n,n,sample_size))
+        sample[:,:,0] = W1
+        sample[:, :, 1] = W2
+
+        result = metric.calculate_for_sample(sample)
+        expected_result = np.array([4, 3])
+
+        self.assertTrue(np.all(result == expected_result))
 
 
 class TestNumberOfTriangles(unittest.TestCase):

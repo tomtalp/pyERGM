@@ -11,7 +11,6 @@ import sampling
 from utils import *
 from metrics import *
 
-
 class ERGM():
     def __init__(self,
                  n_nodes,
@@ -23,6 +22,7 @@ class ERGM():
                  sample_size=100,
                  n_mcmc_steps=500,
                  verbose=True,
+                 use_sparse_matrix=False,
                  optimization_options={}):
         """
         An ERGM model object. 
@@ -55,7 +55,7 @@ class ERGM():
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
-        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes)
+        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes, use_sparse_matrix=use_sparse_matrix)
 
         if initial_thetas is not None:
             self._thetas = initial_thetas
@@ -102,8 +102,8 @@ class ERGM():
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
-    def generate_networks_for_sample(self, seed_network=None, replace=True):
-        sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics)
+    def generate_networks_for_sample(self, seed_network=None, replace=True, burn_in=10000, mcmc_steps_per_sample=1000):
+        sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics, burn_in, mcmc_steps_per_sample)
 
         if seed_network is None:
             G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
@@ -143,7 +143,9 @@ class ERGM():
             convergence_criterion="hotelling",
             cov_matrix_estimation_method="batch",
             cov_matrix_num_batches=25,
-            hotelling_confidence=0.99):
+            hotelling_confidence=0.99,
+            mcmc_burn_in=1000, 
+            mcmc_steps_per_sample=10):
         """
         Fit an ERGM model to a given network.
 
@@ -194,39 +196,19 @@ class ERGM():
         self.optimization_start_time = time.time()
         num_of_features = self._network_statistics.num_of_features
 
-        if convergence_criterion == "hotelling":
-            hotelling_critical_value = f.ppf(1 - hotelling_confidence, num_of_features,
-                                             self.sample_size - num_of_features)  # F(p, n-p) TODO - doc this better
-
         grads = np.zeros((opt_steps, num_of_features))
         hotelling_statistics = []
 
-        prev_cov_matrix = np.ones((num_of_features, num_of_features))
+        if convergence_criterion == "hotelling":
+            hotelling_critical_value = f.ppf(1 - hotelling_confidence, num_of_features,
+                                            self.sample_size - num_of_features)  # F(p, n-p) TODO - doc this better
 
-        seed_network = None
-
+        seed_network = observed_network
+        burn_in = mcmc_burn_in
         for i in range(opt_steps):
-            if ((i + 1) % steps_for_decay) == 0:
-                lr *= (1 - lr_decay_pct)
-
-                if self.sample_size < max_nets_for_sample:
-                    self.sample_size *= (1 + sample_pct_growth)
-                    self.sample_size = np.min([int(self.sample_size), max_nets_for_sample])
-                    # As in the constructor, the sample size must be even.
-                    if self.sample_size % 2 != 0:
-                        self.sample_size += 1
-                    print(f"\t Sample size increased at step {i + 1} to {self.sample_size}")
-
-                    if convergence_criterion == "hotelling":
-                        hotelling_critical_value = f.ppf(1 - hotelling_confidence, num_of_features,
-                                                         self.sample_size - num_of_features)  # F(p, n-p) TODO - doc this better
-
-                if sliding_grad_window_k < max_sliding_window_size:
-                    sliding_grad_window_k *= (1 + sample_pct_growth)
-                    sliding_grad_window_k = np.min(
-                        [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
-
-            networks_for_sample = self.generate_networks_for_sample(seed_network=seed_network)
+            if i > 0:
+                burn_in = 0
+            networks_for_sample = self.generate_networks_for_sample(seed_network=seed_network, burn_in=burn_in, mcmc_steps_per_sample=mcmc_steps_per_sample)
             seed_network = networks_for_sample[:, :, -1]
 
             features_of_net_samples = self._network_statistics.calculate_sample_statistics(networks_for_sample)
@@ -252,12 +234,12 @@ class ERGM():
 
             idx_for_sliding_grad = np.max([0, i - sliding_grad_window_k + 1])
             sliding_window_grads = grads[idx_for_sliding_grad:i + 1].mean()
-
+            
             if i % steps_for_decay == 0:
                 delta_t = time.time() - self.optimization_start_time
                 # print(f"Step {i+1} - grad: {grads[i - 1]}, window_grad: {sliding_window_grads:.2f} lr: {lr:.10f}, thetas: {self._thetas}, time from start: {delta_t:.2f}, sample_size: {self.sample_size}, sliding_grad_window_k: {sliding_grad_window_k}")
                 print(
-                    f"Step {i + 1} - lr: {lr:.10f}, time from start: {delta_t:.2f}, window_grad: {sliding_window_grads:.2f}")
+                    f"Step {i + 1} - lr: {lr:.7f}, time from start: {delta_t:.2f}, window_grad: {sliding_window_grads:.2f}")
 
             if convergence_criterion == "hotelling":
                 dist = mahalanobis(observed_features, mean_features, inv_estimated_cov_matrix)
@@ -278,13 +260,21 @@ class ERGM():
                     # "inv_hessian_norm": np.linalg.norm(inv_hessian)
                 })
 
-                # FOR DEBUG ONLY -
-                if np.linalg.norm(inv_estimated_cov_matrix) / np.linalg.norm(prev_cov_matrix) > 10 ** 6:
-                    print(f"Covariance matrix decreased in iteration {i}")
-                    print(f"Prev inv_cov matrix norm - {np.linalg.norm(prev_cov_matrix)}")
-                    print(f"Current inv_cov matrix norm - {np.linalg.norm(inv_estimated_cov_matrix)}")
+                if ((i + 1) % steps_for_decay) == 0:
+                    lr *= (1 - lr_decay_pct)
 
-                prev_cov_matrix = inv_estimated_cov_matrix
+                    if self.sample_size < max_nets_for_sample:
+                        self.sample_size *= (1 + sample_pct_growth)
+                        self.sample_size = np.min([int(self.sample_size), max_nets_for_sample])
+                        # As in the constructor, the sample size must be even.
+                        if self.sample_size % 2 != 0:
+                            self.sample_size += 1
+                        print(f"\t Sample size increased at step {i + 1} to {self.sample_size}")
+
+                    if sliding_grad_window_k < max_sliding_window_size:
+                        sliding_grad_window_k *= (1 + sample_pct_growth)
+                        sliding_grad_window_k = np.min(
+                            [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
                 if hotelling_as_f_statistic <= hotelling_critical_value:
                     print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
@@ -301,7 +291,7 @@ class ERGM():
                     break
             else:
                 raise ValueError(f"Convergence criterion {convergence_criterion} not defined")
-
+            
         return grads, hotelling_statistics
 
     def calculate_probability(self, W: np.ndarray):
