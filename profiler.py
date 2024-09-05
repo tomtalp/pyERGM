@@ -62,21 +62,22 @@ elif args.type == "big_network":
     is_directed = True
 
     estimated_p_seed = np.sum(W) / (n*(n-1))
-
+    print(f"estimated_p_seed = {estimated_p_seed}")
     metrics = [NumberOfEdgesDirected(), TotalReciprocity()]
 
-    fitted_model = ERGM(n, metrics, is_directed=is_directed, sample_size=10000, n_mcmc_steps=n, seed_MCMC_proba=estimated_p_seed)
+    fitted_model = ERGM(n, metrics, is_directed=is_directed, sample_size=2000, n_mcmc_steps=n, seed_MCMC_proba=estimated_p_seed)
 
     # # convergence_criterion = "zero_grad_norm"
     convergence_criterion = "hotelling"
 
-    hotelling_conf = 0.9
-    grads, hotelling = fitted_model.fit(W, lr=0.05, opt_steps=100, 
-                            lr_decay_pct=0.1, steps_for_decay=25,
+    hotelling_conf = 0.99
+    grads, hotelling = fitted_model.fit(W, lr=0.5, opt_steps=40, 
+                            lr_decay_pct=0.05, steps_for_decay=1,
                             sliding_grad_window_k=20, sample_pct_growth=0.05, 
                             convergence_criterion=convergence_criterion, 
                             optimization_method="newton_raphson",
                             hotelling_confidence=hotelling_conf,
+                            mcmc_burn_in=1000, mcmc_steps_per_sample=1000
                             )
 else:
     raise ValueError(f"Type {args.type} is invalid")

@@ -3,11 +3,11 @@ from typing import Collection
 from copy import deepcopy
 
 import numpy as np
+import torch
 import networkx as nx
 from numba import njit
 
 from utils import *
-
 
 class Metric(ABC):
     def __init__(self, requires_graph=False):
@@ -38,6 +38,7 @@ class Metric(ABC):
         -------
         statistic of proposed_network minus statistic of current_network.
         """
+        i, j = indices
         if self.requires_graph:
             proposed_network = current_network.copy()
             if proposed_network.has_edge(i, j):
@@ -45,7 +46,6 @@ class Metric(ABC):
             else:
                 proposed_network.add_edge(i, j)
         else:
-            i, j = indices
             proposed_network = current_network.copy()
             proposed_network[i, j] = 1 - proposed_network[i, j]
 
@@ -86,7 +86,7 @@ class NumberOfEdgesUndirected(Metric):
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         return -1 if current_network[indices[0], indices[1]] else 1
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
+    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         """
         Sum each matrix over all matrices in sample
         """
@@ -111,15 +111,12 @@ class NumberOfEdgesDirected(Metric):
         return -1 if current_network[indices[0], indices[1]] else 1
 
     @staticmethod
-    @njit
-    def calculate_for_sample(networks_sample: np.ndarray):
+    @calc_for_sample_njit()
+    def calculate_for_sample(networks_sample: np.ndarray | torch.Tensor):
         """
         Sum each matrix over all matrices in sample
         """
-        n = networks_sample.shape[0]
-        reshaped_networks_sample = networks_sample.reshape(n ** 2, networks_sample.shape[2])
-        return np.sum(reshaped_networks_sample, axis=0)
-
+        return networks_sample.sum(axis=0).sum(axis=0)
 
 # TODO: change the name of this one to undirected and implement also a directed version?
 class NumberOfTriangles(Metric):
@@ -192,8 +189,18 @@ class InDegree(BaseDegreeVector):
         diff[j] = sign
         return diff[self.base_idx:]
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
-        return networks_sample.sum(axis=0)[self.base_idx:]
+    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
+        summed_tensor = networks_sample.sum(axis=0)
+
+        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
+            n_nodes = networks_sample.shape[0]
+            n_samples = networks_sample.shape[2]
+
+            indices = summed_tensor.indices()[:, self.base_idx:]
+            values = summed_tensor.values()[self.base_idx:]
+            return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
+        else:
+            return summed_tensor[self.base_idx:]
 
 
 class OutDegree(BaseDegreeVector):
@@ -221,8 +228,18 @@ class OutDegree(BaseDegreeVector):
         diff[i] = sign
         return diff[self.base_idx:]
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
-        return networks_sample.sum(axis=1)[self.base_idx:]
+    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
+        summed_tensor = networks_sample.sum(axis=1)
+
+        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
+            n_nodes = networks_sample.shape[0]
+            n_samples = networks_sample.shape[2]
+
+            indices = summed_tensor.indices()[:, self.base_idx:]
+            values = summed_tensor.values()[self.base_idx:]
+            return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
+        else:
+            return summed_tensor[self.base_idx:]
 
 
 class UndirectedDegree(BaseDegreeVector):
@@ -308,13 +325,139 @@ class TotalReciprocity(Metric):
             return 0
 
     @staticmethod
-    # @njit
-    def calculate_for_sample(networks_sample: np.ndarray):
-        return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
+    # @njit # Not supporting neither np.einsum and sparse torch
+    def calculate_for_sample(networks_sample: np.ndarray | torch.Tensor):
+        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
+            transposed_sparse_tensor = transpose_sparse_sample_matrices(networks_sample)
+            return torch.sum(networks_sample * transposed_sparse_tensor, axis=(0, 1)) / 2
+        elif isinstance(networks_sample, np.ndarray):
+            return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
+        else:
+            raise ValueError(f"Unsupported type of sample: {type(networks_sample)}! Supported types are np.ndarray and "
+                             f"torch.Tensor with is_sparse=True")
 
+
+class ExWeightNumEdges(Metric):
+    """
+    Weighted sum of the number of edges, based on exogenous attributes.
+    """
+
+    # TODO: Collection doesn't necessarily support __getitem__, find a typing hint of a sized Iterable that does.
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(requires_graph=False)
+        self.exogenous_attr = exogenous_attr
+        self.num_weight_mats = self._get_num_weight_mats()
+        self.edge_weights = None
+        self._calc_edge_weights()
+
+    @abstractmethod
+    def _calc_edge_weights(self):
+        ...
+
+    @abstractmethod
+    def _get_num_weight_mats(self):
+        ...
+
+    def get_effective_feature_count(self, n):
+        return self.num_weight_mats
+
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        sign = -1 if current_network[indices[0], indices[1]] else 1
+        return sign * self.edge_weights[:, indices[0], indices[1]]
+
+    def calculate(self, input: np.ndarray):
+        res = np.einsum('ij,kij->k', input, self.edge_weights)
+        if not self._is_directed:
+            res = res / 2
+        return res
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        res = np.einsum('ijk,mij->mk', networks_sample, self.edge_weights)
+        if not self._is_directed:
+            res = res / 2
+        return res
+
+
+class NumberOfEdgesTypesDirected(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(exogenous_attr)
+        self._is_directed = True
+        
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        unique_types = sorted(set(self.exogenous_attr))
+        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        weight_mat_idx = 0
+        for pre_type in unique_types:
+            for post_type in unique_types:
+                for i in range(num_nodes):
+                    for j in range(num_nodes):
+                        if i == j:
+                            continue
+                        if self.exogenous_attr[i] == pre_type and self.exogenous_attr[j] == post_type:
+                            self.edge_weights[weight_mat_idx, i, j] = 1
+                weight_mat_idx += 1
+
+    def _get_num_weight_mats(self):
+        return len(set(self.exogenous_attr)) ** 2
+
+
+class NodeAttrSum(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection, is_directed: bool):
+        super().__init__(exogenous_attr)
+        self._is_directed = is_directed
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                if i == j:
+                    continue
+                self.edge_weights[0, i, j] = self.exogenous_attr[i] + self.exogenous_attr[j]
+
+    def _get_num_weight_mats(self):
+        return 1
+
+
+class NodeAttrSumOut(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(exogenous_attr)
+        self._is_directed = True
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        for i in range(num_nodes):
+            self.edge_weights[0, i, :] = self.exogenous_attr[i] * np.ones(num_nodes)
+            self.edge_weights[0, i, i] = 0
+
+    def _get_num_weight_mats(self):
+        return 1
+
+
+class NodeAttrSumIn(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(exogenous_attr)
+        self._is_directed = True
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        for j in range(num_nodes):
+            self.edge_weights[0, :, j] = self.exogenous_attr[j] * np.ones(num_nodes)
+            self.edge_weights[0, j, j] = 0
+
+    def _get_num_weight_mats(self):
+        return 1
 
 class MetricsCollection:
-    def __init__(self, metrics: Collection[Metric], is_directed: bool, n_nodes: int, fix_collinearity=True):
+    def __init__(self, 
+                 metrics: Collection[Metric], 
+                 is_directed: bool, 
+                 n_nodes: int, 
+                 fix_collinearity=True, 
+                 use_sparse_matrix=False):
         self.metrics = tuple([deepcopy(metric) for metric in metrics])
         self.metric_names = tuple([str(metric) for metric in self.metrics])
 
@@ -339,6 +482,7 @@ class MetricsCollection:
         self.num_of_features = sum([metric.get_effective_feature_count(self.n_nodes) for metric in self.metrics])
 
         self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
+        self.use_sparse_matrix = use_sparse_matrix
 
     def get_metric(self, metric_name: str) -> Metric:
         """
@@ -438,17 +582,28 @@ class MetricsCollection:
         if self.requires_graph:
             networks_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in networks_sample]
 
+        if self.use_sparse_matrix:
+            networks_as_sparse_tensor = np_tensor_to_sparse_tensor(networks_sample)
+
         feature_idx = 0
         for metric in self.metrics:
             n_features_from_metric = metric.get_effective_feature_count(self.n_nodes)
 
             if metric.requires_graph:
                 networks = networks_as_graphs
+            elif self.use_sparse_matrix:
+                networks = networks_as_sparse_tensor
             else:
                 networks = networks_sample
-
-            features_of_net_samples[feature_idx:feature_idx + n_features_from_metric] = metric.calculate_for_sample(
-                networks)
+            
+            features = metric.calculate_for_sample(networks)
+            
+            if isinstance(features, torch.Tensor):
+                if features.is_sparse:
+                    features = features.to_dense()
+                features = features.numpy()
+            
+            features_of_net_samples[feature_idx:feature_idx + n_features_from_metric] = features
             feature_idx += n_features_from_metric
 
         return features_of_net_samples
