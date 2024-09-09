@@ -34,7 +34,7 @@ class TestNumberOfEdgesDirected(unittest.TestCase):
         expected_result = 4
 
         self.assertEqual(result, expected_result)
-    
+
     def test_num_of_edges_on_sample(self):
         metric = NumberOfEdgesDirected()
         n = 3
@@ -50,8 +50,8 @@ class TestNumberOfEdgesDirected(unittest.TestCase):
             [1, 0, 0]
         ])
 
-        sample = np.zeros((n,n,sample_size))
-        sample[:,:,0] = W1
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
         sample[:, :, 1] = W2
 
         result = metric.calculate_for_sample(sample)
@@ -463,32 +463,42 @@ class TestMetricsCollection(unittest.TestCase):
     def test_collinearity_fixer(self):
         n = 18
 
+        possible_types = ['A', 'B', 'C', 'D']
+        # sampled once using np.random.choice(len(possible_types), size=n)
+        type_idx_per_node = [3, 3, 0, 0, 0, 0, 1, 3, 1, 1, 3, 0, 3, 2, 0, 3, 3, 1]
+        neuronal_types = [possible_types[type_idx_per_node[i]] for i in range(n)]
+
         test_scenarios = {
             "num_edges__total_reciprocity__indegree": {
                 "metrics": [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()],
                 "expected_num_of_features": 1 + 1 + n - 1,
                 # InDegree is trimmed by 1 because of collinearity with num_of_edges
-                "expected_trimmed_metrics": [str(InDegree())]
+                "expected_trimmed_metrics": {str(InDegree()): [0]}
             },
             "indegree": {
                 "metrics": [InDegree()],
                 "expected_num_of_features": n,  # There is no collinearity since InDegree() is the only feature
-                "expected_trimmed_metrics": []
+                "expected_trimmed_metrics": {}
             },
             "outdegree": {
                 "metrics": [OutDegree()],
                 "expected_num_of_features": n,  # There is no collinearity since InDegree() is the only feature
-                "expected_trimmed_metrics": []
+                "expected_trimmed_metrics": {}
             },
             "in_outdegree": {
                 "metrics": [InDegree(), OutDegree()],
                 "expected_num_of_features": n + n - 1,  # There is no collinearity since InDegree() is the only feature
-                "expected_trimmed_metrics": [str(InDegree())]
+                "expected_trimmed_metrics": {str(InDegree()): [0]}
             },
             "num_edges__total_reciprocity__indegree_outdegree": {
                 "metrics": [NumberOfEdgesDirected(), TotalReciprocity(), InDegree(), OutDegree()],
                 "expected_num_of_features": 1 + 1 + n - 1 + n - 1,
-                "expected_trimmed_metrics": [str(InDegree()), str(OutDegree())]
+                "expected_trimmed_metrics": {str(InDegree()): [0], str(OutDegree()): [0]}
+            },
+            "num_edges__exogenous_types": {
+                "metrics": {NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(neuronal_types)},
+                "expected_num_of_features": 1 + len(set(neuronal_types)) ** 2 - 2,
+                "expected_trimmed_metrics": {str(NumberOfEdgesTypesDirected(neuronal_types)): [0, 10]}
             }
 
         }
@@ -501,11 +511,11 @@ class TestMetricsCollection(unittest.TestCase):
 
             # Check if the correct metrics were trimmed
             for metric in scenario_data["metrics"]:
-                if str(metric) in scenario_data["expected_trimmed_metrics"]:
-                    self.assertEqual(collection.get_metric(str(metric)).base_idx, 1)
-                elif hasattr(metric,
-                             "base_idx"):  # Only metrics with a base_idx can be trimmed. The others aren't tested
-                    self.assertEqual(collection.get_metric(str(metric)).base_idx, 0)
+                if str(metric) in scenario_data["expected_trimmed_metrics"].keys():
+                    self.assertEqual(set(collection.get_metric(str(metric))._indices_to_ignore),
+                                     set(scenario_data["expected_trimmed_metrics"][str(metric)]))
+                elif hasattr(metric, "_indices_to_ignore"):  # Only metrics with a base_idx can be trimmed. The others aren't tested
+                    self.assertEqual(collection.get_metric(str(metric))._indices_to_ignore, [])
 
     def test_calculate_statistics(self):
         # Test undirected graphs
