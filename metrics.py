@@ -482,9 +482,14 @@ class MetricsCollection:
         self.metrics = tuple([deepcopy(metric) for metric in metrics])
         for m in self.metrics:
             m._n_nodes = n_nodes
-        self.metric_names = tuple([str(metric) for metric in self.metrics])
+            if hasattr(m, "_indices_to_ignore"):
+                if m._indices_to_ignore:
+                    cur_num_features = m._get_effective_feature_count()
+                    if max(m._indices_to_ignore) >= cur_num_features or min(m._indices_to_ignore) <= -cur_num_features:
+                        raise ValueError(
+                            f"{str(m)} got indices to ignore {m._indices_to_ignore} which are out of bound for "
+                            f"{cur_num_features} features it has")
 
-        self.requires_graph = any([x.requires_graph for x in self.metrics])
         self.is_directed = is_directed
         for x in self.metrics:
             if x._is_directed != self.is_directed:
@@ -492,11 +497,11 @@ class MetricsCollection:
                 metric_is_directed_str = "a directed" if x._is_directed else "an undirected"
                 raise ValueError(f"Trying to initialize {model_is_directed_str} model with {metric_is_directed_str} "
                                  f"metric `{str(x)}`!")
-        self.num_of_metrics = len(self.metrics)
 
         self.n_nodes = n_nodes
 
         self.use_sparse_matrix = use_sparse_matrix
+        self.requires_graph = any([x.requires_graph for x in self.metrics])
 
         self._fix_collinearity = fix_collinearity
         if self._fix_collinearity:
@@ -508,6 +513,8 @@ class MetricsCollection:
         # function
         self.num_of_features = self.calc_num_of_features()
 
+        self.num_of_metrics = len(self.metrics)
+        self.metric_names = tuple([str(metric) for metric in self.metrics])
         self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
 
     def calc_num_of_features(self):
@@ -549,30 +556,20 @@ class MetricsCollection:
         """
         Find collinearity between metrics in the collection.
 
-        Currently this is a naive version that only handles the very simple cases. 
-        TODO - Implement a smarter solution
+        Currently this is a naive version that only handles the very simple cases.
         TODO: revisit the threshold and sample size
         """
-        node_attr_sum_both_name = str(NodeAttrSum([], True))
-        node_attr_sum_in_name = str(NodeAttrSumIn([]))
-        node_attr_sum_out_name = str(NodeAttrSumOut([]))
-        # Note - this is a special case where collinearity cannot be fixed using a base_idx (as each of these metrics
-        # has only on parameter, so one of them must be totally removed). Thus, it is handled separately.
-        if (node_attr_sum_both_name in self.metric_names and node_attr_sum_in_name in self.metric_names and
-                node_attr_sum_out_name in self.metric_names):
-            print(f"Got a collection of metrics that contains {node_attr_sum_both_name}, {node_attr_sum_in_name}, "
-                  f"{node_attr_sum_out_name}, which are linearly dependent, thus one must be removed. "
-                  f"Removing {node_attr_sum_both_name}")
-            self.metrics = tuple([m for m in self.metrics if str(m) != node_attr_sum_both_name])
-
         is_linearly_dependent = True
         while is_linearly_dependent:
             self.num_of_features = self.calc_num_of_features()
 
             # Sample networks from a maximum entropy distribution, for avoiding edge cases (such as a feature is 0 for
             # all networks in the sample).
-            # TODO: is such naive sampling enough? is the sample size good?
             sample = np.random.binomial(n=1, p=0.5, size=(self.n_nodes, self.n_nodes, sample_size))
+
+            # Symmetrize samples if not directed
+            if not self.is_directed:
+                sample = np.round((sample + sample.transpose(1, 0, 2)) / 2)
 
             # Make sure the main diagonal is 0
             for i in range(self.n_nodes):
@@ -587,55 +584,51 @@ class MetricsCollection:
             # that when multiplied by the matrix gives the 0 vector. Namely, there is a single set of coefficients that
             # defines a non-trivial linear combination that equals 0, for *all* the sampled feature vectors. This means
             # the features are linearly dependent.
-
-            # mat_rank = np.linalg.matrix_rank(sample_features)
-            # if mat_rank == self.num_of_features:
-            #     is_linearly_dependent = False
-
             eigen_vals, eigen_vecs = np.linalg.eigh(features_cov_mat)
             small_eigen_vals_indices = np.where(np.abs(eigen_vals) < thr)[0]
-            # TODO: revisit this threshold
             if small_eigen_vals_indices.size == 0:
                 is_linearly_dependent = False
             else:
+                # For each linear dependency (corresponding to an eigen vector with a low value), mark the indices of
+                # features that are involved (identified by a non-zero coefficient in the eigen vector).
                 dependent_features_flags = np.zeros((small_eigen_vals_indices.size, self.num_of_features))
                 for i in range(small_eigen_vals_indices.size):
                     dependent_features_flags[
                         i, np.where(np.abs(eigen_vecs[:, small_eigen_vals_indices[i]]) > thr)[0]] = 1
-                common_dependent_features = np.where(np.prod(dependent_features_flags, axis=0) == 1)[0]
-                # TODO: implement a smarter way to choose which feature to trim? We can't exhaustively iterate all
-                #  subsets of eigen vectors and look for features that take part in multi-collinearity of different
-                #  subsets of features. And if we don't do that, and just remove a feature that appears to be linear
-                #  dependent to to others according to the first eigen vector, is is necessary to do keep the special
-                #  case where there is a feature that is involved in all eigen vectors?
-                candidates_to_remove = common_dependent_features if common_dependent_features.size > 0 else np.where(
-                    dependent_features_flags[0] == 1)[0]
-                i = 0
-                cur_metric = self.get_metric_by_feat_idx(candidates_to_remove[i])
-                is_trimmable = cur_metric._get_effective_feature_count() > 1
-                while not is_trimmable and i < candidates_to_remove.size:
-                    i += 1
-                    cur_metric = self.get_metric_by_feat_idx(candidates_to_remove[i])
-                    is_trimmable = cur_metric._get_effective_feature_count() > 1
-                if not is_trimmable:
-                    print(f"Removing the metric {str(cur_metric)} from the collection to fix multi-collinearity")
-                    self.metrics = tuple([m for m in self.metrics if str(m) != str(cur_metric)])
-                else:
-                    idx_to_delete = self.get_feature_idx_within_metric(candidates_to_remove[i])
-                    cur_metric._indices_to_ignore.append(idx_to_delete)
 
-        # num_edges_name = str(NumberOfEdgesDirected())
-        # indegree_name = str(InDegree())
-        # outdegree_name = str(OutDegree())
-        #
-        # if num_edges_name in self.metric_names and indegree_name in self.metric_names:
-        #     self.get_metric(indegree_name).base_idx = 1
-        #
-        # if num_edges_name in self.metric_names and outdegree_name in self.metric_names:
-        #     self.get_metric(outdegree_name).base_idx = 1
-        #
-        # if indegree_name in self.metric_names and outdegree_name in self.metric_names:
-        #     self.get_metric(indegree_name).base_idx = 1
+                # Calculate the fraction of dependencies each feature is involved in.
+                fraction_of_dependencies_involved = dependent_features_flags.mean(axis=0)
+
+                # Sort the features (their indices) by the fraction of dependencies they are involved in (remove first
+                # features that are involved in more dependencies). Break ties by the original order of the features in
+                # the array (for the consistency of sorting. E.g, if we need to get rid of degree features, always
+                # remove them by the order of nodes).
+                removal_order = np.lexsort((np.arange(self.num_of_features), -fraction_of_dependencies_involved))
+
+                # Iterate the metrics to find one with multiple features, namely effective number of features that is
+                # larger than 1 ('trimmable'). We prefer to trim metrics rather than totally eliminate them from the
+                # collection.
+                i = 0
+                cur_metric = self.get_metric_by_feat_idx(removal_order[i])
+                is_trimmable = cur_metric._get_effective_feature_count() > 1
+                while (not is_trimmable and i < removal_order.size - 1 and fraction_of_dependencies_involved[
+                    removal_order[i]] > 0):
+                    i += 1
+                    cur_metric = self.get_metric_by_feat_idx(removal_order[i])
+                    is_trimmable = cur_metric._get_effective_feature_count() > 1
+
+                # If a trimmable metric was not found (i.e., all features that are involved in the dependency are of
+                # metrics with an effective number of features of 1), totally remove the metric that is involved in most
+                # dependencies.
+                if not is_trimmable:
+                    first_metric = self.get_metric_by_feat_idx(removal_order[0])
+                    print(f"Removing the metric {str(first_metric)} from the collection to fix multi-collinearity")
+                    self.metrics = tuple([m for m in self.metrics if str(m) != str(first_metric)])
+                    self.requires_graph = any([x.requires_graph for x in self.metrics])
+                else:
+                    idx_to_delete = self.get_feature_idx_within_metric(removal_order[i])
+                    print(f"Removing the {idx_to_delete} feature of {str(cur_metric)} to fix multi-collinearity")
+                    cur_metric._indices_to_ignore.append(idx_to_delete)
 
     def calculate_statistics(self, W: np.ndarray):
         """
