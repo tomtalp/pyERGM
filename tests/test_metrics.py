@@ -497,13 +497,13 @@ class TestMetricsCollection(unittest.TestCase):
             },
             "outdegree": {
                 "metrics": [OutDegree()],
-                "expected_num_of_features": n,  # There is no collinearity since InDegree() is the only feature
+                "expected_num_of_features": n, 
                 "expected_trimmed_metrics": {},
                 "expected_eliminated_metrics": []
             },
             "in_outdegree": {
                 "metrics": [InDegree(), OutDegree()],
-                "expected_num_of_features": n + n - 1,  # There is no collinearity since InDegree() is the only feature
+                "expected_num_of_features": n + n - 1,  
                 "expected_trimmed_metrics": {str(InDegree()): [0]},
                 "expected_eliminated_metrics": []
             },
