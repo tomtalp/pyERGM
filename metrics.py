@@ -517,6 +517,10 @@ class MetricsCollection:
         self.metric_names = tuple([str(metric) for metric in self.metrics])
         self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
 
+    def _delete_metric(self, metric: Metric):
+        self.metrics = tuple([m for m in self.metrics if m != metric])
+        self.requires_graph = any([x.requires_graph for x in self.metrics])
+    
     def calc_num_of_features(self):
         return sum([metric._get_effective_feature_count() for metric in self.metrics])
 
@@ -623,8 +627,7 @@ class MetricsCollection:
                 if not is_trimmable:
                     first_metric = self.get_metric_by_feat_idx(removal_order[0])
                     print(f"Removing the metric {str(first_metric)} from the collection to fix multi-collinearity")
-                    self.metrics = tuple([m for m in self.metrics if str(m) != str(first_metric)])
-                    self.requires_graph = any([x.requires_graph for x in self.metrics])
+                    self._delete_metric(metric=first_metric)
                 else:
                     idx_to_delete = self.get_feature_idx_within_metric(removal_order[i])
                     print(f"Removing the {idx_to_delete} feature of {str(cur_metric)} to fix multi-collinearity")

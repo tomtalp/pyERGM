@@ -474,8 +474,14 @@ class TestMetricsCollection(unittest.TestCase):
         # sampled once using np.random.choice(len(possible_types), size=n)
         type_idx_per_node = [3, 3, 0, 0, 0, 0, 1, 3, 1, 1, 3, 0, 3, 2, 0, 3, 3, 1]
         neuronal_types = [possible_types[type_idx_per_node[i]] for i in range(n)]
-
+        
         test_scenarios = {
+            "num_edges_twice": {
+                "metrics": [NumberOfEdgesDirected(), NumberOfEdgesDirected()],
+                "expected_num_of_features": 1,
+                "expected_trimmed_metrics": {},
+                "expected_eliminated_metrics": []
+            },
             "num_edges__total_reciprocity__indegree": {
                 "metrics": [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()],
                 "expected_num_of_features": 1 + 1 + n - 1,
@@ -518,9 +524,15 @@ class TestMetricsCollection(unittest.TestCase):
                             NodeAttrSumOut(np.arange(n))],
                 "expected_num_of_features": 2,
                 "expected_trimmed_metrics": {},
-                "expected_eliminated_metrics": [str(NodeAttrSum(np.arange(n), is_directed=True))]
+                "expected_eliminated_metrics": []
             }
         }
+
+        # In a case where the collinearity fixer is going to eliminate a specific metric, we want to verify that the
+        # correct metric was removed by checking the pointer of the removed metric (since some metrics might have the same name).
+        # For this reason, we're going to put the metric that's going to be removed in a list and check if the pointer
+        test_scenarios["num_edges_twice"]["expected_eliminated_metrics"] = [test_scenarios["num_edges_twice"]["metrics"][0]]
+        test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["expected_eliminated_metrics"] = [test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["metrics"][0]]
 
         for scenario_data in test_scenarios.values():
             collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True, n_nodes=n)
@@ -536,9 +548,8 @@ class TestMetricsCollection(unittest.TestCase):
                 elif hasattr(metric,
                              "_indices_to_ignore"):  # Only metrics with a base_idx can be trimmed. The others aren't tested
                     self.assertEqual(collection.get_metric(str(metric))._indices_to_ignore, [])
-                elif str(metric) in scenario_data["expected_eliminated_metrics"]:
-                    self.assertTrue(str(metric) not in [str(m) for m in collection.metrics])
-                    self.assertTrue(str(metric) not in [s for s in collection.metric_names])
+                elif metric in scenario_data["expected_eliminated_metrics"]:
+                    self.assertTrue(metric not in [m for m in collection.metrics])
                     self.assertEqual(collection.num_of_metrics, len(collection.metrics))
 
     def test_calculate_statistics(self):
