@@ -9,6 +9,7 @@ from numba import njit
 
 from utils import *
 
+
 class Metric(ABC):
     def __init__(self, requires_graph=False):
         self.requires_graph = requires_graph
@@ -16,12 +17,13 @@ class Metric(ABC):
         # and should not change.
         self._is_directed = None
         self._is_dyadic_independent = True
+        self._n_nodes = None
 
     @abstractmethod
     def calculate(self, input: np.ndarray | nx.Graph):
         pass
 
-    def get_effective_feature_count(self, n):
+    def _get_effective_feature_count(self):
         """
         How many features does this metric produce. Defaults to 1.
         """
@@ -49,7 +51,7 @@ class Metric(ABC):
             proposed_network = current_network.copy()
             proposed_network[i, j] = 1 - proposed_network[i, j]
 
-            if not self.network_stats_calculator.is_directed:
+            if not self._is_directed:
                 proposed_network[j, i] = 1 - proposed_network[j, i]
 
         proposed_network_stat = self.calculate(proposed_network)
@@ -57,14 +59,9 @@ class Metric(ABC):
         return proposed_network_stat - current_network_stat
 
     def calculate_for_sample(self, networks_sample: np.ndarray | Collection[nx.Graph]):
-        if self.requires_graph:
-            n = networks_sample[0].number_of_nodes()
-        else:
-            n = networks_sample.shape[0]
-
         num_of_samples = networks_sample.shape[2]
 
-        result = np.zeros((self.get_effective_feature_count(n), num_of_samples))
+        result = np.zeros((self._get_effective_feature_count(), num_of_samples))
         for i in range(num_of_samples):
             network = networks_sample[i] if self.requires_graph else networks_sample[:, :, i]
             result[:, i] = self.calculate(network)
@@ -118,6 +115,7 @@ class NumberOfEdgesDirected(Metric):
         """
         return networks_sample.sum(axis=0).sum(axis=0)
 
+
 # TODO: change the name of this one to undirected and implement also a directed version?
 class NumberOfTriangles(Metric):
     def __str__(self):
@@ -151,17 +149,17 @@ class NumberOfTriangles(Metric):
 class BaseDegreeVector(Metric):
     """
     A base class for calculating a degree vector for a network.
-    To avoid multicollinearity with other features, an optional parameter `base_idx` can be used to specify
-    which index the calculation starts from.
+    To avoid multicollinearity with other features, an optional parameter `indices_to_ignore` can be used to specify
+    which indices the calculation ignores.
     """
 
-    def __init__(self, requires_graph: bool, is_directed: bool, base_idx=0):
+    def __init__(self, requires_graph: bool, is_directed: bool, indices_to_ignore=[]):
         super().__init__(requires_graph=requires_graph)
         self._is_directed = is_directed
-        self.base_idx = base_idx
+        self._indices_to_ignore = indices_to_ignore
 
-    def get_effective_feature_count(self, n):
-        return n - self.base_idx
+    def _get_effective_feature_count(self):
+        return self._n_nodes - len(self._indices_to_ignore)
 
 
 class InDegree(BaseDegreeVector):
@@ -172,12 +170,12 @@ class InDegree(BaseDegreeVector):
     def __str__(self):
         return "indegree"
 
-    def __init__(self, base_idx=0):
-        super().__init__(requires_graph=False, is_directed=True, base_idx=base_idx)
+    def __init__(self, indices_to_ignore=[]):
+        super().__init__(requires_graph=False, is_directed=True, indices_to_ignore=indices_to_ignore)
         self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
-        return W.sum(axis=0)[self.base_idx:]
+        return np.delete(W.sum(axis=0), self._indices_to_ignore)
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         n = current_network.shape[0]
@@ -187,7 +185,7 @@ class InDegree(BaseDegreeVector):
         sign = -1 if current_network[i, j] else 1
 
         diff[j] = sign
-        return diff[self.base_idx:]
+        return np.delete(diff, self._indices_to_ignore)
 
     def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         summed_tensor = networks_sample.sum(axis=0)
@@ -196,11 +194,12 @@ class InDegree(BaseDegreeVector):
             n_nodes = networks_sample.shape[0]
             n_samples = networks_sample.shape[2]
 
-            indices = summed_tensor.indices()[:, self.base_idx:]
-            values = summed_tensor.values()[self.base_idx:]
+            indices_to_keep = [i for i in range(self._n_nodes) if i not in self._indices_to_ignore]
+            indices = summed_tensor.indices()[:, indices_to_keep]
+            values = summed_tensor.values()[indices_to_keep]
             return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
         else:
-            return summed_tensor[self.base_idx:]
+            return np.delete(summed_tensor, self._indices_to_ignore, axis=0)
 
 
 class OutDegree(BaseDegreeVector):
@@ -211,12 +210,12 @@ class OutDegree(BaseDegreeVector):
     def __str__(self):
         return "outdegree"
 
-    def __init__(self, base_idx=0):
-        super().__init__(requires_graph=False, is_directed=True, base_idx=base_idx)
+    def __init__(self, indices_to_ignore=[]):
+        super().__init__(requires_graph=False, is_directed=True, indices_to_ignore=indices_to_ignore)
         self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
-        return W.sum(axis=1)[self.base_idx:]
+        return np.delete(W.sum(axis=1), self._indices_to_ignore)
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         n = current_network.shape[0]
@@ -226,7 +225,7 @@ class OutDegree(BaseDegreeVector):
         sign = -1 if current_network[i, j] else 1
 
         diff[i] = sign
-        return diff[self.base_idx:]
+        return np.delete(diff, self._indices_to_ignore)
 
     def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         summed_tensor = networks_sample.sum(axis=1)
@@ -235,11 +234,12 @@ class OutDegree(BaseDegreeVector):
             n_nodes = networks_sample.shape[0]
             n_samples = networks_sample.shape[2]
 
-            indices = summed_tensor.indices()[:, self.base_idx:]
-            values = summed_tensor.values()[self.base_idx:]
+            indices_to_keep = [i for i in range(self._n_nodes) if i not in self._indices_to_ignore]
+            indices = summed_tensor.indices()[:, indices_to_keep]
+            values = summed_tensor.values()[indices_to_keep]
             return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
         else:
-            return summed_tensor[self.base_idx:]
+            return np.delete(summed_tensor, self._indices_to_ignore, axis=0)
 
 
 class UndirectedDegree(BaseDegreeVector):
@@ -250,12 +250,12 @@ class UndirectedDegree(BaseDegreeVector):
     def __str__(self):
         return "undirected_degree"
 
-    def __init__(self, base_idx=0):
-        super().__init__(requires_graph=False, is_directed=False, base_idx=base_idx)
+    def __init__(self, indices_to_ignore=[]):
+        super().__init__(requires_graph=False, is_directed=False, indices_to_ignore=indices_to_ignore)
         self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
-        return W.sum(axis=0)[self.base_idx:]
+        return np.delete(W.sum(axis=0), self._indices_to_ignore)
 
 
 class Reciprocity(Metric):
@@ -276,9 +276,9 @@ class Reciprocity(Metric):
     def calculate(self, W: np.ndarray):
         return (W * W.T)[np.triu_indices(W.shape[0], 1)]
 
-    def get_effective_feature_count(self, n):
+    def _get_effective_feature_count(self):
         # n choose 2
-        return n * (n - 1) // 2
+        return self._n_nodes * (self._n_nodes - 1) // 2
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         # Note: we intentionally initialize the whole matrix and return np.triu_indices() by the end (rather than
@@ -325,7 +325,7 @@ class TotalReciprocity(Metric):
             return 0
 
     @staticmethod
-    # @njit # Not supporting neither np.einsum and sparse torch
+    # @njit # Not supporting neither np.einsum nor sparse torch
     def calculate_for_sample(networks_sample: np.ndarray | torch.Tensor):
         if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
             transposed_sparse_tensor = transpose_sparse_sample_matrices(networks_sample)
@@ -346,7 +346,6 @@ class ExWeightNumEdges(Metric):
     def __init__(self, exogenous_attr: Collection):
         super().__init__(requires_graph=False)
         self.exogenous_attr = exogenous_attr
-        self.num_weight_mats = self._get_num_weight_mats()
         self.edge_weights = None
         self._calc_edge_weights()
 
@@ -358,8 +357,8 @@ class ExWeightNumEdges(Metric):
     def _get_num_weight_mats(self):
         ...
 
-    def get_effective_feature_count(self, n):
-        return self.num_weight_mats
+    def _get_effective_feature_count(self):
+        return self._get_num_weight_mats()
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         sign = -1 if current_network[indices[0], indices[1]] else 1
@@ -379,27 +378,38 @@ class ExWeightNumEdges(Metric):
 
 
 class NumberOfEdgesTypesDirected(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection):
+    def __init__(self, exogenous_attr: Collection, indices_to_ignore=[]):
+        self._indices_to_ignore = indices_to_ignore
         super().__init__(exogenous_attr)
         self._is_directed = True
-        
+
     def _calc_edge_weights(self):
         num_nodes = len(self.exogenous_attr)
         unique_types = sorted(set(self.exogenous_attr))
-        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
         weight_mat_idx = 0
+        num_skipped_indices = 0
         for pre_type in unique_types:
             for post_type in unique_types:
-                for i in range(num_nodes):
-                    for j in range(num_nodes):
-                        if i == j:
-                            continue
-                        if self.exogenous_attr[i] == pre_type and self.exogenous_attr[j] == post_type:
-                            self.edge_weights[weight_mat_idx, i, j] = 1
+                if weight_mat_idx not in self._indices_to_ignore:
+                    for i in range(num_nodes):
+                        for j in range(num_nodes):
+                            if i == j:
+                                continue
+                            if self.exogenous_attr[i] == pre_type and self.exogenous_attr[j] == post_type:
+                                self.edge_weights[weight_mat_idx - num_skipped_indices, i, j] = 1
+                else:
+                    num_skipped_indices += 1
                 weight_mat_idx += 1
 
     def _get_num_weight_mats(self):
-        return len(set(self.exogenous_attr)) ** 2
+        return len(set(self.exogenous_attr)) ** 2 - len(self._indices_to_ignore)
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return np.delete(super().calculate_for_sample(networks_sample), self._indices_to_ignore, axis=0)
+
+    def __str__(self):
+        return "num_edges_between_types_directed"
 
 
 class NodeAttrSum(ExWeightNumEdges):
@@ -409,7 +419,7 @@ class NodeAttrSum(ExWeightNumEdges):
 
     def _calc_edge_weights(self):
         num_nodes = len(self.exogenous_attr)
-        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
         for i in range(num_nodes):
             for j in range(num_nodes):
                 if i == j:
@@ -419,6 +429,9 @@ class NodeAttrSum(ExWeightNumEdges):
     def _get_num_weight_mats(self):
         return 1
 
+    def __str__(self):
+        return "node_attribute_sum"
+
 
 class NodeAttrSumOut(ExWeightNumEdges):
     def __init__(self, exogenous_attr: Collection):
@@ -427,13 +440,16 @@ class NodeAttrSumOut(ExWeightNumEdges):
 
     def _calc_edge_weights(self):
         num_nodes = len(self.exogenous_attr)
-        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
         for i in range(num_nodes):
             self.edge_weights[0, i, :] = self.exogenous_attr[i] * np.ones(num_nodes)
             self.edge_weights[0, i, i] = 0
 
     def _get_num_weight_mats(self):
         return 1
+
+    def __str__(self):
+        return "node_attribute_sum_out"
 
 
 class NodeAttrSumIn(ExWeightNumEdges):
@@ -443,7 +459,7 @@ class NodeAttrSumIn(ExWeightNumEdges):
 
     def _calc_edge_weights(self):
         num_nodes = len(self.exogenous_attr)
-        self.edge_weights = np.zeros((self.num_weight_mats, num_nodes, num_nodes))
+        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
         for j in range(num_nodes):
             self.edge_weights[0, :, j] = self.exogenous_attr[j] * np.ones(num_nodes)
             self.edge_weights[0, j, j] = 0
@@ -451,17 +467,29 @@ class NodeAttrSumIn(ExWeightNumEdges):
     def _get_num_weight_mats(self):
         return 1
 
+    def __str__(self):
+        return "node_attribute_in"
+
+
 class MetricsCollection:
-    def __init__(self, 
-                 metrics: Collection[Metric], 
-                 is_directed: bool, 
-                 n_nodes: int, 
-                 fix_collinearity=True, 
+
+    def __init__(self,
+                 metrics: Collection[Metric],
+                 is_directed: bool,
+                 n_nodes: int,
+                 fix_collinearity=True,
                  use_sparse_matrix=False):
         self.metrics = tuple([deepcopy(metric) for metric in metrics])
-        self.metric_names = tuple([str(metric) for metric in self.metrics])
+        for m in self.metrics:
+            m._n_nodes = n_nodes
+            if hasattr(m, "_indices_to_ignore"):
+                if m._indices_to_ignore:
+                    cur_num_features = m._get_effective_feature_count()
+                    if max(m._indices_to_ignore) >= cur_num_features or min(m._indices_to_ignore) <= -cur_num_features:
+                        raise ValueError(
+                            f"{str(m)} got indices to ignore {m._indices_to_ignore} which are out of bound for "
+                            f"{cur_num_features} features it has")
 
-        self.requires_graph = any([x.requires_graph for x in self.metrics])
         self.is_directed = is_directed
         for x in self.metrics:
             if x._is_directed != self.is_directed:
@@ -469,20 +497,32 @@ class MetricsCollection:
                 metric_is_directed_str = "a directed" if x._is_directed else "an undirected"
                 raise ValueError(f"Trying to initialize {model_is_directed_str} model with {metric_is_directed_str} "
                                  f"metric `{str(x)}`!")
-        self.num_of_metrics = len(self.metrics)
+
+        self.n_nodes = n_nodes
+
+        self.use_sparse_matrix = use_sparse_matrix
+        self.requires_graph = any([x.requires_graph for x in self.metrics])
 
         self._fix_collinearity = fix_collinearity
         if self._fix_collinearity:
             self.collinearity_fixer()
 
-        self.n_nodes = n_nodes
+        # Returns the number of features that are being calculated. Since a single metric might return more than one
+        # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
+        # on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count
+        # function
+        self.num_of_features = self.calc_num_of_features()
 
-        # Returns the number of features that are being calculated. Since a single metric might return more than one feature, the length of the statistics vector might be larger than 
-        # the amount of metrics. Since it also depends on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count function
-        self.num_of_features = sum([metric.get_effective_feature_count(self.n_nodes) for metric in self.metrics])
-
+        self.num_of_metrics = len(self.metrics)
+        self.metric_names = tuple([str(metric) for metric in self.metrics])
         self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
-        self.use_sparse_matrix = use_sparse_matrix
+
+    def _delete_metric(self, metric: Metric):
+        self.metrics = tuple([m for m in self.metrics if m != metric])
+        self.requires_graph = any([x.requires_graph for x in self.metrics])
+    
+    def calc_num_of_features(self):
+        return sum([metric._get_effective_feature_count() for metric in self.metrics])
 
     def get_metric(self, metric_name: str) -> Metric:
         """
@@ -490,25 +530,108 @@ class MetricsCollection:
         """
         return self.metrics[self.metric_names.index(metric_name)]
 
-    def collinearity_fixer(self):
+    def get_metric_by_feat_idx(self, idx: int):
+        cum_sum_num_feats = 0
+        for m in self.metrics:
+            cum_sum_num_feats += m._get_effective_feature_count()
+            if cum_sum_num_feats > idx:
+                return m
+
+    def get_feature_idx_within_metric(self, idx: int):
+        cum_sum_num_feats = 0
+        for m_idx in range(len(self.metrics)):
+            next_met_num_feats = self.metrics[m_idx]._get_effective_feature_count()
+            if cum_sum_num_feats + next_met_num_feats > idx:
+                # We want to return the index in the "full" array, namely regardless of ignored features. So, in case
+                # there are indices that are ignored and their indices are smaller than the current feature's in the
+                # trimmed array, we must compensate and add the number of ignored indices.
+                # For example - if we ignore the degree of the first node, and want to return 4 as the index of the
+                # feature of the degree of the fifth node, we must add one, as it appears fourth (namely with index 3)
+                # after trimming.
+                num_ignored_features_before_idx = 0
+                if hasattr(self.metrics[m_idx], "_indices_to_ignore"):
+                    num_ignored_features_before_idx = len(
+                        [i for i in self.metrics[m_idx]._indices_to_ignore if i <= idx - cum_sum_num_feats])
+                return idx - cum_sum_num_feats + num_ignored_features_before_idx
+            else:
+                cum_sum_num_feats += next_met_num_feats
+
+    def collinearity_fixer(self, sample_size=1000, thr=10 ** -5):
         """
         Find collinearity between metrics in the collection.
 
-        Currently this is a naive version that only handles the very simple cases. 
-        TODO - Implement a smarter solution
+        Currently this is a naive version that only handles the very simple cases.
+        TODO: revisit the threshold and sample size
         """
-        num_edges_name = str(NumberOfEdgesDirected())
-        indegree_name = str(InDegree())
-        outdegree_name = str(OutDegree())
+        is_linearly_dependent = True
+        while is_linearly_dependent:
+            self.num_of_features = self.calc_num_of_features()
 
-        if num_edges_name in self.metric_names and indegree_name in self.metric_names:
-            self.get_metric(indegree_name).base_idx = 1
+            # Sample networks from a maximum entropy distribution, for avoiding edge cases (such as a feature is 0 for
+            # all networks in the sample).
+            sample = np.random.binomial(n=1, p=0.5, size=(self.n_nodes, self.n_nodes, sample_size))
 
-        if num_edges_name in self.metric_names and outdegree_name in self.metric_names:
-            self.get_metric(outdegree_name).base_idx = 1
+            # Symmetrize samples if not directed
+            if not self.is_directed:
+                sample = np.round((sample + sample.transpose(1, 0, 2)) / 2)
 
-        if indegree_name in self.metric_names and outdegree_name in self.metric_names:
-            self.get_metric(indegree_name).base_idx = 1
+            # Make sure the main diagonal is 0
+            for i in range(self.n_nodes):
+                for k in range(sample_size):
+                    sample[i, i, k] = 0
+
+            # Calculate the features of the sample
+            sample_features = self.calculate_sample_statistics(sample)
+            features_cov_mat = sample_features @ sample_features.T
+
+            # Determine whether the matrix of features is invertible. If not - this means there is a non-trivial vector,
+            # that when multiplied by the matrix gives the 0 vector. Namely, there is a single set of coefficients that
+            # defines a non-trivial linear combination that equals 0, for *all* the sampled feature vectors. This means
+            # the features are linearly dependent.
+            eigen_vals, eigen_vecs = np.linalg.eigh(features_cov_mat)
+            small_eigen_vals_indices = np.where(np.abs(eigen_vals) < thr)[0]
+            if small_eigen_vals_indices.size == 0:
+                is_linearly_dependent = False
+            else:
+                # For each linear dependency (corresponding to an eigen vector with a low value), mark the indices of
+                # features that are involved (identified by a non-zero coefficient in the eigen vector).
+                dependent_features_flags = np.zeros((small_eigen_vals_indices.size, self.num_of_features))
+                for i in range(small_eigen_vals_indices.size):
+                    dependent_features_flags[
+                        i, np.where(np.abs(eigen_vecs[:, small_eigen_vals_indices[i]]) > thr)[0]] = 1
+
+                # Calculate the fraction of dependencies each feature is involved in.
+                fraction_of_dependencies_involved = dependent_features_flags.mean(axis=0)
+
+                # Sort the features (their indices) by the fraction of dependencies they are involved in (remove first
+                # features that are involved in more dependencies). Break ties by the original order of the features in
+                # the array (for the consistency of sorting. E.g, if we need to get rid of degree features, always
+                # remove them by the order of nodes).
+                removal_order = np.lexsort((np.arange(self.num_of_features), -fraction_of_dependencies_involved))
+
+                # Iterate the metrics to find one with multiple features, namely effective number of features that is
+                # larger than 1 ('trimmable'). We prefer to trim metrics rather than totally eliminate them from the
+                # collection.
+                i = 0
+                cur_metric = self.get_metric_by_feat_idx(removal_order[i])
+                is_trimmable = cur_metric._get_effective_feature_count() > 1
+                while (not is_trimmable and i < removal_order.size - 1 and fraction_of_dependencies_involved[
+                    removal_order[i]] > 0):
+                    i += 1
+                    cur_metric = self.get_metric_by_feat_idx(removal_order[i])
+                    is_trimmable = cur_metric._get_effective_feature_count() > 1
+
+                # If a trimmable metric was not found (i.e., all features that are involved in the dependency are of
+                # metrics with an effective number of features of 1), totally remove the metric that is involved in most
+                # dependencies.
+                if not is_trimmable:
+                    first_metric = self.get_metric_by_feat_idx(removal_order[0])
+                    print(f"Removing the metric {str(first_metric)} from the collection to fix multi-collinearity")
+                    self._delete_metric(metric=first_metric)
+                else:
+                    idx_to_delete = self.get_feature_idx_within_metric(removal_order[i])
+                    print(f"Removing the {idx_to_delete} feature of {str(cur_metric)} to fix multi-collinearity")
+                    cur_metric._indices_to_ignore.append(idx_to_delete)
 
     def calculate_statistics(self, W: np.ndarray):
         """
@@ -536,7 +659,7 @@ class MetricsCollection:
             else:
                 input = W
 
-            n_features_from_metric = metric.get_effective_feature_count(self.n_nodes)
+            n_features_from_metric = metric._get_effective_feature_count()
             statistics[feature_idx:feature_idx + n_features_from_metric] = metric.calculate(input)
             feature_idx += n_features_from_metric
 
@@ -545,6 +668,10 @@ class MetricsCollection:
     def calc_change_scores(self, current_network: np.ndarray, indices: tuple):
         """
         Calculates the vector of change scores, namely g(net_2) - g(net_1)
+
+        NOTE - this function assumes that the size current_network and self.n_nodes are the same, and doesn't validate
+        it, due to runtime considerations. Currently, the only use of this function is within ERGM and
+        NaiveMetropolisHastings, so this is fine.
         """
         if self.requires_graph:
             G1 = connectivity_matrix_to_G(current_network, directed=self.is_directed)
@@ -558,7 +685,7 @@ class MetricsCollection:
             else:
                 input = current_network
 
-            n_features_from_metric = metric.get_effective_feature_count(self.n_nodes)
+            n_features_from_metric = metric._get_effective_feature_count()
             change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input, indices)
             feature_idx += n_features_from_metric
 
@@ -576,6 +703,10 @@ class MetricsCollection:
         -------
         an array of the statistics vector per sample (num_features X sample_size)
         """
+        if networks_sample.shape[0] != self.n_nodes:
+            raise ValueError(
+                f"Got a sample of networks of size {networks_sample.shape[0]}, but Metrics expect size {self.n_nodes}")
+
         num_of_samples = networks_sample.shape[2]
         features_of_net_samples = np.zeros((self.num_of_features, num_of_samples))
 
@@ -587,7 +718,7 @@ class MetricsCollection:
 
         feature_idx = 0
         for metric in self.metrics:
-            n_features_from_metric = metric.get_effective_feature_count(self.n_nodes)
+            n_features_from_metric = metric._get_effective_feature_count()
 
             if metric.requires_graph:
                 networks = networks_as_graphs
@@ -595,14 +726,14 @@ class MetricsCollection:
                 networks = networks_as_sparse_tensor
             else:
                 networks = networks_sample
-            
+
             features = metric.calculate_for_sample(networks)
-            
+
             if isinstance(features, torch.Tensor):
                 if features.is_sparse:
                     features = features.to_dense()
                 features = features.numpy()
-            
+
             features_of_net_samples[feature_idx:feature_idx + n_features_from_metric] = features
             feature_idx += n_features_from_metric
 

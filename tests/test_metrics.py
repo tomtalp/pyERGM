@@ -1,4 +1,7 @@
 import unittest
+
+import numpy as np
+
 from utils import *
 from metrics import *
 
@@ -34,7 +37,7 @@ class TestNumberOfEdgesDirected(unittest.TestCase):
         expected_result = 4
 
         self.assertEqual(result, expected_result)
-    
+
     def test_num_of_edges_on_sample(self):
         metric = NumberOfEdgesDirected()
         n = 3
@@ -50,8 +53,8 @@ class TestNumberOfEdgesDirected(unittest.TestCase):
             [1, 0, 0]
         ])
 
-        sample = np.zeros((n,n,sample_size))
-        sample[:,:,0] = W1
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
         sample[:, :, 1] = W2
 
         result = metric.calculate_for_sample(sample)
@@ -149,19 +152,23 @@ class TestDegreeMetrics(unittest.TestCase):
     def test_get_effective_feature_count(self):
         receiver = InDegree()
         n = 18
-        self.assertEqual(receiver.get_effective_feature_count(n), n)
+        receiver._n_nodes = n
+        self.assertEqual(receiver._get_effective_feature_count(), n)
 
-        receiver = InDegree(base_idx=1)
+        receiver = InDegree(indices_to_ignore=[0])
         n = 18
-        self.assertEqual(receiver.get_effective_feature_count(n), n - 1)
+        receiver._n_nodes = n
+        self.assertEqual(receiver._get_effective_feature_count(), n - 1)
 
         sender = OutDegree()
         n = 18
-        self.assertEqual(sender.get_effective_feature_count(n), n)
+        sender._n_nodes = n
+        self.assertEqual(sender._get_effective_feature_count(), n)
 
-        sender = OutDegree(base_idx=1)
+        sender = OutDegree(indices_to_ignore=[0])
         n = 18
-        self.assertEqual(sender.get_effective_feature_count(n), n - 1)
+        sender._n_nodes = n
+        self.assertEqual(sender._get_effective_feature_count(), n - 1)
 
     def test_calculate(self):
         W = np.array([
@@ -205,11 +212,11 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
     def test_get_num_weight_mats(self):
         neuronal_types = ['A', 'B', 'C']
         metric = NumberOfEdgesTypesDirected(neuronal_types)
-        self.assertTrue(metric.num_weight_mats == 9)
+        self.assertTrue(metric._get_num_weight_mats() == 9)
 
         neuronal_types = ['A', 'B', 'C', 'A', 'B', 'C']
         metric = NumberOfEdgesTypesDirected(neuronal_types)
-        self.assertTrue(metric.num_weight_mats == 9)
+        self.assertTrue(metric._get_num_weight_mats() == 9)
 
     def test_calc_edge_weights(self):
         neuronal_types = ['A', 'B', 'B', 'A']
@@ -463,49 +470,104 @@ class TestMetricsCollection(unittest.TestCase):
     def test_collinearity_fixer(self):
         n = 18
 
+        possible_types = ['A', 'B', 'C', 'D']
+        # sampled once using np.random.choice(len(possible_types), size=n)
+        type_idx_per_node = [3, 3, 0, 0, 0, 0, 1, 3, 1, 1, 3, 0, 3, 2, 0, 3, 3, 1]
+        neuronal_types = [possible_types[type_idx_per_node[i]] for i in range(n)]
+        
+        n_for_multitypes_test = 6
+        multitypes_1 = ['A', 'B']
+        multitypes_2 = ['C', 'D']
+        type_1_idx_per_node = [0, 0, 0, 1, 1, 1,]
+        type_2_idx_per_node = [0, 0, 0, 0, 1, 1]
+        types_1 = [multitypes_1[type_1_idx_per_node[i]] for i in range(n_for_multitypes_test)]
+        types_2 = [multitypes_2[type_2_idx_per_node[i]] for i in range(n_for_multitypes_test)]
+
         test_scenarios = {
+            "num_edges_twice": {
+                "metrics": [NumberOfEdgesDirected(), NumberOfEdgesDirected()],
+                "expected_num_of_features": 1,
+                "expected_trimmed_metrics": {},
+                "expected_eliminated_metrics": []
+            },
             "num_edges__total_reciprocity__indegree": {
                 "metrics": [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()],
                 "expected_num_of_features": 1 + 1 + n - 1,
                 # InDegree is trimmed by 1 because of collinearity with num_of_edges
-                "expected_trimmed_metrics": [str(InDegree())]
+                "expected_trimmed_metrics": {str(InDegree()): [0]},
+                "expected_eliminated_metrics": []
             },
             "indegree": {
                 "metrics": [InDegree()],
                 "expected_num_of_features": n,  # There is no collinearity since InDegree() is the only feature
-                "expected_trimmed_metrics": []
+                "expected_trimmed_metrics": {},
+                "expected_eliminated_metrics": []
             },
             "outdegree": {
                 "metrics": [OutDegree()],
-                "expected_num_of_features": n,  # There is no collinearity since InDegree() is the only feature
-                "expected_trimmed_metrics": []
+                "expected_num_of_features": n, 
+                "expected_trimmed_metrics": {},
+                "expected_eliminated_metrics": []
             },
             "in_outdegree": {
                 "metrics": [InDegree(), OutDegree()],
-                "expected_num_of_features": n + n - 1,  # There is no collinearity since InDegree() is the only feature
-                "expected_trimmed_metrics": [str(InDegree())]
+                "expected_num_of_features": n + n - 1,  
+                "expected_trimmed_metrics": {str(InDegree()): [0]},
+                "expected_eliminated_metrics": []
             },
             "num_edges__total_reciprocity__indegree_outdegree": {
                 "metrics": [NumberOfEdgesDirected(), TotalReciprocity(), InDegree(), OutDegree()],
                 "expected_num_of_features": 1 + 1 + n - 1 + n - 1,
-                "expected_trimmed_metrics": [str(InDegree()), str(OutDegree())]
+                "expected_trimmed_metrics": {str(InDegree()): [0], str(OutDegree()): [0]},
+                "expected_eliminated_metrics": []
+            },
+            "num_edges__exogenous_types": {
+                "metrics": [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(neuronal_types)],
+                "expected_num_of_features": 1 + len(set(neuronal_types)) ** 2 - 2,
+                "expected_trimmed_metrics": {str(NumberOfEdgesTypesDirected(neuronal_types)): [0, 10]},
+                "expected_eliminated_metrics": []
+            },
+            "sum_attr_both__sum_attr_in__sum_attr_out": {
+                "metrics": [NodeAttrSum(np.arange(n), is_directed=True), NodeAttrSumIn(np.arange(n)),
+                            NodeAttrSumOut(np.arange(n))],
+                "expected_num_of_features": 2,
+                "expected_trimmed_metrics": {},
+                "expected_eliminated_metrics": []
+            },
+            "multiple_types": {
+                "n": n_for_multitypes_test,
+                "metrics": [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types_1), NumberOfEdgesTypesDirected(types_2)],
+                "expected_num_of_features": 1 + len(set(types_1)) ** 2 + len(set(types_2)) ** 2 - 2,
+                "expected_trimmed_metrics": {str(NumberOfEdgesTypesDirected(types_1)): [0], str(NumberOfEdgesTypesDirected(types_2)): [0]},
+                "expected_eliminated_metrics": []
             }
-
         }
 
+        # In a case where the collinearity fixer is going to eliminate a specific metric, we want to verify that the
+        # correct metric was removed by checking the pointer of the removed metric (since some metrics might have the same name).
+        # For this reason, we're going to put the metric that's going to be removed in a list and check if the pointer
+        test_scenarios["num_edges_twice"]["expected_eliminated_metrics"] = [test_scenarios["num_edges_twice"]["metrics"][0]]
+        test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["expected_eliminated_metrics"] = [test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["metrics"][0]]
+
         for scenario_data in test_scenarios.values():
-            collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True, n_nodes=n)
+            net_size = scenario_data.get("n", n)
+            
+            collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True, n_nodes=net_size)
 
             # Check the general number of features matches the expectation
             self.assertEqual(collection.num_of_features, scenario_data["expected_num_of_features"])
 
             # Check if the correct metrics were trimmed
             for metric in scenario_data["metrics"]:
-                if str(metric) in scenario_data["expected_trimmed_metrics"]:
-                    self.assertEqual(collection.get_metric(str(metric)).base_idx, 1)
+                if str(metric) in scenario_data["expected_trimmed_metrics"].keys():
+                    self.assertEqual(set(collection.get_metric(str(metric))._indices_to_ignore),
+                                     set(scenario_data["expected_trimmed_metrics"][str(metric)]))
                 elif hasattr(metric,
-                             "base_idx"):  # Only metrics with a base_idx can be trimmed. The others aren't tested
-                    self.assertEqual(collection.get_metric(str(metric)).base_idx, 0)
+                             "_indices_to_ignore"):  # Only metrics with a base_idx can be trimmed. The others aren't tested
+                    self.assertEqual(collection.get_metric(str(metric))._indices_to_ignore, [])
+                elif metric in scenario_data["expected_eliminated_metrics"]:
+                    self.assertTrue(metric not in [m for m in collection.metrics])
+                    self.assertEqual(collection.num_of_metrics, len(collection.metrics))
 
     def test_calculate_statistics(self):
         # Test undirected graphs
