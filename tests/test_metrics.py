@@ -475,6 +475,14 @@ class TestMetricsCollection(unittest.TestCase):
         type_idx_per_node = [3, 3, 0, 0, 0, 0, 1, 3, 1, 1, 3, 0, 3, 2, 0, 3, 3, 1]
         neuronal_types = [possible_types[type_idx_per_node[i]] for i in range(n)]
         
+        n_for_multitypes_test = 6
+        multitypes_1 = ['A', 'B']
+        multitypes_2 = ['C', 'D']
+        type_1_idx_per_node = [0, 0, 0, 1, 1, 1,]
+        type_2_idx_per_node = [0, 0, 0, 0, 1, 1]
+        types_1 = [multitypes_1[type_1_idx_per_node[i]] for i in range(n_for_multitypes_test)]
+        types_2 = [multitypes_2[type_2_idx_per_node[i]] for i in range(n_for_multitypes_test)]
+
         test_scenarios = {
             "num_edges_twice": {
                 "metrics": [NumberOfEdgesDirected(), NumberOfEdgesDirected()],
@@ -525,6 +533,13 @@ class TestMetricsCollection(unittest.TestCase):
                 "expected_num_of_features": 2,
                 "expected_trimmed_metrics": {},
                 "expected_eliminated_metrics": []
+            },
+            "multiple_types": {
+                "n": n_for_multitypes_test,
+                "metrics": [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types_1), NumberOfEdgesTypesDirected(types_2)],
+                "expected_num_of_features": 1 + len(set(types_1)) ** 2 + len(set(types_2)) ** 2 - 2,
+                "expected_trimmed_metrics": {str(NumberOfEdgesTypesDirected(types_1)): [0], str(NumberOfEdgesTypesDirected(types_2)): [0]},
+                "expected_eliminated_metrics": []
             }
         }
 
@@ -535,7 +550,9 @@ class TestMetricsCollection(unittest.TestCase):
         test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["expected_eliminated_metrics"] = [test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["metrics"][0]]
 
         for scenario_data in test_scenarios.values():
-            collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True, n_nodes=n)
+            net_size = scenario_data.get("n", n)
+            
+            collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True, n_nodes=net_size)
 
             # Check the general number of features matches the expectation
             self.assertEqual(collection.num_of_features, scenario_data["expected_num_of_features"])
