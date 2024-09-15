@@ -153,10 +153,13 @@ class BaseDegreeVector(Metric):
     which indices the calculation ignores.
     """
 
-    def __init__(self, requires_graph: bool, is_directed: bool, indices_to_ignore=[]):
+    def __init__(self, requires_graph: bool, is_directed: bool, indices_to_ignore=None):
         super().__init__(requires_graph=requires_graph)
         self._is_directed = is_directed
-        self._indices_to_ignore = indices_to_ignore
+        if indices_to_ignore is None:
+            self._indices_to_ignore = []
+        else:
+            self._indices_to_ignore = deepcopy(indices_to_ignore)
 
     def _get_effective_feature_count(self):
         return self._n_nodes - len(self._indices_to_ignore)
@@ -170,7 +173,7 @@ class InDegree(BaseDegreeVector):
     def __str__(self):
         return "indegree"
 
-    def __init__(self, indices_to_ignore=[]):
+    def __init__(self, indices_to_ignore=None):
         super().__init__(requires_graph=False, is_directed=True, indices_to_ignore=indices_to_ignore)
         self._is_dyadic_independent = True
 
@@ -210,7 +213,7 @@ class OutDegree(BaseDegreeVector):
     def __str__(self):
         return "outdegree"
 
-    def __init__(self, indices_to_ignore=[]):
+    def __init__(self, indices_to_ignore=None):
         super().__init__(requires_graph=False, is_directed=True, indices_to_ignore=indices_to_ignore)
         self._is_dyadic_independent = True
 
@@ -250,7 +253,7 @@ class UndirectedDegree(BaseDegreeVector):
     def __str__(self):
         return "undirected_degree"
 
-    def __init__(self, indices_to_ignore=[]):
+    def __init__(self, indices_to_ignore=None):
         super().__init__(requires_graph=False, is_directed=False, indices_to_ignore=indices_to_ignore)
         self._is_dyadic_independent = True
 
@@ -382,8 +385,11 @@ class ExWeightNumEdges(Metric):
 
 
 class NumberOfEdgesTypesDirected(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection, indices_to_ignore=[]):
-        self._indices_to_ignore = indices_to_ignore
+    def __init__(self, exogenous_attr: Collection, indices_to_ignore=None):
+        if indices_to_ignore is None:
+            self._indices_to_ignore = []
+        else:
+            self._indices_to_ignore = deepcopy(indices_to_ignore)
         super().__init__(exogenous_attr)
         self._is_directed = True
 
@@ -482,8 +488,13 @@ class MetricsCollection:
                  is_directed: bool,
                  n_nodes: int,
                  fix_collinearity=True,
-                 use_sparse_matrix=False):
-        self.metrics = tuple([deepcopy(metric) for metric in metrics])
+                 use_sparse_matrix=False,
+                 # TODO: For tests only, find a better solution
+                 do_copy_metrics=True):
+        if not do_copy_metrics:
+            self.metrics = tuple([metric for metric in metrics])
+        else:
+            self.metrics = tuple([deepcopy(metric) for metric in metrics])
         for m in self.metrics:
             m._n_nodes = n_nodes
             if hasattr(m, "_indices_to_ignore"):
@@ -524,7 +535,7 @@ class MetricsCollection:
     def _delete_metric(self, metric: Metric):
         self.metrics = tuple([m for m in self.metrics if m != metric])
         self.requires_graph = any([x.requires_graph for x in self.metrics])
-    
+
     def calc_num_of_features(self):
         return sum([metric._get_effective_feature_count() for metric in self.metrics])
 
@@ -547,16 +558,25 @@ class MetricsCollection:
             next_met_num_feats = self.metrics[m_idx]._get_effective_feature_count()
             if cum_sum_num_feats + next_met_num_feats > idx:
                 # We want to return the index in the "full" array, namely regardless of ignored features. So, in case
-                # there are indices that are ignored and their indices are smaller than the current feature's in the
-                # trimmed array, we must compensate and add the number of ignored indices.
-                # For example - if we ignore the degree of the first node, and want to return 4 as the index of the
-                # feature of the degree of the fifth node, we must add one, as it appears fourth (namely with index 3)
-                # after trimming.
-                num_ignored_features_before_idx = 0
+                # there are indices that are ignored, we must take the returned index from the array of non-ignored
+                # indices, to compensate for the ones ignored by the indexing of MetricCollection (which holds only
+                # effective features, after ignoring).
+                # For example - if we ignore the degree of the first node, and now want to ignore the degree of the
+                # fifth node as well, we must return 4 for the metric to correctly ignore it. But it is the fourth
+                # feature corresponding to the metric in the MetricCollection vector of features (not fifth, because the
+                # first is missing, not returned by the Metric as it's ignored). By returning the fourth element from
+                # the list of non-ignored indices, which is [1, 2, ..., n], we solve the problem.
+
+                effective_idx_within_metric = idx - cum_sum_num_feats
                 if hasattr(self.metrics[m_idx], "_indices_to_ignore"):
-                    num_ignored_features_before_idx = len(
-                        [i for i in self.metrics[m_idx]._indices_to_ignore if i <= idx - cum_sum_num_feats])
-                return idx - cum_sum_num_feats + num_ignored_features_before_idx
+                    # The number of ignored indices + the number of used indices is the total number (without ignoring).
+                    total_num_indices = len(self.metrics[m_idx]._indices_to_ignore) + next_met_num_feats
+                    non_ignored_indices = [i for i in range(total_num_indices) if
+                                           i not in self.metrics[m_idx]._indices_to_ignore]
+                    # Return the index of the feature with relation to the whole set of features (without ignoring).
+                    return non_ignored_indices[effective_idx_within_metric]
+                else:
+                    return effective_idx_within_metric
             else:
                 cum_sum_num_feats += next_met_num_feats
 

@@ -474,14 +474,21 @@ class TestMetricsCollection(unittest.TestCase):
         # sampled once using np.random.choice(len(possible_types), size=n)
         type_idx_per_node = [3, 3, 0, 0, 0, 0, 1, 3, 1, 1, 3, 0, 3, 2, 0, 3, 3, 1]
         neuronal_types = [possible_types[type_idx_per_node[i]] for i in range(n)]
-        
+
         n_for_multitypes_test = 6
         multitypes_1 = ['A', 'B']
         multitypes_2 = ['C', 'D']
-        type_1_idx_per_node = [0, 0, 0, 1, 1, 1,]
+        type_1_idx_per_node = [0, 0, 0, 1, 1, 1]
         type_2_idx_per_node = [0, 0, 0, 0, 1, 1]
         types_1 = [multitypes_1[type_1_idx_per_node[i]] for i in range(n_for_multitypes_test)]
         types_2 = [multitypes_2[type_2_idx_per_node[i]] for i in range(n_for_multitypes_test)]
+
+        multitypes_3 = ['A', 'B']
+        multitypes_4 = ['C', 'D', 'E']
+        type_3_idx_per_node = [0, 0, 1, 1, 1, 1]
+        type_4_idx_per_node = [0, 0, 1, 1, 2, 2]
+        types_3 = [multitypes_3[type_3_idx_per_node[i]] for i in range(n_for_multitypes_test)]
+        types_4 = [multitypes_4[type_4_idx_per_node[i]] for i in range(n_for_multitypes_test)]
 
         test_scenarios = {
             "num_edges_twice": {
@@ -493,8 +500,7 @@ class TestMetricsCollection(unittest.TestCase):
             "num_edges__total_reciprocity__indegree": {
                 "metrics": [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()],
                 "expected_num_of_features": 1 + 1 + n - 1,
-                # InDegree is trimmed by 1 because of collinearity with num_of_edges
-                "expected_trimmed_metrics": {str(InDegree()): [0]},
+                "expected_trimmed_metrics": {},
                 "expected_eliminated_metrics": []
             },
             "indegree": {
@@ -505,26 +511,26 @@ class TestMetricsCollection(unittest.TestCase):
             },
             "outdegree": {
                 "metrics": [OutDegree()],
-                "expected_num_of_features": n, 
+                "expected_num_of_features": n,
                 "expected_trimmed_metrics": {},
                 "expected_eliminated_metrics": []
             },
             "in_outdegree": {
                 "metrics": [InDegree(), OutDegree()],
-                "expected_num_of_features": n + n - 1,  
-                "expected_trimmed_metrics": {str(InDegree()): [0]},
+                "expected_num_of_features": n + n - 1,
+                "expected_trimmed_metrics": {},
                 "expected_eliminated_metrics": []
             },
             "num_edges__total_reciprocity__indegree_outdegree": {
                 "metrics": [NumberOfEdgesDirected(), TotalReciprocity(), InDegree(), OutDegree()],
                 "expected_num_of_features": 1 + 1 + n - 1 + n - 1,
-                "expected_trimmed_metrics": {str(InDegree()): [0], str(OutDegree()): [0]},
+                "expected_trimmed_metrics": {},
                 "expected_eliminated_metrics": []
             },
             "num_edges__exogenous_types": {
                 "metrics": [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(neuronal_types)],
                 "expected_num_of_features": 1 + len(set(neuronal_types)) ** 2 - 2,
-                "expected_trimmed_metrics": {str(NumberOfEdgesTypesDirected(neuronal_types)): [0, 10]},
+                "expected_trimmed_metrics": {},
                 "expected_eliminated_metrics": []
             },
             "sum_attr_both__sum_attr_in__sum_attr_out": {
@@ -536,35 +542,76 @@ class TestMetricsCollection(unittest.TestCase):
             },
             "multiple_types": {
                 "n": n_for_multitypes_test,
-                "metrics": [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types_1), NumberOfEdgesTypesDirected(types_2)],
+                "metrics": [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types_1),
+                            NumberOfEdgesTypesDirected(types_2)],
                 "expected_num_of_features": 1 + len(set(types_1)) ** 2 + len(set(types_2)) ** 2 - 2,
-                "expected_trimmed_metrics": {str(NumberOfEdgesTypesDirected(types_1)): [0], str(NumberOfEdgesTypesDirected(types_2)): [0]},
+                "expected_trimmed_metrics": {},
+                "expected_eliminated_metrics": []
+            },
+            "multiple_types_2": {
+                "n": n_for_multitypes_test,
+                "metrics": [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types_3),
+                            NumberOfEdgesTypesDirected(types_4)],
+                "expected_num_of_features": 1 + len(set(types_3)) ** 2 + len(set(types_4)) ** 2 - 5,
+                "expected_trimmed_metrics": {},
                 "expected_eliminated_metrics": []
             }
         }
 
-        # In a case where the collinearity fixer is going to eliminate a specific metric, we want to verify that the
-        # correct metric was removed by checking the pointer of the removed metric (since some metrics might have the same name).
-        # For this reason, we're going to put the metric that's going to be removed in a list and check if the pointer
-        test_scenarios["num_edges_twice"]["expected_eliminated_metrics"] = [test_scenarios["num_edges_twice"]["metrics"][0]]
-        test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["expected_eliminated_metrics"] = [test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["metrics"][0]]
+        # We want to make sure that the changes (trimming and complete removal) are made for the right metrics, so we
+        # update the scenarios after initializing the lists of Metrics, to pass the class instances by reference when
+        # asserting stuff later.
+        test_scenarios["num_edges_twice"]["expected_eliminated_metrics"] = [
+            test_scenarios["num_edges_twice"]["metrics"][0]]
+
+        test_scenarios["num_edges__total_reciprocity__indegree"]["expected_trimmed_metrics"] = {
+            # InDegree is trimmed by 1 because of collinearity with num_of_edges
+            test_scenarios["num_edges__total_reciprocity__indegree"]["metrics"][2]: [0]
+        }
+
+        test_scenarios["in_outdegree"]["expected_trimmed_metrics"] = {
+            test_scenarios["in_outdegree"]["metrics"][0]: [0]
+        }
+
+        test_scenarios["num_edges__total_reciprocity__indegree_outdegree"]["expected_trimmed_metrics"] = {
+            test_scenarios["num_edges__total_reciprocity__indegree_outdegree"]["metrics"][2]: [0],
+            test_scenarios["num_edges__total_reciprocity__indegree_outdegree"]["metrics"][3]: [0]
+        }
+
+        test_scenarios["num_edges__exogenous_types"]["expected_trimmed_metrics"] = {
+            test_scenarios["num_edges__exogenous_types"]["metrics"][1]: [0, 10]
+        }
+
+        test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["expected_eliminated_metrics"] = [
+            test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["metrics"][0]]
+
+        test_scenarios["multiple_types"]["expected_trimmed_metrics"] = {
+            test_scenarios["multiple_types"]["metrics"][1]: [0],
+            test_scenarios["multiple_types"]["metrics"][2]: [0]}
+
+        test_scenarios["multiple_types_2"]["expected_trimmed_metrics"] = {
+            # A->A, A->B, B->A trimmed
+            test_scenarios["multiple_types_2"]["metrics"][1]: [0, 1, 2],
+            # C->C, D->D trimmed
+            test_scenarios["multiple_types_2"]["metrics"][2]: [0, 4]}
 
         for scenario_data in test_scenarios.values():
             net_size = scenario_data.get("n", n)
-            
-            collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True, n_nodes=net_size)
+
+            collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True,
+                                           n_nodes=net_size, do_copy_metrics=False)
 
             # Check the general number of features matches the expectation
             self.assertEqual(collection.num_of_features, scenario_data["expected_num_of_features"])
 
             # Check if the correct metrics were trimmed
             for metric in scenario_data["metrics"]:
-                if str(metric) in scenario_data["expected_trimmed_metrics"].keys():
-                    self.assertEqual(set(collection.get_metric(str(metric))._indices_to_ignore),
-                                     set(scenario_data["expected_trimmed_metrics"][str(metric)]))
+                if metric in scenario_data["expected_trimmed_metrics"].keys():
+                    self.assertEqual(set(metric._indices_to_ignore),
+                                     set(scenario_data["expected_trimmed_metrics"][metric]))
                 elif hasattr(metric,
                              "_indices_to_ignore"):  # Only metrics with a base_idx can be trimmed. The others aren't tested
-                    self.assertEqual(collection.get_metric(str(metric))._indices_to_ignore, [])
+                    self.assertEqual(metric._indices_to_ignore, [])
                 elif metric in scenario_data["expected_eliminated_metrics"]:
                     self.assertTrue(metric not in [m for m in collection.metrics])
                     self.assertEqual(collection.num_of_metrics, len(collection.metrics))
