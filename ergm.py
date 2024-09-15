@@ -24,6 +24,7 @@ class ERGM():
                  n_mcmc_steps=500,
                  verbose=True,
                  use_sparse_matrix=False,
+                 fix_collinearity=True,
                  optimization_options={}):
         """
         An ERGM model object. 
@@ -56,7 +57,7 @@ class ERGM():
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
-        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes, use_sparse_matrix=use_sparse_matrix)
+        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes, use_sparse_matrix=use_sparse_matrix, fix_collinearity=fix_collinearity)
 
         if initial_thetas is not None:
             self._thetas = initial_thetas
@@ -123,6 +124,27 @@ class ERGM():
 
         # print(f"Finished generating networks for Z, which is estimated at {self._normalization_factor}")
 
+    def get_model_parameters(self):
+        """
+        Returns the parameters of the models in a dictionary format
+        """
+        params = {}
+        theta_idx = 0
+        for metric in self._network_statistics.metrics:
+            num_of_features = metric._get_effective_feature_count()
+            for i in range(num_of_features):
+                theta_idx += 1
+            if num_of_features == 1:
+                params[str(metric)] = self._thetas[theta_idx]
+                theta_idx += 1
+            else:
+                pass
+
+
+
+            
+            
+
     @staticmethod
     def do_estimate_covariance_matrix(optimization_method, convergence_criterion):
         if optimization_method == "newton_raphson" or convergence_criterion == "hotelling":
@@ -168,7 +190,7 @@ class ERGM():
 
                 row_idx += 1
         
-        clf = LogisticRegression(fit_intercept=False, penalty=None).fit(Xs, ys)
+        clf = LogisticRegression(fit_intercept=False, penalty=None, max_iter=5000).fit(Xs, ys)
         return clf.coef_[0]
     
     def _do_MPLE(self, theta_init_method):

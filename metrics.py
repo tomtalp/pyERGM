@@ -349,6 +349,10 @@ class ExWeightNumEdges(Metric):
         self.edge_weights = None
         self._calc_edge_weights()
 
+        #TODO  @Oren - is it ok to init this here?
+        # so that in calc_change_score I can safely use it
+        self._indices_to_ignore = []
+
     @abstractmethod
     def _calc_edge_weights(self):
         ...
@@ -362,7 +366,7 @@ class ExWeightNumEdges(Metric):
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         sign = -1 if current_network[indices[0], indices[1]] else 1
-        return sign * self.edge_weights[:, indices[0], indices[1]]
+        return sign * np.delete(self.edge_weights, self._indices_to_ignore, axis=0)[:, indices[0], indices[1]]
 
     def calculate(self, input: np.ndarray):
         res = np.einsum('ij,kij->k', input, self.edge_weights)
