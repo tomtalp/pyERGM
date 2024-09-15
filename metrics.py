@@ -573,12 +573,6 @@ class MetricsCollection:
                     return non_ignored_indices[effective_idx_within_metric]
                 else:
                     return effective_idx_within_metric
-
-                # num_ignored_features_before_idx = 0
-                # if hasattr(self.metrics[m_idx], "_indices_to_ignore"):
-                # num_ignored_features_before_idx = len(
-                #     [i for i in self.metrics[m_idx]._indices_to_ignore if i <= idx - cum_sum_num_feats])
-                # return idx - cum_sum_num_feats + num_ignored_features_before_idx
             else:
                 cum_sum_num_feats += next_met_num_feats
 
