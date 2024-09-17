@@ -1,7 +1,7 @@
 import numpy as np
 import networkx as nx
 from numba import njit
-from scipy.sparse.linalg import eigsh
+from scipy.spatial.distance import mahalanobis
 import torch
 import random
 
@@ -155,12 +155,14 @@ def get_random_edges_to_flip(num_nodes, num_pairs):
 
     return edges_to_flip
 
+
 def np_tensor_to_sparse_tensor(np_tensor: np.ndarray) -> torch.Tensor:
     """
     Receives a numpy tensor and converts it to a sparse Tensor, using Torch.
     TODO - Support different types of Sparse Matrix data structures? More efficient conversion?
     """
     return torch.from_numpy(np_tensor).to_sparse()
+
 
 def transpose_sparse_sample_matrices(sparse_tensor: torch.Tensor) -> torch.Tensor:
     """
@@ -180,12 +182,13 @@ def transpose_sparse_sample_matrices(sparse_tensor: torch.Tensor) -> torch.Tenso
     """
     n = sparse_tensor.shape[0]
     k = sparse_tensor.shape[2]
-    
+
     indices = sparse_tensor.indices().type(torch.int64)
     transposed_indices = torch.stack([indices[1], indices[0], indices[2]])
     values = sparse_tensor.values()
 
     return torch.sparse_coo_tensor(transposed_indices, values, (n, n, k))
+
 
 def calc_for_sample_njit():
     def wrapper(func):
@@ -193,8 +196,11 @@ def calc_for_sample_njit():
             if isinstance(sample, np.ndarray):
                 return njit(func)(sample)
             return func(sample)
+
         return inner
+
     return wrapper
+
 
 def approximate_auto_correlation_function(features_of_net_samples: np.ndarray) -> np.ndarray:
     """
@@ -371,3 +377,18 @@ def covariance_matrix_estimation(features_of_net_samples: np.ndarray, mean_featu
 @njit
 def calc_nll_gradient(observed_features, mean_features_of_net_samples):
     return mean_features_of_net_samples - observed_features
+
+
+def calc_hotteling_statistic_for_sample(observed_features: np.ndarray, sample_features: np.ndarray,
+                                        cov_mat_est_method: str):
+    mean_features = np.mean(sample_features, axis=1)
+    cov_mat_est = covariance_matrix_estimation(sample_features, mean_features,
+                                               method=cov_mat_est_method)
+    inv_cov_mat = np.linalg.pinv(cov_mat_est)
+    dist = mahalanobis(observed_features, mean_features, inv_cov_mat)
+    sample_size = sample_features.shape[1]
+    hotelling_t_stat = sample_size * dist * dist
+    num_features = sample_features.shape[0]
+    hotelling_t_as_f = ((sample_size - num_features) / (
+                        num_features * (sample_size - 1))) * hotelling_t_stat
+    return hotelling_t_as_f
