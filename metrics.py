@@ -8,7 +8,7 @@ import networkx as nx
 from numba import njit
 
 from utils import *
-
+import time
 
 class Metric(ABC):
     def __init__(self, requires_graph=False):
@@ -18,6 +18,7 @@ class Metric(ABC):
         self._is_directed = None
         self._is_dyadic_independent = True
         self._n_nodes = None
+        self._indices_to_ignore = []
 
     @abstractmethod
     def calculate(self, input: np.ndarray | nx.Graph):
@@ -82,7 +83,7 @@ class NumberOfEdgesUndirected(Metric):
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         return -1 if current_network[indices[0], indices[1]] else 1
-
+    
     def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         """
         Sum each matrix over all matrices in sample
@@ -365,7 +366,7 @@ class ExWeightNumEdges(Metric):
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         sign = -1 if current_network[indices[0], indices[1]] else 1
-        return sign * self.edge_weights[:, indices[0], indices[1]]
+        return sign * np.delete(self.edge_weights, self._indices_to_ignore, axis=0)[:, indices[0], indices[1]]
 
     def calculate(self, input: np.ndarray):
         res = np.einsum('ij,kij->k', input, self.edge_weights)
@@ -374,10 +375,24 @@ class ExWeightNumEdges(Metric):
         return res
 
     def calculate_for_sample(self, networks_sample: np.ndarray):
-        res = np.einsum('ijk,mij->mk', networks_sample, self.edge_weights)
+        res = self._numba_calculate_for_sample(networks_sample, self.edge_weights)
         if not self._is_directed:
             res = res / 2
         return res
+
+    @staticmethod
+    @njit
+    def _numba_calculate_for_sample(networks_sample: np.ndarray, edge_weights: np.ndarray):
+        reshaped_edge_weights = edge_weights.reshape(edge_weights.shape[0], -1).astype(np.float64)
+        reshaped_networks_sample = networks_sample.reshape(-1, networks_sample.shape[2]).astype(np.float64)
+        
+        res = reshaped_edge_weights @ reshaped_networks_sample
+        # res = np.einsum('ijk,mij->mk', networks_sample, self.edge_weights)
+        # res = np.tensordot(self.edge_weights, networks_sample, axes=2)
+
+        return res
+        
+        
 
 
 class NumberOfEdgesTypesDirected(ExWeightNumEdges):
@@ -584,24 +599,32 @@ class MetricsCollection:
         TODO: revisit the threshold and sample size
         """
         is_linearly_dependent = True
+
+        self.num_of_features = self.calc_num_of_features()
+
+        # Sample networks from a maximum entropy distribution, for avoiding edge cases (such as a feature is 0 for
+        # all networks in the sample).
+        sample = np.random.binomial(n=1, p=0.5, size=(self.n_nodes, self.n_nodes, sample_size))
+
+        # Symmetrize samples if not directed
+        if not self.is_directed:
+            sample = np.round((sample + sample.transpose(1, 0, 2)) / 2)
+
+        # Make sure the main diagonal is 0
+        for i in range(self.n_nodes):
+            for k in range(sample_size):
+                sample[i, i, k] = 0
+
+        # Calculate the features of the sample
+        t1 = time.time()
+        print("Started collecting samples")
+        sample_features = self.calculate_sample_statistics(sample)
+        t2 = time.time()
+        print(f"done collecting samples. Took {t2 - t1} seconds")
+
         while is_linearly_dependent:
             self.num_of_features = self.calc_num_of_features()
-
-            # Sample networks from a maximum entropy distribution, for avoiding edge cases (such as a feature is 0 for
-            # all networks in the sample).
-            sample = np.random.binomial(n=1, p=0.5, size=(self.n_nodes, self.n_nodes, sample_size))
-
-            # Symmetrize samples if not directed
-            if not self.is_directed:
-                sample = np.round((sample + sample.transpose(1, 0, 2)) / 2)
-
-            # Make sure the main diagonal is 0
-            for i in range(self.n_nodes):
-                for k in range(sample_size):
-                    sample[i, i, k] = 0
-
-            # Calculate the features of the sample
-            sample_features = self.calculate_sample_statistics(sample)
+            
             features_cov_mat = sample_features @ sample_features.T
 
             # Determine whether the matrix of features is invertible. If not - this means there is a non-trivial vector,
@@ -648,10 +671,15 @@ class MetricsCollection:
                     first_metric = self.get_metric_by_feat_idx(removal_order[0])
                     print(f"Removing the metric {str(first_metric)} from the collection to fix multi-collinearity")
                     self._delete_metric(metric=first_metric)
+
+                    sample_features = np.delete(sample_features, removal_order[0], axis=0)
+
                 else:
                     idx_to_delete = self.get_feature_idx_within_metric(removal_order[i])
                     print(f"Removing the {idx_to_delete} feature of {str(cur_metric)} to fix multi-collinearity")
                     cur_metric._indices_to_ignore.append(idx_to_delete)
+
+                    sample_features = np.delete(sample_features, removal_order[i], axis=0)
 
     def calculate_statistics(self, W: np.ndarray):
         """

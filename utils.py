@@ -1,3 +1,6 @@
+import itertools
+from collections import Counter
+from typing import Collection
 import numpy as np
 import networkx as nx
 from numba import njit
@@ -378,6 +381,58 @@ def covariance_matrix_estimation(features_of_net_samples: np.ndarray, mean_featu
 def calc_nll_gradient(observed_features, mean_features_of_net_samples):
     return mean_features_of_net_samples - observed_features
 
+def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
+    """
+    Calculate the density of edges between each pair of types in the network.
+
+    Parameters
+    ----------
+    W : np.ndarray
+        The adjacency matrix of the network
+    
+    types : Collection
+        A list of types for every node in a network
+
+    Returns
+    ----------
+    densities : np.ndarray
+        An array of edge density per type pairs, which is calculated as follows -    
+        p_(type1, type2) = (number of edges between type1 and type2) / (number of potential edges between type1 and type2).
+
+        Array size is k^2 where k is number of types
+    """
+
+    sorted_types = sorted(list(set(types)))
+    n = W.shape[0]
+    real_frequencies = {k: 0 for k in itertools.product(sorted_types, sorted_types)}
+
+    types_frequencies = dict(Counter(types))
+    potential_frequencies = {}
+
+    # Count how many potential edges can exist between each pair of types
+    for pair in itertools.product(sorted_types, sorted_types):
+        type_1 = pair[0]
+        type_2 = pair[1]
+
+        if type_1 == type_2:
+            potential_frequencies[pair] = types_frequencies[type_1] * (types_frequencies[type_1] - 1)
+        else:
+            potential_frequencies[pair] = types_frequencies[type_1] * types_frequencies[type_2]
+
+    # Count how many actual edges exist between each pair of types
+    for i in range(n):
+        for j in range(n):
+            if i == j:
+                continue
+        
+            type_a = types[i]
+            type_b = types[j]
+
+            real_frequencies[(type_a, type_b)] += W[i, j]
+
+    normalized_real_frequencies = {k: 0 if potential_frequencies[k] == 0 else v/potential_frequencies[k] for k, v in real_frequencies.items()}  
+    return normalized_real_frequencies
+    
 
 def calc_hotteling_statistic_for_sample(observed_features: np.ndarray, sample_features: np.ndarray,
                                         cov_mat_est_method: str):
@@ -392,3 +447,4 @@ def calc_hotteling_statistic_for_sample(observed_features: np.ndarray, sample_fe
     hotelling_t_as_f = ((sample_size - num_features) / (
                         num_features * (sample_size - 1))) * hotelling_t_stat
     return hotelling_t_as_f
+

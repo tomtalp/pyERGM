@@ -25,6 +25,7 @@ class ERGM():
                  n_mcmc_steps=500,
                  verbose=True,
                  use_sparse_matrix=False,
+                 fix_collinearity=True,
                  optimization_options={}):
         """
         An ERGM model object. 
@@ -57,9 +58,7 @@ class ERGM():
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
-        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes,
-                                                     use_sparse_matrix=use_sparse_matrix)
-
+        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes, use_sparse_matrix=use_sparse_matrix, fix_collinearity=fix_collinearity)
         if initial_thetas is not None:
             self._thetas = initial_thetas
         else:
@@ -188,7 +187,7 @@ class ERGM():
 
                 row_idx += 1
 
-        clf = LogisticRegression(fit_intercept=False, penalty=None).fit(Xs, ys)
+        clf = LogisticRegression(fit_intercept=False, penalty=None, max_iter=5000).fit(Xs, ys)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
         self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = clf.predict_proba(Xs)[:, 1]
         return clf.coef_[0]
