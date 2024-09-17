@@ -395,14 +395,16 @@ def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
 
         Array size is k^2 where k is number of types
     """
+
+    sorted_types = sorted(list(set(types)))
     n = W.shape[0]
-    real_frequencies = {k: 0 for k in list(itertools.product(types, types))}
+    real_frequencies = {k: 0 for k in itertools.product(sorted_types, sorted_types)}
 
     types_frequencies = dict(Counter(types))
     potential_frequencies = {}
 
     # Count how many potential edges can exist between each pair of types
-    for pair in set(itertools.product(types, types)):
+    for pair in itertools.product(sorted_types, sorted_types):
         type_1 = pair[0]
         type_2 = pair[1]
 
@@ -424,3 +426,4 @@ def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
 
     normalized_real_frequencies = {k: 0 if potential_frequencies[k] == 0 else v/potential_frequencies[k] for k, v in real_frequencies.items()}  
     return normalized_real_frequencies
+    
