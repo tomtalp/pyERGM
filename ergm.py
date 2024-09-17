@@ -124,27 +124,6 @@ class ERGM():
 
         # print(f"Finished generating networks for Z, which is estimated at {self._normalization_factor}")
 
-    def get_model_parameters(self):
-        """
-        Returns the parameters of the models in a dictionary format
-        """
-        params = {}
-        theta_idx = 0
-        for metric in self._network_statistics.metrics:
-            num_of_features = metric._get_effective_feature_count()
-            for i in range(num_of_features):
-                theta_idx += 1
-            if num_of_features == 1:
-                params[str(metric)] = self._thetas[theta_idx]
-                theta_idx += 1
-            else:
-                pass
-
-
-
-            
-            
-
     @staticmethod
     def do_estimate_covariance_matrix(optimization_method, convergence_criterion):
         if optimization_method == "newton_raphson" or convergence_criterion == "hotelling":
