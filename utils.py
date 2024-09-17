@@ -387,4 +387,8 @@ def calc_hotteling_statistic_for_sample(observed_features: np.ndarray, sample_fe
     inv_cov_mat = np.linalg.pinv(cov_mat_est)
     dist = mahalanobis(observed_features, mean_features, inv_cov_mat)
     sample_size = sample_features.shape[1]
-    return sample_size * dist * dist
+    hotelling_t_stat = sample_size * dist * dist
+    num_features = sample_features.shape[0]
+    hotelling_t_as_f = ((sample_size - num_features) / (
+                        num_features * (sample_size - 1))) * hotelling_t_stat
+    return hotelling_t_as_f
