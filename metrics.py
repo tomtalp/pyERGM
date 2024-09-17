@@ -84,7 +84,6 @@ class NumberOfEdgesUndirected(Metric):
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         return -1 if current_network[indices[0], indices[1]] else 1
     
-    @njit
     def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         """
         Sum each matrix over all matrices in sample
