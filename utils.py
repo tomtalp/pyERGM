@@ -375,6 +375,10 @@ def covariance_matrix_estimation(features_of_net_samples: np.ndarray, mean_featu
 def calc_nll_gradient(observed_features, mean_features_of_net_samples):
     return mean_features_of_net_samples - observed_features
 
+def get_sorted_type_pairs(types):
+    sorted_types = sorted(list(set(types)))
+    return list(itertools.product(sorted_types, sorted_types))
+
 def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
     """
     Calculate the density of edges between each pair of types in the network.
@@ -395,16 +399,15 @@ def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
 
         Array size is k^2 where k is number of types
     """
-
-    sorted_types = sorted(list(set(types)))
+    type_pairs = get_sorted_type_pairs(types)
     n = W.shape[0]
-    real_frequencies = {k: 0 for k in itertools.product(sorted_types, sorted_types)}
+    real_frequencies = {k: 0 for k in type_pairs}
 
     types_frequencies = dict(Counter(types))
     potential_frequencies = {}
 
     # Count how many potential edges can exist between each pair of types
-    for pair in itertools.product(sorted_types, sorted_types):
+    for pair in type_pairs:
         type_1 = pair[0]
         type_2 = pair[1]
 

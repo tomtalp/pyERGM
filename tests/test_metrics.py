@@ -219,35 +219,23 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         self.assertTrue(metric._get_num_weight_mats() == 9)
 
     def test_calc_edge_weights(self):
-        neuronal_types = ['A', 'B', 'B', 'A']
-        expected_edge_weights = np.array([
-            # A->A connections
-            [[0, 0, 0, 1],
-             [0, 0, 0, 0],
-             [0, 0, 0, 0],
-             [1, 0, 0, 0]],
-
-            # A->B connections
-            [[0, 1, 1, 0],
-             [0, 0, 0, 0],
-             [0, 0, 0, 0],
-             [0, 1, 1, 0]],
-
-            # B->A connections
-            [[0, 0, 0, 0],
-             [1, 0, 0, 1],
-             [1, 0, 0, 1],
-             [0, 0, 0, 0]],
-
-            # B->B connections
-            [[0, 0, 0, 0],
-             [0, 0, 1, 0],
-             [0, 1, 0, 0],
-             [0, 0, 0, 0]]
-        ])
-
+        neuronal_types = ['A', 'B', 'A', 'B']
         metric = NumberOfEdgesTypesDirected(neuronal_types)
+        expected_edge_weights = np.array([[0, 1, 0, 1], 
+                                          [2, 3, 2, 3], 
+                                          [0, 1, 0, 1], 
+                                          [2, 3, 2, 3]])
 
+        self.assertTrue(np.all(metric.edge_weights == expected_edge_weights))
+
+        neuronal_types = ['A', 'B', 'B', 'A']
+        metric = NumberOfEdgesTypesDirected(neuronal_types)
+        expected_edge_weights = np.array([[0, 1, 1, 0], 
+                                          [2, 3, 3, 2], 
+                                          [2, 3, 3, 2],
+                                          [0, 1, 1, 0]])
+        print(metric.edge_weights)
+        print(expected_edge_weights)
         self.assertTrue(np.all(metric.edge_weights == expected_edge_weights))
 
     def test_calculate(self):
@@ -595,7 +583,7 @@ class TestMetricsCollection(unittest.TestCase):
             # C->C, D->D trimmed
             test_scenarios["multiple_types_2"]["metrics"][2]: [0, 4]}
 
-        for scenario_data in test_scenarios.values():
+        for name, scenario_data in test_scenarios.items():
             net_size = scenario_data.get("n", n)
 
             collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True,

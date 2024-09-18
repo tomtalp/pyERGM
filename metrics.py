@@ -369,6 +369,9 @@ class ExWeightNumEdges(Metric):
         return sign * np.delete(self.edge_weights, self._indices_to_ignore, axis=0)[:, indices[0], indices[1]]
 
     def calculate(self, input: np.ndarray):
+        # TODO - Since most of our focus is on the `calculate_for_sample` functions,
+        # we can convert all individual calculate(x) functions to calculate_for_sample([x])
+        # and reuse code.
         res = np.einsum('ij,kij->k', input, self.edge_weights)
         if not self._is_directed:
             res = res / 2
@@ -396,7 +399,35 @@ class ExWeightNumEdges(Metric):
 
 
 class NumberOfEdgesTypesDirected(ExWeightNumEdges):
+    """
+    A metric that counts how many edges exist between different node types in a directed graph.
+    For example - 
+        A graph with `n` nodes, with an exogenous attribute `type=[A, B]` assigned to each node.
+    The metric counts the number of edges between nodes of type A->A, A->B, B->A, B->B of a given graph,
+    yielding len(type)**2 features.
+
+    Parameters
+    -----------
+        exogenous_attr : Collection
+            A collection of attributes assigned to each node in a graph with n nodes.
+
+            #TODO - len(exogenous_attr)==n is a requirement, right? Should we assert?
+        
+        indices_to_ignore: list
+            # TODO - relative to what order is this expected to arrive?
+            e.g. for an input exogenous_attr=[A, B, A, B]
+            can the user _always_ expect that indices_to_ignore is relative to 
+            [AA, AB, BA, BB] (i.e. alphabetic order) ?
+            
+            # TODO - what types can `exogenous_attr` hold? Only strings?
+            If not (e.g. also `int` to denote class types), how are they sorted
+            for indices_to_ignore?
+    """
     def __init__(self, exogenous_attr: Collection, indices_to_ignore=None):
+        self.exogenous_attr = exogenous_attr
+        self._unique_attributes = set(exogenous_attr)
+        self._sorted_type_pairs = get_sorted_type_pairs(self._unique_attributes)
+
         if indices_to_ignore is None:
             self._indices_to_ignore = []
         else:
@@ -405,29 +436,77 @@ class NumberOfEdgesTypesDirected(ExWeightNumEdges):
         self._is_directed = True
 
     def _calc_edge_weights(self):
+        """
+        Each edge is weighted by the index of it's corresponding sorted type pair.
+        
+        For example, for an n=4 matrix with types [A, B, A, B], the weight matrix is
+            [ AA, AB, AA, AB
+              BA, BB, BA, BB
+              AA, AB, AA, AB
+              BA, BB, BA, BB ]
+        but instead of AA, AB, ..., we save the corresponding index of the type pair
+        in self._sorted_type_pairs (which is sorted alphabetically.)
+            
+        """
         num_nodes = len(self.exogenous_attr)
-        unique_types = sorted(set(self.exogenous_attr))
-        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
-        weight_mat_idx = 0
-        num_skipped_indices = 0
-        for pre_type in unique_types:
-            for post_type in unique_types:
-                if weight_mat_idx not in self._indices_to_ignore:
-                    for i in range(num_nodes):
-                        for j in range(num_nodes):
-                            if i == j:
-                                continue
-                            if self.exogenous_attr[i] == pre_type and self.exogenous_attr[j] == post_type:
-                                self.edge_weights[weight_mat_idx - num_skipped_indices, i, j] = 1
-                else:
-                    num_skipped_indices += 1
-                weight_mat_idx += 1
+        self.edge_weights = np.zeros((num_nodes, num_nodes)).astype(int)
+
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                type_1 = self.exogenous_attr[i]
+                type_2 = self.exogenous_attr[j]
+
+                self.edge_weights[i, j] = self._sorted_type_pairs.index((type_1, type_2))
 
     def _get_num_weight_mats(self):
         return len(set(self.exogenous_attr)) ** 2 - len(self._indices_to_ignore)
 
+    def calculate(self, input: np.ndarray):
+        nonzero_entries = input.nonzero()
+        type_pairs_in_network = self.edge_weights[nonzero_entries].astype(int)
+        return np.delete(np.bincount(type_pairs_in_network, minlength=len(self._sorted_type_pairs)), self._indices_to_ignore)
+        
     def calculate_for_sample(self, networks_sample: np.ndarray):
-        return np.delete(super().calculate_for_sample(networks_sample), self._indices_to_ignore, axis=0)
+        """
+        Parameters
+        ----------
+        networks_sample: np.ndarray
+            An array of size (n,n, k) - k networks of size (n, n)
+        """
+        nonzero_entries = np.nonzero(networks_sample) 
+
+        type_pairs_indices = self.edge_weights[nonzero_entries[0], nonzero_entries[1]]
+
+        # An array of size (2, num_of_nonzero_entries), where the first row is the type_pair index
+        # of every nonzero entry in the sample size.
+        # The second denotes from which sample the type pair came from.
+        type_pairs_idx_per_sample = np.array([type_pairs_indices, nonzero_entries[2]])
+
+        sorted_indices = np.argsort(type_pairs_idx_per_sample[1])
+        sorted_type_pair_indices = type_pairs_idx_per_sample[:, sorted_indices].astype(int)
+
+        sample_size = networks_sample.shape[2]
+        result = np.zeros((sample_size, len(self._sorted_type_pairs)))
+
+        start_idx = 0
+        end_idx = start_idx
+        cur_sample_idx = 0
+        while cur_sample_idx < sample_size:
+            while end_idx < sorted_type_pair_indices.shape[1] and sorted_type_pair_indices[1, end_idx] == cur_sample_idx:
+                end_idx += 1
+            result[cur_sample_idx, :] = np.bincount(sorted_type_pair_indices[0, start_idx:end_idx], minlength=len(self._sorted_type_pairs))
+            cur_sample_idx += 1
+            start_idx = end_idx
+        
+        return np.delete(result.T, self._indices_to_ignore, axis=0)
+        # return np.delete(super().calculate_for_sample(networks_sample), self._indices_to_ignore, axis=0)
+        
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        sign = -1 if current_network[indices[0], indices[1]] else 1
+        result = np.zeros(len(self._sorted_type_pairs))
+        result[self.edge_weights[indices]] = sign
+        return np.delete(result, self._indices_to_ignore, axis=0)
+ 
 
     def __str__(self):
         return "num_edges_between_types_directed"
