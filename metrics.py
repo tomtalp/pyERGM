@@ -10,6 +10,7 @@ from numba import njit
 from utils import *
 import time
 
+
 class Metric(ABC):
     def __init__(self, requires_graph=False):
         self.requires_graph = requires_graph
@@ -83,7 +84,7 @@ class NumberOfEdgesUndirected(Metric):
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         return -1 if current_network[indices[0], indices[1]] else 1
-    
+
     def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         """
         Sum each matrix over all matrices in sample
@@ -385,52 +386,101 @@ class ExWeightNumEdges(Metric):
     def _numba_calculate_for_sample(networks_sample: np.ndarray, edge_weights: np.ndarray):
         reshaped_edge_weights = edge_weights.reshape(edge_weights.shape[0], -1).astype(np.float64)
         reshaped_networks_sample = networks_sample.reshape(-1, networks_sample.shape[2]).astype(np.float64)
-        
+
         res = reshaped_edge_weights @ reshaped_networks_sample
         # res = np.einsum('ijk,mij->mk', networks_sample, self.edge_weights)
         # res = np.tensordot(self.edge_weights, networks_sample, axes=2)
 
         return res
-        
-        
 
 
-class NumberOfEdgesTypesDirected(ExWeightNumEdges):
+# class NumberOfEdgesTypesDirected(ExWeightNumEdges):
+#     def __init__(self, exogenous_attr: Collection, indices_to_ignore=None):
+#         if indices_to_ignore is None:
+#             self._indices_to_ignore = []
+#         else:
+#             self._indices_to_ignore = deepcopy(indices_to_ignore)
+#         super().__init__(exogenous_attr)
+#         self._is_directed = True
+#
+#     def _calc_edge_weights(self):
+#         num_nodes = len(self.exogenous_attr)
+#         unique_types = sorted(set(self.exogenous_attr))
+#         self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
+#         weight_mat_idx = 0
+#         num_skipped_indices = 0
+#         for pre_type in unique_types:
+#             for post_type in unique_types:
+#                 if weight_mat_idx not in self._indices_to_ignore:
+#                     for i in range(num_nodes):
+#                         for j in range(num_nodes):
+#                             if i == j:
+#                                 continue
+#                             if self.exogenous_attr[i] == pre_type and self.exogenous_attr[j] == post_type:
+#                                 self.edge_weights[weight_mat_idx - num_skipped_indices, i, j] = 1
+#                 else:
+#                     num_skipped_indices += 1
+#                 weight_mat_idx += 1
+#
+#     def _get_num_weight_mats(self):
+#         return len(set(self.exogenous_attr)) ** 2 - len(self._indices_to_ignore)
+#
+#     def calculate_for_sample(self, networks_sample: np.ndarray):
+#         return np.delete(super().calculate_for_sample(networks_sample), self._indices_to_ignore, axis=0)
+#
+#     def __str__(self):
+#         return "num_edges_between_types_directed"
+
+class NumberOfEdgesTypesDirected(Metric):
     def __init__(self, exogenous_attr: Collection, indices_to_ignore=None):
+        self.exogenous_attr = exogenous_attr
         if indices_to_ignore is None:
             self._indices_to_ignore = []
         else:
             self._indices_to_ignore = deepcopy(indices_to_ignore)
-        super().__init__(exogenous_attr)
+        super().__init__()
         self._is_directed = True
+        self.unique_types = sorted(list(set(self.exogenous_attr)))
+        self.indices_of_types = {}
+        for i, t in enumerate(self.exogenous_attr):
+            if t not in self.indices_of_types.keys():
+                self.indices_of_types[t] = [i]
+            else:
+                self.indices_of_types[t].append(i)
+        self.sorted_type_pairs = list(itertools.product(self.unique_types, self.unique_types))
 
-    def _calc_edge_weights(self):
-        num_nodes = len(self.exogenous_attr)
-        unique_types = sorted(set(self.exogenous_attr))
-        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
-        weight_mat_idx = 0
-        num_skipped_indices = 0
-        for pre_type in unique_types:
-            for post_type in unique_types:
-                if weight_mat_idx not in self._indices_to_ignore:
-                    for i in range(num_nodes):
-                        for j in range(num_nodes):
-                            if i == j:
-                                continue
-                            if self.exogenous_attr[i] == pre_type and self.exogenous_attr[j] == post_type:
-                                self.edge_weights[weight_mat_idx - num_skipped_indices, i, j] = 1
-                else:
-                    num_skipped_indices += 1
-                weight_mat_idx += 1
+    def _get_effective_feature_count(self):
+        return len(self.unique_types) ** 2 - len(self._indices_to_ignore)
 
-    def _get_num_weight_mats(self):
-        return len(set(self.exogenous_attr)) ** 2 - len(self._indices_to_ignore)
+    def calculate(self, input: np.ndarray):
+        stats = np.zeros(self._get_effective_feature_count())
+        idx = 0
+        for i, type_pair in enumerate(self.sorted_type_pairs):
+            if i in self._indices_to_ignore:
+                continue
+            stats[idx] = input[np.ix_(self.indices_of_types[type_pair[0]], self.indices_of_types[type_pair[1]])].sum()
+            idx += 1
+        return stats
 
     def calculate_for_sample(self, networks_sample: np.ndarray):
-        return np.delete(super().calculate_for_sample(networks_sample), self._indices_to_ignore, axis=0)
+        sample_size = networks_sample.shape[2]
+        stats = np.zeros((self._get_effective_feature_count(), sample_size))
+        idx = 0
+        for i, type_pair in enumerate(self.sorted_type_pairs):
+            if i in self._indices_to_ignore:
+                continue
+            stats[idx] = networks_sample[
+                np.ix_(self.indices_of_types[type_pair[0]], self.indices_of_types[type_pair[1]])].sum(axis=(0, 1))
+            idx += 1
+        return stats
 
-    def __str__(self):
-        return "num_edges_between_types_directed"
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        edge_type_pair = (self.exogenous_attr[indices[0]], self.exogenous_attr[indices[1]])
+        idx_in_features_vec = self.sorted_type_pairs.index(edge_type_pair)
+        sign = -1 if current_network[indices[0], indices[1]] else 1
+        change_score = np.zeros(len(self.sorted_type_pairs))
+        change_score[idx_in_features_vec] = sign
+        return np.delete(change_score, self._indices_to_ignore)
 
 
 class NodeAttrSum(ExWeightNumEdges):
@@ -624,7 +674,7 @@ class MetricsCollection:
 
         while is_linearly_dependent:
             self.num_of_features = self.calc_num_of_features()
-            
+
             features_cov_mat = sample_features @ sample_features.T
 
             # Determine whether the matrix of features is invertible. If not - this means there is a non-trivial vector,

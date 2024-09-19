@@ -175,7 +175,8 @@ class ERGM():
         ys = np.zeros((self._n_nodes ** 2 - self._n_nodes))
 
         row_idx = 0
-        for i in range(self._n_nodes):
+        from tqdm import tqdm
+        for i in tqdm(range(self._n_nodes)):
             for j in range(self._n_nodes):
                 if i == j:
                     continue
@@ -190,12 +191,14 @@ class ERGM():
                 row_idx += 1
 
         # TODO: decide whih one we use and clean
+        # start = time.time()
         # clf = LogisticRegression(fit_intercept=False, penalty=None, max_iter=5000).fit(Xs, ys)
+        # print(f"finished optimizing using sklearn! took {time.time() - start: .2f} seconds")
         # self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
         # self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = clf.predict_proba(Xs)[:, 1]
         # return clf.coef_[0]
 
-        trained_thetas, prediction, _ = logistic_regression_optimization(Xs, ys)
+        trained_thetas, prediction = logistic_regression_optimization(Xs, ys)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
         self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
         return trained_thetas

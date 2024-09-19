@@ -3,7 +3,7 @@ from collections import Counter
 from typing import Collection
 import numpy as np
 import networkx as nx
-from numba import njit
+from numba import njit, objmode
 from scipy.spatial.distance import mahalanobis
 import torch
 import random
@@ -452,10 +452,12 @@ def calc_hotelling_statistic_for_sample(observed_features: np.ndarray, sample_fe
     return hotelling_t_as_f
 
 
+@njit
 def sigmoid(x: np.ndarray | float):
     return 1 / (1 + np.exp(-x))
 
 
+@njit
 def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
     """
     Calculate the predictions of a Logistic Regression model with input Xs and parameters thetas
@@ -472,6 +474,7 @@ def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
     return sigmoid(Xs @ thetas)
 
 
+@njit
 def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray):
     """
     Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
@@ -491,6 +494,7 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
     return np.dot(np.log(predictions).T, ys) + np.dot(np.log(1 - predictions).T, 1 - ys)
 
 
+@njit
 def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np.ndarray, ys: np.ndarray):
     """
     Calculates the gradient of the log-likelihood of labeled data with regard to the predictions of a Logistic
@@ -512,6 +516,7 @@ def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np
     return Xs.T @ (ys - predictions)
 
 
+@njit
 def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions: np.ndarray):
     """
     Calculates the hessian of the log-likelihood of labeled data with regard to the predictions of a Logistic
@@ -548,9 +553,11 @@ def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas
     """
     return (-np.log(1 + np.exp(-Xs @ thetas)) + (ys - 1) * Xs @ thetas).sum()
 
+
 # TODO: njit this and all related functions
+@njit
 def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_thetas: np.ndarray | None = None,
-                                     lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-6):
+                                     lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-3):
     """
     Optimize the parameters of a Logistic Regression model by maximizing the likelihood using Newton-Raphson.
     Parameters
@@ -580,24 +587,32 @@ def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_the
         thetas = np.random.rand(num_features, 1)
     else:
         thetas = initial_thetas.copy()
-    log_like_history = np.zeros(max_iter)
+    # log_like_history = np.zeros(max_iter)
+    cur_log_like = -np.inf
+    prev_log_like = -np.inf
     prediction = calc_logistic_regression_predictions(Xs, thetas)
     idx = 0
-    start = time.time()
+    with objmode(start='f8'):
+        start = time.perf_counter()
     print("Logistic regression optimization started")
     for i in range(max_iter):
         idx = i
-        log_like_history[i] = calc_logistic_regression_predictions_log_likelihood(prediction, ys)
+        # log_like_history[i] = calc_logistic_regression_predictions_log_likelihood(prediction, ys)
+        cur_log_like = calc_logistic_regression_predictions_log_likelihood(prediction, ys)[0][0]
         if (i - 1) % 100 == 0:
-            print(f"Iteration {i}, log-likelihood: {log_like_history[i]}, time from start: "
-                  f"{time.time() - start:.2f} seconds")
+            with objmode():
+                print("Iteration {0}, log-likelihood: {1}, time from start: {2} seconds".format(i, cur_log_like,
+                                                                                                time.perf_counter() - start))
         if i > 0:
-            log_like_frac_change = (log_like_history[i] - log_like_history[i - 1]) / log_like_history[i - 1]
+            # log_like_frac_change = (log_like_history[i] - log_like_history[i - 1]) / log_like_history[i - 1]
+            log_like_frac_change = (cur_log_like - prev_log_like) / prev_log_like
             if 0 <= log_like_frac_change < stopping_thr:
-                print("Optimization terminated successfully! (the log-likelihood doesn't increase)\n"
-                      f"Last iteration: {i}, final log-likelihood: {log_like_history[i]}, time from start: "
-                      f"{time.time() - start:.2f} seconds")
+                with objmode():
+                    print(
+                        "Optimization terminated successfully! (the log-likelihood doesn't increase)\nLast iteration: {0}, final log-likelihood: {1}, time from start: {2} seconds".format(
+                            i, cur_log_like, time.perf_counter() - start))
                 break
+        prev_log_like = cur_log_like
         grad = calc_logistic_regression_log_likelihood_grad(Xs, prediction, ys)
         hessian = calc_logistic_regression_log_likelihood_hessian(Xs, prediction)
         hessian_inv = np.linalg.pinv(hessian)
@@ -605,14 +620,15 @@ def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_the
         prediction = calc_logistic_regression_predictions(Xs, thetas)
 
     if idx == max_iter:
-        print(f"Optimization reached max iterations of {max_iter}!\n"
-              f"last log-likelihood: {log_like_history[idx]}, time from start: "
-              f"{time.time() - start:.2f} seconds")
+        with objmode():
+            print(
+                "Optimization reached max iterations of {0}!\nlast log-likelihood: {1}, time from start: {2} seconds".format(
+                    max_iter, cur_log_like, time.perf_counter() - start))
 
     # TODO: remove
-    from matplotlib import pyplot as plt
-    plt.plot(np.arange(idx), log_like_history[:idx])
-    plt.show()
+    # from matplotlib import pyplot as plt
+    # plt.plot(np.arange(idx), log_like_history[:idx])
+    # plt.show()
 
     # TODO: don't return the history
-    return thetas.flatten(), prediction.flatten(), log_like_history[:idx]
+    return thetas.flatten(), prediction.flatten()  # , log_like_history[:idx]
