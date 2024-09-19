@@ -434,7 +434,7 @@ def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
     return normalized_real_frequencies
     
 
-def calc_hotteling_statistic_for_sample(observed_features: np.ndarray, sample_features: np.ndarray,
+def calc_hotelling_statistic_for_sample(observed_features: np.ndarray, sample_features: np.ndarray,
                                         cov_mat_est_method: str):
     mean_features = np.mean(sample_features, axis=1)
     cov_mat_est = covariance_matrix_estimation(sample_features, mean_features,
