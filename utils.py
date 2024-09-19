@@ -7,6 +7,7 @@ from numba import njit
 from scipy.spatial.distance import mahalanobis
 import torch
 import random
+import time
 
 
 def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
@@ -381,6 +382,7 @@ def covariance_matrix_estimation(features_of_net_samples: np.ndarray, mean_featu
 def calc_nll_gradient(observed_features, mean_features_of_net_samples):
     return mean_features_of_net_samples - observed_features
 
+
 def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
     """
     Calculate the density of edges between each pair of types in the network.
@@ -424,15 +426,16 @@ def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
         for j in range(n):
             if i == j:
                 continue
-        
+
             type_a = types[i]
             type_b = types[j]
 
             real_frequencies[(type_a, type_b)] += W[i, j]
 
-    normalized_real_frequencies = {k: 0 if potential_frequencies[k] == 0 else v/potential_frequencies[k] for k, v in real_frequencies.items()}  
+    normalized_real_frequencies = {k: 0 if potential_frequencies[k] == 0 else v / potential_frequencies[k] for k, v in
+                                   real_frequencies.items()}
     return normalized_real_frequencies
-    
+
 
 def calc_hotelling_statistic_for_sample(observed_features: np.ndarray, sample_features: np.ndarray,
                                         cov_mat_est_method: str):
@@ -445,6 +448,171 @@ def calc_hotelling_statistic_for_sample(observed_features: np.ndarray, sample_fe
     hotelling_t_stat = sample_size * dist * dist
     num_features = sample_features.shape[0]
     hotelling_t_as_f = ((sample_size - num_features) / (
-                        num_features * (sample_size - 1))) * hotelling_t_stat
+            num_features * (sample_size - 1))) * hotelling_t_stat
     return hotelling_t_as_f
 
+
+def sigmoid(x: np.ndarray | float):
+    return 1 / (1 + np.exp(-x))
+
+
+def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
+    """
+    Calculate the predictions of a Logistic Regression model with input Xs and parameters thetas
+    Parameters
+    ----------
+    Xs
+        The input to the model (the regressors), of shape (num_samples X num_features)
+    thetas
+        The parameters of the model, of shape (num_features X 1)
+    Returns
+        sigmoid(Xs @ thetas)
+    -------
+    """
+    return sigmoid(Xs @ thetas)
+
+
+def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray):
+    """
+    Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
+    Parameters
+    ----------
+    predictions
+        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
+        labeled 1). Of shape (num_samples X 1)
+    ys
+        The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+    Returns
+    -------
+    The probability to observe the vector `ys` under the distribution induced by `predictions`.
+    """
+    # TODO: trim to (eps, 1-eps) before taking the log? (the model can't give probabilities of strictly 0 or 1 in
+    #  theory, but numerics...)?
+    return np.dot(np.log(predictions).T, ys) + np.dot(np.log(1 - predictions).T, 1 - ys)
+
+
+def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np.ndarray, ys: np.ndarray):
+    """
+    Calculates the gradient of the log-likelihood of labeled data with regard to the predictions of a Logistic
+    Regression model.
+    Parameters
+    ----------
+    Xs
+        The input to the model (the regressors), of shape (num_samples X num_features)
+    predictions
+        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
+        labeled 1). Of shape (num_samples X 1)
+    ys
+         The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+    Returns
+    -------
+    The gradient (partial derivatives with relation to thetas - the model parameters) of the log-likelihood of the data
+    given the model. Of shape (num_features X 1)
+    """
+    return Xs.T @ (ys - predictions)
+
+
+def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions: np.ndarray):
+    """
+    Calculates the hessian of the log-likelihood of labeled data with regard to the predictions of a Logistic
+    Regression model.
+    Parameters
+    ----------
+    Xs
+        The input to the model (the regressors), of shape (num_samples X num_features)
+    predictions
+        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
+        labeled 1). Of shape (num_samples X 1)
+    Returns
+    -------
+    The hessian (partial second derivatives with relation to thetas - the model parameters) of the log-likelihood of the
+    data given the model. Of shape (num_features X num_features)
+    """
+    return Xs.T @ (predictions * (1 - predictions) * Xs)
+
+
+def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas: np.ndarray, ys: np.ndarray):
+    """
+    Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
+    Parameters
+    ----------
+    Xs
+        The input to the model (the regressors), of shape (num_samples X num_features)
+    thetas
+        The parameters of the model, of shape (num_features X 1)
+    ys
+        The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+    Returns
+    -------
+    The probability to observe the vector `ys` under the distribution induced by the model.
+    """
+    return (-np.log(1 + np.exp(-Xs @ thetas)) + (ys - 1) * Xs @ thetas).sum()
+
+# TODO: njit this and all related functions
+def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_thetas: np.ndarray | None = None,
+                                     lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-6):
+    """
+    Optimize the parameters of a Logistic Regression model by maximizing the likelihood using Newton-Raphson.
+    Parameters
+    ----------
+    Xs
+        The input to the model (the regressors), of shape (num_samples X num_features)
+    ys
+         The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+    initial_thetas
+        The initial vector of parameters. If `None`, the initial state is randomly sampled from (0,1)
+    lr
+        The learning rate of the gradient-ascent, scales the step size of the optimization.
+    max_iter
+        The maximum number of optimization iterations to run.
+    stopping_thr
+        The fraction of change in the objective function (which is the log-likelihood) that is used as stopping
+        criterion (i.e., if the percent change of the objective is smaller than this threshold we stop)
+    Returns
+        Parameters of the trained model.
+    -------
+
+    """
+    num_samples = Xs.shape[0]
+    ys = ys.reshape((num_samples, 1))
+    num_features = Xs.shape[1]
+    if initial_thetas is None:
+        thetas = np.random.rand(num_features, 1)
+    else:
+        thetas = initial_thetas.copy()
+    log_like_history = np.zeros(max_iter)
+    prediction = calc_logistic_regression_predictions(Xs, thetas)
+    idx = 0
+    start = time.time()
+    print("Logistic regression optimization started")
+    for i in range(max_iter):
+        idx = i
+        log_like_history[i] = calc_logistic_regression_predictions_log_likelihood(prediction, ys)
+        if (i - 1) % 100 == 0:
+            print(f"Iteration {i}, log-likelihood: {log_like_history[i]}, time from start: "
+                  f"{time.time() - start:.2f} seconds")
+        if i > 0:
+            log_like_frac_change = (log_like_history[i] - log_like_history[i - 1]) / log_like_history[i - 1]
+            if 0 <= log_like_frac_change < stopping_thr:
+                print("Optimization terminated successfully! (the log-likelihood doesn't increase)\n"
+                      f"Last iteration: {i}, final log-likelihood: {log_like_history[i]}, time from start: "
+                      f"{time.time() - start:.2f} seconds")
+                break
+        grad = calc_logistic_regression_log_likelihood_grad(Xs, prediction, ys)
+        hessian = calc_logistic_regression_log_likelihood_hessian(Xs, prediction)
+        hessian_inv = np.linalg.pinv(hessian)
+        thetas += lr * hessian_inv @ grad
+        prediction = calc_logistic_regression_predictions(Xs, thetas)
+
+    if idx == max_iter:
+        print(f"Optimization reached max iterations of {max_iter}!\n"
+              f"last log-likelihood: {log_like_history[idx]}, time from start: "
+              f"{time.time() - start:.2f} seconds")
+
+    # TODO: remove
+    from matplotlib import pyplot as plt
+    plt.plot(np.arange(idx), log_like_history[:idx])
+    plt.show()
+
+    # TODO: don't return the history
+    return thetas.flatten(), prediction.flatten(), log_like_history[:idx]

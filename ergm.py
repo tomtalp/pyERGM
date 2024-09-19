@@ -58,7 +58,9 @@ class ERGM():
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
-        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes, use_sparse_matrix=use_sparse_matrix, fix_collinearity=fix_collinearity)
+        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes,
+                                                     use_sparse_matrix=use_sparse_matrix,
+                                                     fix_collinearity=fix_collinearity)
         if initial_thetas is not None:
             self._thetas = initial_thetas
         else:
@@ -187,10 +189,17 @@ class ERGM():
 
                 row_idx += 1
 
-        clf = LogisticRegression(fit_intercept=False, penalty=None, max_iter=5000).fit(Xs, ys)
+        # TODO: decide whih one we use and clean
+        # clf = LogisticRegression(fit_intercept=False, penalty=None, max_iter=5000).fit(Xs, ys)
+        # self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
+        # self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = clf.predict_proba(Xs)[:, 1]
+        # return clf.coef_[0]
+
+        trained_thetas, prediction, _ = logistic_regression_optimization(Xs, ys)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
-        self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = clf.predict_proba(Xs)[:, 1]
-        return clf.coef_[0]
+        self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
+        return trained_thetas
+
 
     def _do_MPLE(self, theta_init_method):
         if not self._network_statistics._has_dyadic_dependent_metrics or theta_init_method == "mple":
