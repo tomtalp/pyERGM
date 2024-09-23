@@ -225,6 +225,8 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
                                           [2, 3, 2, 3], 
                                           [0, 1, 0, 1], 
                                           [2, 3, 2, 3]])
+    
+        expected_edge_weights += 1 # Increment because we also want a bin for nonexisting edges (which have the entry 0)
 
         self.assertTrue(np.all(metric.edge_weights == expected_edge_weights))
 
@@ -234,6 +236,9 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
                                           [2, 3, 3, 2], 
                                           [2, 3, 3, 2],
                                           [0, 1, 1, 0]])
+        
+        expected_edge_weights += 1 # Increment because we also want a bin for nonexisting edges (which have the entry 0)
+        
         print(metric.edge_weights)
         print(expected_edge_weights)
         self.assertTrue(np.all(metric.edge_weights == expected_edge_weights))

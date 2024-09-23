@@ -457,54 +457,47 @@ class NumberOfEdgesTypesDirected(ExWeightNumEdges):
                 type_2 = self.exogenous_attr[j]
 
                 self.edge_weights[i, j] = self._sorted_type_pairs.index((type_1, type_2))
+            
+        self.edge_weights += 1 # Increment by 1 to avoid 0-indexing (the index 0 will be kept for non-existing edges)
 
     def _get_num_weight_mats(self):
         return len(set(self.exogenous_attr)) ** 2 - len(self._indices_to_ignore)
 
     def calculate(self, input: np.ndarray):
-        nonzero_entries = input.nonzero()
-        type_pairs_in_network = self.edge_weights[nonzero_entries].astype(int)
-        return np.delete(np.bincount(type_pairs_in_network, minlength=len(self._sorted_type_pairs)), self._indices_to_ignore)
-        
+        return self.calculate_for_sample(input[:, :, np.newaxis]).reshape(-1)
+    
     def calculate_for_sample(self, networks_sample: np.ndarray):
         """
-        Parameters
+        Receives an array of networks and calculates the number of edges between each type pair in each network.
+
+        We begin by performing an entry-wise product between the network and the edge weights matrix. This results in an (n,n,k) matrix,
+        where each entry (i,j,k) is the type pair index between nodes i and j in the k-th network.
+        We then perform a 3-dimensional bincount on the resulting matrix, by flattening the entire tensor.
         ----------
         networks_sample: np.ndarray
             An array of size (n,n, k) - k networks of size (n, n)
         """
-        nonzero_entries = np.nonzero(networks_sample) 
+        n_nets = networks_sample.shape[-1]
+        n_bins = self._get_effective_feature_count() + 1  # +1 to account for the 0-th bin (which will hold empty edges)
 
-        type_pairs_indices = self.edge_weights[nonzero_entries[0], nonzero_entries[1]]
+        type_pairs = networks_sample * self.edge_weights[:, :, np.newaxis]
+        flattened_type_pairs = type_pairs.reshape(-1, n_nets)
 
-        # An array of size (2, num_of_nonzero_entries), where the first row is the type_pair index
-        # of every nonzero entry in the sample size.
-        # The second denotes from which sample the type pair came from.
-        type_pairs_idx_per_sample = np.array([type_pairs_indices, nonzero_entries[2]])
-
-        sorted_indices = np.argsort(type_pairs_idx_per_sample[1])
-        sorted_type_pair_indices = type_pairs_idx_per_sample[:, sorted_indices].astype(int)
-
-        sample_size = networks_sample.shape[2]
-        result = np.zeros((sample_size, len(self._sorted_type_pairs)))
-
-        start_idx = 0
-        end_idx = start_idx
-        cur_sample_idx = 0
-        while cur_sample_idx < sample_size:
-            while end_idx < sorted_type_pair_indices.shape[1] and sorted_type_pair_indices[1, end_idx] == cur_sample_idx:
-                end_idx += 1
-            result[cur_sample_idx, :] = np.bincount(sorted_type_pair_indices[0, start_idx:end_idx], minlength=len(self._sorted_type_pairs))
-            cur_sample_idx += 1
-            start_idx = end_idx
+        scaled_idx = n_bins*np.arange(n_nets)[None,:] + flattened_type_pairs # Give an offset for each sample so that bincount can be used "separately" for each network sample
+        scaled_idx = scaled_idx.astype(int)
+        counts = np.bincount(scaled_idx.flatten(), minlength=n_bins*n_nets)
         
-        return np.delete(result.T, self._indices_to_ignore, axis=0)
-        # return np.delete(super().calculate_for_sample(networks_sample), self._indices_to_ignore, axis=0)
-        
+        # We counted one extra bin in each sample (the 0-th bin), so we now need to remove it.
+        indices_of_0_to_remove = [i*n_bins for i in range(n_nets)]
+        counts = np.delete(counts, indices_of_0_to_remove)
+        counts = counts.reshape((n_bins-1, n_nets), order="F")
+
+        return np.delete(counts, self._indices_to_ignore, axis=0)
+
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         sign = -1 if current_network[indices[0], indices[1]] else 1
         result = np.zeros(len(self._sorted_type_pairs))
-        result[self.edge_weights[indices]] = sign
+        result[self.edge_weights[indices]-1] = sign # -1 to ignore the empty edge type (edge_weights assigns 0 to empty edges, 1 for the first type-pair, etc...)
         return np.delete(result, self._indices_to_ignore, axis=0)
  
 
