@@ -209,15 +209,6 @@ class TestDegreeMetrics(unittest.TestCase):
 
 
 class TestNumberOfEdgesTypesDirected(unittest.TestCase):
-    def test_get_num_weight_mats(self):
-        neuronal_types = ['A', 'B', 'C']
-        metric = NumberOfEdgesTypesDirected(neuronal_types)
-        self.assertTrue(metric._get_num_weight_mats() == 9)
-
-        neuronal_types = ['A', 'B', 'C', 'A', 'B', 'C']
-        metric = NumberOfEdgesTypesDirected(neuronal_types)
-        self.assertTrue(metric._get_num_weight_mats() == 9)
-
     def test_calc_edge_weights(self):
         neuronal_types = ['A', 'B', 'A', 'B']
         metric = NumberOfEdgesTypesDirected(neuronal_types)
@@ -318,6 +309,35 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         calculated_change_score = metric.calc_change_score(W2, (1, 2))
         expected_change_score = np.array([0, 0, 1, 0])
         self.assertTrue(np.all(expected_change_score == calculated_change_score))
+    
+    def test_calculate_change_score_full_network(self):
+        types = ['A', 'B', 'A', 'B']
+        metric = NumberOfEdgesTypesDirected(types)
+
+        W1 = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [1, 1, 0, 0],
+            [0, 0, 1, 0]
+        ])
+
+        expected_full_change_score = np.array([
+            [0, -1, 0, 0],
+            [1, 0, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, -1, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, -1],
+            [-1, 0, 0, 0],
+            [0, -1, 0, 0],
+            [0, 1, 0, 0],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+            [0, 0, -1, 0]
+        ])
+
+        full_change_score = metric.calculate_change_score_full_network(W1)
+        self.assertTrue(np.all(expected_full_change_score == full_change_score))
 
 
 class TestNodeAttrSums(unittest.TestCase):
@@ -682,3 +702,43 @@ class TestMetricsCollection(unittest.TestCase):
         expected_result = [-1, 0, -1, 0]
 
         self.assertTrue(all(result == expected_result))
+    
+    def test_calculate_change_scores_all_edges(self): 
+        types = ['A', 'B', 'A', 'B']
+        metrics = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
+
+        W1 = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [1, 1, 0, 0],
+            [0, 0, 1, 0]
+        ])
+        n_nodes = W1.shape[0]
+
+        expected_full_change_score = np.array([
+            [-1, 0, -1, 0, 0],
+            [1, 1, 0, 0, 0],
+            [1, 0, 1, 0, 0],
+            [-1, 0, 0, -1, 0],
+            [1, 0, 0, 1, 0],
+            [-1, 0, 0, 0, -1],
+            [-1, -1, 0, 0, 0],
+            [-1, 0, -1, 0, 0],
+            [1, 0, 1, 0, 0],
+            [1, 0, 0, 1, 0],
+            [1, 0, 0, 0, 1],
+            [-1, 0, 0, -1, 0]
+        ])
+        
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
+
+        # The collinearity fixer is supposed to remove one attribute from the NumberOfEdgesTypesDirected metric
+        self.assertEqual(len(collection.metrics[1]._indices_to_ignore), 1)
+        
+        idx_to_ignore = collection.metrics[1]._indices_to_ignore[0]
+
+        res = collection.calculate_change_scores_all_edges(W1)
+
+        # Deleting the 1+idx_to_ignore because the first entry is the NumberOfEdgesDirected metric
+        expected_full_change_score = np.delete(expected_full_change_score, 1+idx_to_ignore, axis=1)
+        self.assertTrue(np.all(expected_full_change_score == res))

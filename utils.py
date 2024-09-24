@@ -451,3 +451,9 @@ def calc_hotteling_statistic_for_sample(observed_features: np.ndarray, sample_fe
                         num_features * (sample_size - 1))) * hotelling_t_stat
     return hotelling_t_as_f
 
+@njit
+def generate_binomial_tensor(net_size, num_samples):
+    """
+    Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
+    """
+    return np.random.binomial(1, 0.5, (net_size, net_size, num_samples)).astype(np.int8) 
