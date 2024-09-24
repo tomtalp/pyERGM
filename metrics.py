@@ -116,6 +116,14 @@ class NumberOfEdgesDirected(Metric):
         """
         return networks_sample.sum(axis=0).sum(axis=0)
 
+    @staticmethod
+    @njit
+    def calculate_change_score_full_network(current_network: np.ndarray):
+        sign_matrix = np.where(current_network == 1, -1, 1) # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
+        nondiag_signs = sign_matrix[~np.eye(sign_matrix.shape[0], dtype=bool)].flatten()
+
+        return nondiag_signs[:, np.newaxis]
+ 
 
 # TODO: change the name of this one to undirected and implement also a directed version?
 class NumberOfTriangles(Metric):
@@ -502,6 +510,7 @@ class NumberOfEdgesTypesDirected(Metric):
         # -1 to ignore the empty edge type (edge_weights assigns 0 to empty edges, 1 for the first type-pair, etc...)
         nondiag_weights = self.edge_weights[~np.eye(self.edge_weights.shape[0], dtype=bool)].flatten() -1 
         change_scores[np.arange(num_edges), nondiag_weights] = nondiag_signs
+        change_scores = change_scores.astype(np.int8)
         return np.delete(change_scores, self._indices_to_ignore, axis=1)
  
 
@@ -1000,6 +1009,8 @@ class MetricsCollection:
 
         feature_idx = 0
         for metric in self.metrics:
+            t1 = time.time()
+            print(f"Working on metric {metric}")
             if metric.requires_graph:
                 input = G1
             else:
@@ -1021,5 +1032,8 @@ class MetricsCollection:
 
 
             feature_idx += n_features_from_metric
+            t2 = time.time()
+            print(f"Done with metric {metric}. Took {t2 - t1} seconds")
+
 
         return change_scores

@@ -170,23 +170,25 @@ class ERGM():
             The estimated coefficients of the ERGM.
         """
 
-        Xs = np.zeros((self._n_nodes ** 2 - self._n_nodes, self._network_statistics.num_of_features))
-        ys = np.zeros((self._n_nodes ** 2 - self._n_nodes))
+        # Xs = np.zeros((self._n_nodes ** 2 - self._n_nodes, self._network_statistics.num_of_features))
+        Xs = self._network_statistics.calculate_change_scores_all_edges(observed_network)
+        # ys = np.zeros((self._n_nodes ** 2 - self._n_nodes))
+        ys = observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()
 
-        row_idx = 0
-        for i in tqdm.tqdm(range(self._n_nodes)):
-            for j in tqdm.tqdm(range(self._n_nodes), leave=False):
-                if i == j:
-                    continue
+        # row_idx = 0
+        # for i in tqdm.tqdm(range(self._n_nodes)):
+        #     for j in tqdm.tqdm(range(self._n_nodes), leave=False):
+        #         if i == j:
+        #             continue
 
-                y = observed_network[i, j]
-                W_minus = np.copy(observed_network)
-                W_minus[i, j] = 0
+        #         y = observed_network[i, j]
+        #         W_minus = np.copy(observed_network)
+        #         W_minus[i, j] = 0
 
-                ys[row_idx] = y
-                Xs[row_idx, :] = self._network_statistics.calc_change_scores(W_minus, (i, j))
+        #         ys[row_idx] = y
+        #         Xs[row_idx, :] = self._network_statistics.calc_change_scores(W_minus, (i, j))
 
-                row_idx += 1
+        #         row_idx += 1
 
         print("Done collecting data, now performing logistic regression")
         t1 = time.time()
