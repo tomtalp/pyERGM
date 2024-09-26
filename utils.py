@@ -381,6 +381,12 @@ def covariance_matrix_estimation(features_of_net_samples: np.ndarray, mean_featu
 def calc_nll_gradient(observed_features, mean_features_of_net_samples):
     return mean_features_of_net_samples - observed_features
 
+
+def get_sorted_type_pairs(types):
+    sorted_types = sorted(list(set(types)))
+    return list(itertools.product(sorted_types, sorted_types))
+
+
 def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
     """
     Calculate the density of edges between each pair of types in the network.
@@ -401,16 +407,15 @@ def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
 
         Array size is k^2 where k is number of types
     """
-
-    sorted_types = sorted(list(set(types)))
+    type_pairs = get_sorted_type_pairs(types)
     n = W.shape[0]
-    real_frequencies = {k: 0 for k in itertools.product(sorted_types, sorted_types)}
+    real_frequencies = {k: 0 for k in type_pairs}
 
     types_frequencies = dict(Counter(types))
     potential_frequencies = {}
 
     # Count how many potential edges can exist between each pair of types
-    for pair in itertools.product(sorted_types, sorted_types):
+    for pair in type_pairs:
         type_1 = pair[0]
         type_2 = pair[1]
 
@@ -424,15 +429,16 @@ def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
         for j in range(n):
             if i == j:
                 continue
-        
+
             type_a = types[i]
             type_b = types[j]
 
             real_frequencies[(type_a, type_b)] += W[i, j]
 
-    normalized_real_frequencies = {k: 0 if potential_frequencies[k] == 0 else v/potential_frequencies[k] for k, v in real_frequencies.items()}  
+    normalized_real_frequencies = {k: 0 if potential_frequencies[k] == 0 else v / potential_frequencies[k] for k, v in
+                                   real_frequencies.items()}
     return normalized_real_frequencies
-    
+
 
 def calc_hotteling_statistic_for_sample(observed_features: np.ndarray, sample_features: np.ndarray,
                                         cov_mat_est_method: str):
@@ -445,6 +451,13 @@ def calc_hotteling_statistic_for_sample(observed_features: np.ndarray, sample_fe
     hotelling_t_stat = sample_size * dist * dist
     num_features = sample_features.shape[0]
     hotelling_t_as_f = ((sample_size - num_features) / (
-                        num_features * (sample_size - 1))) * hotelling_t_stat
+            num_features * (sample_size - 1))) * hotelling_t_stat
     return hotelling_t_as_f
 
+
+@njit
+def generate_binomial_tensor(net_size, num_samples, p=0.5):
+    """
+    Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
+    """
+    return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)

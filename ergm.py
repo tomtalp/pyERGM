@@ -58,7 +58,9 @@ class ERGM():
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
-        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes, use_sparse_matrix=use_sparse_matrix, fix_collinearity=fix_collinearity)
+        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes,
+                                                     use_sparse_matrix=use_sparse_matrix,
+                                                     fix_collinearity=fix_collinearity)
         if initial_thetas is not None:
             self._thetas = initial_thetas
         else:
@@ -169,25 +171,14 @@ class ERGM():
             The estimated coefficients of the ERGM.
         """
 
-        Xs = np.zeros((self._n_nodes ** 2 - self._n_nodes, self._network_statistics.num_of_features))
-        ys = np.zeros((self._n_nodes ** 2 - self._n_nodes))
+        Xs = self._network_statistics.calculate_change_scores_all_edges(observed_network)
+        ys = observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()
 
-        row_idx = 0
-        for i in range(self._n_nodes):
-            for j in range(self._n_nodes):
-                if i == j:
-                    continue
-
-                y = observed_network[i, j]
-                W_minus = np.copy(observed_network)
-                W_minus[i, j] = 0
-
-                ys[row_idx] = y
-                Xs[row_idx, :] = self._network_statistics.calc_change_scores(W_minus, (i, j))
-
-                row_idx += 1
-
+        print("Done collecting data, now performing logistic regression")
+        t1 = time.time()
         clf = LogisticRegression(fit_intercept=False, penalty=None, max_iter=5000).fit(Xs, ys)
+        t2 = time.time()
+        print(f"Logistic regression took {t2 - t1} seconds")
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
         self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = clf.predict_proba(Xs)[:, 1]
         return clf.coef_[0]
