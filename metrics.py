@@ -931,7 +931,6 @@ class MetricsCollection:
             n_features_from_metric = metric._get_effective_feature_count()
 
             if hasattr(metric, "calculate_change_score_full_network"):
-            # if False:
                 change_scores[:,
                 feature_idx:feature_idx + n_features_from_metric] = metric.calculate_change_score_full_network(
                     current_network)
