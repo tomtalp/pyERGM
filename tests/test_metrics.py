@@ -219,7 +219,7 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
     
         expected_edge_weights += 1 # Increment because we also want a bin for nonexisting edges (which have the entry 0)
 
-        self.assertTrue(np.all(metric.edge_weights == expected_edge_weights))
+        self.assertTrue(np.all(metric._edge_type_idx_assignment == expected_edge_weights))
 
         neuronal_types = ['A', 'B', 'B', 'A']
         metric = NumberOfEdgesTypesDirected(neuronal_types)
@@ -230,9 +230,9 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         
         expected_edge_weights += 1 # Increment because we also want a bin for nonexisting edges (which have the entry 0)
         
-        print(metric.edge_weights)
+        print(metric._edge_type_idx_assignment)
         print(expected_edge_weights)
-        self.assertTrue(np.all(metric.edge_weights == expected_edge_weights))
+        self.assertTrue(np.all(metric._edge_type_idx_assignment == expected_edge_weights))
 
     def test_calculate(self):
         W = np.array([

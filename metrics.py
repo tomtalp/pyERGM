@@ -6,9 +6,11 @@ import numpy as np
 import torch
 import networkx as nx
 from numba import njit
+import numba as nb
 
 from utils import *
 import time
+
 
 class Metric(ABC):
     def __init__(self, requires_graph=False):
@@ -83,7 +85,7 @@ class NumberOfEdgesUndirected(Metric):
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         return -1 if current_network[indices[0], indices[1]] else 1
-    
+
     def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         """
         Sum each matrix over all matrices in sample
@@ -117,13 +119,14 @@ class NumberOfEdgesDirected(Metric):
         return networks_sample.sum(axis=0).sum(axis=0)
 
     @staticmethod
-    @njit
+    # TODO: understand how to properly use numba here (the dtype=bool makes some trouble).
+    # @njit
     def calculate_change_score_full_network(current_network: np.ndarray):
-        sign_matrix = np.where(current_network == 1, -1, 1) # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
+        sign_matrix = np.where(current_network == 1, -1, 1)  # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
         nondiag_signs = sign_matrix[~np.eye(sign_matrix.shape[0], dtype=bool)].flatten()
 
         return nondiag_signs[:, np.newaxis]
- 
+
 
 # TODO: change the name of this one to undirected and implement also a directed version?
 class NumberOfTriangles(Metric):
@@ -396,18 +399,36 @@ class ExWeightNumEdges(Metric):
     def _numba_calculate_for_sample(networks_sample: np.ndarray, edge_weights: np.ndarray):
         reshaped_edge_weights = edge_weights.reshape(edge_weights.shape[0], -1).astype(np.float64)
         reshaped_networks_sample = networks_sample.reshape(-1, networks_sample.shape[2]).astype(np.float64)
-        
+
         res = reshaped_edge_weights @ reshaped_networks_sample
         # res = np.einsum('ijk,mij->mk', networks_sample, self.edge_weights)
         # res = np.tensordot(self.edge_weights, networks_sample, axes=2)
 
         return res
-        
-        
+
 
 class NumberOfEdgesTypesDirected(Metric):
+    """
+    A metric that counts how many edges exist between different node types in a directed graph.
+    For example -
+        A graph with `n` nodes, with an exogenous attribute `type=[A, B]` assigned to each node.
+        The metric counts the number of edges between nodes of type A->A, A->B, B->A, B->B of a given graph,
+        yielding len(type)**2 features.
+
+    Parameters
+    -----------
+        exogenous_attr : Collection
+            A collection of attributes assigned to each node in a graph with n nodes.
+
+            #TODO - len(exogenous_attr)==n is a requirement, right? Should we assert?
+
+        indices_to_ignore: list
+            # TODO - Specify the sorting convention
+    """
+
     def __str__(self):
         return "num_edges_between_types_directed"
+
     def __init__(self, exogenous_attr: Collection, indices_to_ignore=None):
         self.exogenous_attr = exogenous_attr
         if indices_to_ignore is None:
@@ -423,13 +444,13 @@ class NumberOfEdgesTypesDirected(Metric):
                 self.indices_of_types[t] = [i]
             else:
                 self.indices_of_types[t].append(i)
-                                
-        self.sorted_type_pairs = get_sorted_type_pairs(self.unique_types)
-        self._calc_edge_weights()
 
-    def _calc_edge_weights(self):
+        self.sorted_type_pairs = get_sorted_type_pairs(self.unique_types)
+        self._calc_edge_type_idx_assignment()
+
+    def _calc_edge_type_idx_assignment(self):
         """
-        Each edge is weighted by the index of it's corresponding sorted type pair.
+        Each edge is assigned with the index of it's corresponding sorted type pair.
         
         For example, for an n=4 matrix with types [A, B, A, B], the weight matrix is
             [ AA, AB, AA, AB
@@ -441,16 +462,16 @@ class NumberOfEdgesTypesDirected(Metric):
             
         """
         num_nodes = len(self.exogenous_attr)
-        self.edge_weights = np.zeros((num_nodes, num_nodes)).astype(int)
+        self._edge_type_idx_assignment = np.zeros((num_nodes, num_nodes)).astype(int)
 
         for i in range(num_nodes):
             for j in range(num_nodes):
                 type_1 = self.exogenous_attr[i]
                 type_2 = self.exogenous_attr[j]
 
-                self.edge_weights[i, j] = self.sorted_type_pairs.index((type_1, type_2))
-            
-        self.edge_weights += 1 # Increment by 1 to avoid 0-indexing (the index 0 will be kept for non-existing edges)
+                self._edge_type_idx_assignment[i, j] = self.sorted_type_pairs.index((type_1, type_2))
+
+        self._edge_type_idx_assignment += 1  # Increment by 1 to avoid 0-indexing (the index 0 will be kept for non-existing edges)
 
     def _get_effective_feature_count(self):
         return len(self.unique_types) ** 2 - len(self._indices_to_ignore)
@@ -504,131 +525,16 @@ class NumberOfEdgesTypesDirected(Metric):
 
         change_scores = np.zeros((num_edges, len(self.sorted_type_pairs)))
 
-        sign_matrix = np.where(current_network == 1, -1, 1) # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
+        sign_matrix = np.where(current_network == 1, -1,
+                               1)  # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
         nondiag_signs = sign_matrix[~np.eye(sign_matrix.shape[0], dtype=bool)].flatten()
 
         # -1 to ignore the empty edge type (edge_weights assigns 0 to empty edges, 1 for the first type-pair, etc...)
-        nondiag_weights = self.edge_weights[~np.eye(self.edge_weights.shape[0], dtype=bool)].flatten() -1 
+        nondiag_weights = self._edge_type_idx_assignment[
+                              ~np.eye(self._edge_type_idx_assignment.shape[0], dtype=bool)].flatten() - 1
         change_scores[np.arange(num_edges), nondiag_weights] = nondiag_signs
         change_scores = change_scores.astype(np.int8)
         return np.delete(change_scores, self._indices_to_ignore, axis=1)
- 
-
-# class NumberOfEdgesTypesDirected(ExWeightNumEdges):
-#     """
-#     A metric that counts how many edges exist between different node types in a directed graph.
-#     For example - 
-#         A graph with `n` nodes, with an exogenous attribute `type=[A, B]` assigned to each node.
-#     The metric counts the number of edges between nodes of type A->A, A->B, B->A, B->B of a given graph,
-#     yielding len(type)**2 features.
-
-#     Parameters
-#     -----------
-#         exogenous_attr : Collection
-#             A collection of attributes assigned to each node in a graph with n nodes.
-
-#             #TODO - len(exogenous_attr)==n is a requirement, right? Should we assert?
-        
-#         indices_to_ignore: list
-#             # TODO - relative to what order is this expected to arrive?
-#             e.g. for an input exogenous_attr=[A, B, A, B]
-#             can the user _always_ expect that indices_to_ignore is relative to 
-#             [AA, AB, BA, BB] (i.e. alphabetic order) ?
-            
-#             # TODO - what types can `exogenous_attr` hold? Only strings?
-#             If not (e.g. also `int` to denote class types), how are they sorted
-#             for indices_to_ignore?
-#     """
-#     def __init__(self, exogenous_attr: Collection, indices_to_ignore=None):
-#         self.exogenous_attr = exogenous_attr
-#         self._unique_attributes = set(exogenous_attr)
-#         self._sorted_type_pairs = get_sorted_type_pairs(self._unique_attributes)
-
-#         if indices_to_ignore is None:
-#             self._indices_to_ignore = []
-#         else:
-#             self._indices_to_ignore = deepcopy(indices_to_ignore)
-#         super().__init__(exogenous_attr)
-#         self._is_directed = True
-
-#     def _calc_edge_weights(self):
-#         """
-#         Each edge is weighted by the index of it's corresponding sorted type pair.
-        
-#         For example, for an n=4 matrix with types [A, B, A, B], the weight matrix is
-#             [ AA, AB, AA, AB
-#               BA, BB, BA, BB
-#               AA, AB, AA, AB
-#               BA, BB, BA, BB ]
-#         but instead of AA, AB, ..., we save the corresponding index of the type pair
-#         in self._sorted_type_pairs (which is sorted alphabetically.)
-            
-#         """
-#         num_nodes = len(self.exogenous_attr)
-#         self.edge_weights = np.zeros((num_nodes, num_nodes)).astype(int)
-
-#         for i in range(num_nodes):
-#             for j in range(num_nodes):
-#                 type_1 = self.exogenous_attr[i]
-#                 type_2 = self.exogenous_attr[j]
-
-#                 self.edge_weights[i, j] = self._sorted_type_pairs.index((type_1, type_2))
-            
-#         self.edge_weights += 1 # Increment by 1 to avoid 0-indexing (the index 0 will be kept for non-existing edges)
-
-#     def _get_num_weight_mats(self):
-#         return len(set(self.exogenous_attr)) ** 2 - len(self._indices_to_ignore)
-
-#     def calculate(self, input: np.ndarray):
-#         return self.calculate_for_sample(input[:, :, np.newaxis]).reshape(-1)
-    
-#     @staticmethod
-#     @njit
-#     def _perform_bincount(networks_sample: np.ndarray, 
-#                                      edge_weights: np.ndarray,
-#                                      n_bins, n_nets):
-        
-        
-#         type_pairs = networks_sample * edge_weights[:, :, np.newaxis]
-#         flattened_type_pairs = type_pairs.reshape(-1, n_nets)
-
-#         scaled_idx = n_bins*np.arange(n_nets)[np.newaxis, :] + flattened_type_pairs # Give an offset for each sample so that bincount can be used "separately" for each network sample
-#         # scaled_idx = scaled_idx.astype(np.int32)
-#         counts = np.bincount(scaled_idx.flatten(), minlength=n_bins*n_nets)
-#         return counts
-        
-
-#     def calculate_for_sample(self, networks_sample: np.ndarray):
-#         """
-#         Receives an array of networks and calculates the number of edges between each type pair in each network.
-
-#         We begin by performing an entry-wise product between the network and the edge weights matrix. This results in an (n,n,k) matrix,
-#         where each entry (i,j,k) is the type pair index between nodes i and j in the k-th network.
-#         We then perform a 3-dimensional bincount on the resulting matrix, by flattening the entire tensor.
-#         ----------
-#         networks_sample: np.ndarray
-#             An array of size (n,n, k) - k networks of size (n, n)
-#         """
-#         n_bins = self._get_effective_feature_count() + 1  # +1 to account for the 0-th bin (which will hold empty edges)
-#         n_nets = networks_sample.shape[-1]
-#         counts = NumberOfEdgesTypesDirected._perform_bincount(networks_sample, self.edge_weights, n_bins, n_nets)
-        
-#         # We counted one extra bin in each sample (the 0-th bin), so we now need to remove it.
-#         indices_of_0_to_remove = [i*n_bins for i in range(n_nets)]
-#         counts = np.delete(counts, indices_of_0_to_remove)
-#         counts = counts.reshape((n_bins-1, n_nets), order="F")
-
-#         return np.delete(counts, self._indices_to_ignore, axis=0)
-
-#     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
-#         sign = -1 if current_network[indices[0], indices[1]] else 1
-#         result = np.zeros(len(self._sorted_type_pairs))
-#         result[self.edge_weights[indices]-1] = sign # -1 to ignore the empty edge type (edge_weights assigns 0 to empty edges, 1 for the first type-pair, etc...)
-#         return np.delete(result, self._indices_to_ignore, axis=0)
- 
-
-    # def __str__(self):
-    #     return "num_edges_between_types_directed"
 
 
 class NodeAttrSum(ExWeightNumEdges):
@@ -823,7 +729,7 @@ class MetricsCollection:
 
         while is_linearly_dependent:
             self.num_of_features = self.calc_num_of_features()
-            
+
             features_cov_mat = sample_features @ sample_features.T
 
             # Determine whether the matrix of features is invertible. If not - this means there is a non-trivial vector,
@@ -1019,7 +925,9 @@ class MetricsCollection:
             n_features_from_metric = metric._get_effective_feature_count()
 
             if hasattr(metric, "calculate_change_score_full_network"):
-                change_scores[:, feature_idx:feature_idx + n_features_from_metric] = metric.calculate_change_score_full_network(current_network)
+                change_scores[:,
+                feature_idx:feature_idx + n_features_from_metric] = metric.calculate_change_score_full_network(
+                    current_network)
             else:
                 edge_idx = 0
                 for i in range(n_nodes):
@@ -1027,13 +935,12 @@ class MetricsCollection:
                         if i == j:
                             continue
                         indices = (i, j)
-                        change_scores[edge_idx, feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input, indices)
+                        change_scores[edge_idx,
+                        feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input, indices)
                         edge_idx += 1
-
 
             feature_idx += n_features_from_metric
             t2 = time.time()
             print(f"Done with metric {metric}. Took {t2 - t1} seconds")
-
 
         return change_scores
