@@ -561,10 +561,9 @@ def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas
     return (-np.log(1 + np.exp(-Xs @ thetas)) + (ys - 1) * Xs @ thetas).sum()
 
 
-# TODO: njit this and all related functions
-# @njit
+@njit
 def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_thetas: np.ndarray | None = None,
-                                     lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-3):
+                                     lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-6):
     """
     Optimize the parameters of a Logistic Regression model by maximizing the likelihood using Newton-Raphson.
     Parameters
@@ -594,7 +593,6 @@ def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_the
         thetas = np.random.rand(num_features, 1)
     else:
         thetas = initial_thetas.copy()
-    # log_like_history = np.zeros(max_iter)
     cur_log_like = -np.inf
     prev_log_like = -np.inf
     prediction = calc_logistic_regression_predictions(Xs, thetas)
@@ -604,7 +602,6 @@ def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_the
     print("Logistic regression optimization started")
     for i in range(max_iter):
         idx = i
-        # log_like_history[i] = calc_logistic_regression_predictions_log_likelihood(prediction, ys)
         cur_log_like = calc_logistic_regression_predictions_log_likelihood(prediction, ys)
         if (i - 1) % 100 == 0:
             with objmode():
@@ -634,13 +631,7 @@ def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_the
                 "Optimization reached max iterations of {0}!\nlast log-likelihood: {1}, time from start: {2} seconds".format(
                     max_iter, cur_log_like, time.perf_counter() - start))
 
-    # TODO: remove
-    # from matplotlib import pyplot as plt
-    # plt.plot(np.arange(idx), log_like_history[:idx])
-    # plt.show()
-
-    # TODO: don't return the history
-    return thetas.flatten(), prediction.flatten()  # , log_like_history[:idx]
+    return thetas.flatten(), prediction.flatten()
 
 
 def generate_binomial_tensor(net_size, num_samples, p=0.5):

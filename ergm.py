@@ -173,22 +173,14 @@ class ERGM():
             The estimated coefficients of the ERGM.
         """
 
-        Xs = self._metrics_collection.calculate_change_scores_all_edges(np.zeros((observed_network.shape[0], observed_network.shape[0])))
+        Xs = self._metrics_collection.calculate_change_scores_all_edges(
+            np.zeros((observed_network.shape[0], observed_network.shape[0])))
         ys = observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()
-
-        # TODO: decide whih one we use and clean
-        # start = time.time()
-        # clf = LogisticRegression(fit_intercept=False, penalty=None, max_iter=5000).fit(Xs, ys)
-        # print(f"finished optimizing using sklearn! took {time.time() - start: .2f} seconds")
-        # self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
-        # self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = clf.predict_proba(Xs)[:, 1]
-        # return clf.coef_[0]
 
         trained_thetas, prediction = logistic_regression_optimization(Xs, ys)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
         self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
         return trained_thetas
-
 
     def _do_MPLE(self, theta_init_method):
         if not self._metrics_collection._has_dyadic_dependent_metrics or theta_init_method == "mple":
@@ -440,7 +432,7 @@ class ERGM():
         network = sampler.sample(seed_network, num_of_nets=1)
 
         return network
-    
+
     def get_model_parameters(self):
         parameter_names = self._metrics_collection.get_parameter_names()
         return dict(zip(parameter_names, self._thetas))
