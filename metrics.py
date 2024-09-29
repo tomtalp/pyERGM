@@ -32,6 +32,12 @@ class Metric(ABC):
         """
         return 1
 
+    def _get_total_feature_count(self):
+        """
+        How many features does this metric produce, including the ignored ones.
+        """
+        return self._get_effective_feature_count() + len(self._indices_to_ignore)
+
     def calc_change_score(self, current_network: np.ndarray | nx.Graph, indices: tuple):
         """
         The default naive way to calculate the change score (namely, the difference in statistics) of a pair of
@@ -604,6 +610,7 @@ class MetricsCollection:
                  n_nodes: int,
                  fix_collinearity=True,
                  use_sparse_matrix=False,
+                 collinearity_fixer_sample_size=1000,
                  # TODO: For tests only, find a better solution
                  do_copy_metrics=True):
         if not do_copy_metrics:
@@ -634,8 +641,9 @@ class MetricsCollection:
         self.requires_graph = any([x.requires_graph for x in self.metrics])
 
         self._fix_collinearity = fix_collinearity
+        self.collinearity_fixer_sample_size = collinearity_fixer_sample_size
         if self._fix_collinearity:
-            self.collinearity_fixer()
+            self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size)
 
         # Returns the number of features that are being calculated. Since a single metric might return more than one
         # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
@@ -915,8 +923,6 @@ class MetricsCollection:
 
         feature_idx = 0
         for metric in self.metrics:
-            t1 = time.time()
-            print(f"Working on metric {metric}")
             if metric.requires_graph:
                 input = G1
             else:
@@ -941,6 +947,23 @@ class MetricsCollection:
 
             feature_idx += n_features_from_metric
             t2 = time.time()
-            print(f"Done with metric {metric}. Took {t2 - t1} seconds")
 
         return change_scores
+    
+    def get_parameter_names(self):
+        """
+        Returns the names of the parameters of the metrics in the collection.
+        """
+        parameter_names = tuple()
+
+        for metric in self.metrics:
+            metric_name = str(metric)
+            if metric._get_effective_feature_count() == 1:
+                parameter_names += (metric_name,)
+            else:
+                for i in range(metric._get_total_feature_count()):
+                    if i in metric._indices_to_ignore:
+                        continue
+                    parameter_names += (f"{metric_name}_{i+1}",)
+            
+        return parameter_names

@@ -16,7 +16,7 @@ from metrics import *
 class ERGM():
     def __init__(self,
                  n_nodes,
-                 network_statistics: Collection[Metric],
+                 metrics_collection: Collection[Metric],
                  is_directed=False,
                  initial_thetas=None,
                  initial_normalization_factor=None,
@@ -26,6 +26,7 @@ class ERGM():
                  verbose=True,
                  use_sparse_matrix=False,
                  fix_collinearity=True,
+                 collinearity_fixer_sample_size=1000,
                  optimization_options={}):
         """
         An ERGM model object. 
@@ -35,7 +36,7 @@ class ERGM():
         n_nodes : int
             The number of nodes in the network.
         
-        network_statistics : list
+        metrics_collection : list
             A list of Metric objects for calculating statistics of a network.
         
         is_directed : bool
@@ -58,9 +59,10 @@ class ERGM():
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
-        self._network_statistics = MetricsCollection(network_statistics, self._is_directed, self._n_nodes,
+        self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
                                                      use_sparse_matrix=use_sparse_matrix,
-                                                     fix_collinearity=fix_collinearity)
+                                                     fix_collinearity=fix_collinearity,
+                                                     collinearity_fixer_sample_size=collinearity_fixer_sample_size)
         if initial_thetas is not None:
             self._thetas = initial_thetas
         else:
@@ -96,14 +98,14 @@ class ERGM():
         if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] != self._n_nodes:
             raise ValueError(f"The dimensions of the given adjacency matrix, {W.shape}, don't comply with the number of"
                              f" nodes in the network: {self._n_nodes}")
-        features = self._network_statistics.calculate_statistics(W)
+        features = self._metrics_collection.calculate_statistics(W)
         weight = np.exp(np.dot(self._thetas, features))
 
         return weight
 
     def _get_random_thetas(self, sampling_method="uniform"):
         if sampling_method == "uniform":
-            return np.random.uniform(-1, 1, self._network_statistics.num_of_features)
+            return np.random.uniform(-1, 1, self._metrics_collection.num_of_features)
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
@@ -119,7 +121,7 @@ class ERGM():
         if sample_size is None:
             sample_size = self.sample_size
         if sampling_method == "metropolis_hastings":
-            sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics, burn_in,
+            sampler = sampling.NaiveMetropolisHastings(self._thetas, self._metrics_collection, burn_in,
                                                        mcmc_steps_per_sample)
 
             if seed_network is None:
@@ -171,7 +173,7 @@ class ERGM():
             The estimated coefficients of the ERGM.
         """
 
-        Xs = self._network_statistics.calculate_change_scores_all_edges(observed_network)
+        Xs = self._metrics_collection.calculate_change_scores_all_edges(np.zeros((observed_network.shape[0], observed_network.shape[0])))
         ys = observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()
 
         print("Done collecting data, now performing logistic regression")
@@ -183,15 +185,16 @@ class ERGM():
         self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = clf.predict_proba(Xs)[:, 1]
         return clf.coef_[0]
 
+
     def _do_MPLE(self, theta_init_method):
-        if not self._network_statistics._has_dyadic_dependent_metrics or theta_init_method == "mple":
+        if not self._metrics_collection._has_dyadic_dependent_metrics or theta_init_method == "mple":
             return True
         return False
 
     def _generate_exact_sample(self, sample_size: int = 1):
         # TODO: support getting a flag of `replace` which will enable sampling with no replacements (generating samples
         #  of different networks).
-        if self._network_statistics._has_dyadic_dependent_metrics:
+        if self._metrics_collection._has_dyadic_dependent_metrics:
             raise ValueError("Cannot sample exactly from a model that is dyadic dependent!")
         if self._exact_average_mat is None:
             raise ValueError("Cannot sample exactly from a model that is not trained! Call `model.fit()` and pass an "
@@ -220,6 +223,7 @@ class ERGM():
             cov_matrix_num_batches=25,
             hotelling_confidence=0.99,
             theta_init_method="mple",
+            no_mple=False,
             mcmc_burn_in=1000,
             mcmc_steps_per_sample=10):
         """
@@ -260,10 +264,10 @@ class ERGM():
 
         """
 
-        if self._do_MPLE(theta_init_method):
+        if not no_mple and self._do_MPLE(theta_init_method):
             self._thetas = self._mple_fit(observed_network)
 
-            if not self._network_statistics._has_dyadic_dependent_metrics:
+            if not self._metrics_collection._has_dyadic_dependent_metrics:
                 print(f"Model is dyadic independent - using only MPLE instead of MCMLE")
                 return None, None  # TODO - Remove this in the future. Grads are returned only for debug
 
@@ -281,7 +285,7 @@ class ERGM():
         print("optimization started")
 
         self.optimization_start_time = time.time()
-        num_of_features = self._network_statistics.num_of_features
+        num_of_features = self._metrics_collection.num_of_features
 
         grads = np.zeros((opt_steps, num_of_features))
         hotelling_statistics = []
@@ -299,9 +303,9 @@ class ERGM():
                                                                     mcmc_steps_per_sample=mcmc_steps_per_sample)
             seed_network = networks_for_sample[:, :, -1]
 
-            features_of_net_samples = self._network_statistics.calculate_sample_statistics(networks_for_sample)
+            features_of_net_samples = self._metrics_collection.calculate_sample_statistics(networks_for_sample)
             mean_features = np.mean(features_of_net_samples, axis=1)
-            observed_features = self._network_statistics.calculate_statistics(observed_network)
+            observed_features = self._metrics_collection.calculate_statistics(observed_network)
 
             grad = calc_nll_gradient(observed_features, mean_features)
             if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):
@@ -421,7 +425,7 @@ class ERGM():
             The sampled connectivity matrix.
         """
         if sampling_method == "NaiveMetropolisHastings":
-            sampler = sampling.NaiveMetropolisHastings(self._thetas, self._network_statistics)
+            sampler = sampling.NaiveMetropolisHastings(self._thetas, self._metrics_collection)
         else:
             raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
@@ -432,6 +436,10 @@ class ERGM():
         network = sampler.sample(seed_network, num_of_nets=1)
 
         return network
+    
+    def get_model_parameters(self):
+        parameter_names = self._metrics_collection.get_parameter_names()
+        return dict(zip(parameter_names, self._thetas))
 
 
 class BruteForceERGM(ERGM):
@@ -447,11 +455,11 @@ class BruteForceERGM(ERGM):
 
     def __init__(self,
                  n_nodes,
-                 network_statistics: Collection[Metric],
+                 metrics_collection: Collection[Metric],
                  is_directed=False,
                  initial_thetas=None):
         super().__init__(n_nodes,
-                         network_statistics,
+                         metrics_collection,
                          is_directed,
                          initial_thetas)
         self._all_weights = self._calc_all_weights()
@@ -496,20 +504,20 @@ class BruteForceERGM(ERGM):
 
     def fit(self, observed_network):
         def nll(thetas):
-            model = BruteForceERGM(self._n_nodes, list(self._network_statistics.metrics), initial_thetas=thetas,
+            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics), initial_thetas=thetas,
                                    is_directed=self._is_directed)
             return np.log(model._normalization_factor) - np.log(model.calculate_weight(observed_network))
 
         def nll_grad(thetas):
-            model = BruteForceERGM(self._n_nodes, list(self._network_statistics.metrics), initial_thetas=thetas,
+            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics), initial_thetas=thetas,
                                    is_directed=self._is_directed)
-            observed_features = model._network_statistics.calculate_statistics(observed_network)
+            observed_features = model._metrics_collection.calculate_statistics(observed_network)
             all_probs = model._all_weights / model._normalization_factor
-            num_features = model._network_statistics.num_of_metrics
+            num_features = model._metrics_collection.num_of_metrics
             num_nets = all_probs.size
             all_features_by_all_nets = np.zeros((num_features, num_nets))
             for i in range(num_nets):
-                all_features_by_all_nets[:, i] = model._network_statistics.calculate_statistics(
+                all_features_by_all_nets[:, i] = model._metrics_collection.calculate_statistics(
                     construct_adj_mat_from_int(i, self._n_nodes, self._is_directed))
             expected_features = all_features_by_all_nets @ all_probs
             return expected_features - observed_features
