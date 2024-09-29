@@ -6,51 +6,13 @@ from scipy.linalg import eigh
 from matplotlib import pyplot as plt
 import sys
 
-
-# class TestNetworkStatistics(unittest.TestCase):
-#     # def setUp(self):
-#     #     pass      
-
-#     def test_initialization_params_validation(self):
-#         with self.assertRaises(ValueError):
-#             net_stats = NetworkStatistics()
-
-#         with self.assertRaises(ValueError):
-#             net_stats = NetworkStatistics(metric_names=["fake"])
-
-#         with self.assertRaises(ValueError):
-#             net_stats = NetworkStatistics(metric_names=["num_edges"], custom_metrics={"fake": 1})
-
-#     def test_calculate_statistics(self):
-#         net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"], directed=False)
-#         W = np.array([[0, 1, 1], 
-#                       [1, 0, 1], 
-#                       [1, 1, 0]])
-#         stats = net_stats.calculate_statistics(W)
-#         self.assertEqual(stats[0], 3)
-#         self.assertEqual(stats[1], 1)
-
-#         # Assert that num_triangles can't be run on a directed graph
-#         with self.assertRaises(ValueError): 
-#             net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"], directed=True)
-
-#         net_stats = NetworkStatistics(metric_names=["num_edges"], directed=True)
-#         W = np.array([[0, 1, 1], 
-#                       [1, 0, 0], 
-#                       [1, 0, 1]])
-
-#         stats = net_stats.calculate_statistics(W)
-#         self.assertEqual(stats[0], 5)
-
-#         net_stats = NetworkStatistics(metric_names=["num_edges", "num_triangles"], directed=False)
-#         W = np.array([[0, 0, 0], 
-#                       [0, 0, 0], 
-#                       [0, 0, 0]])
-#         stats = net_stats.calculate_statistics(W)
-#         self.assertEqual(stats[0], 0)
-#         self.assertEqual(stats[1], 0)
-
-
+class GeneralUtilsTester(unittest.TestCase):
+    def test_get_sorted_type_pairs(self):
+        types = ["A", "B", "B", "B"]
+        sorted_type_pairs = get_sorted_type_pairs(types)
+        expected_sorted_type_pairs = [("A", "A"), ("A", "B"), ("B", "A"), ("B", "B")]
+        self.assertTrue(sorted_type_pairs == expected_sorted_type_pairs)
+        
 class TestGreatestConvexMinorant(unittest.TestCase):
     DO_PLOT = False
 
@@ -139,8 +101,6 @@ class TestSparseTensorUtilities(unittest.TestCase):
 
         self.assertTrue(np.all(expected_np_tensor_T == transposed_sparse_tensor_as_np))
 
-
-        
 
 class TestCovarianceMatrixEstimation(unittest.TestCase):
 

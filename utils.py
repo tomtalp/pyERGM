@@ -383,6 +383,11 @@ def calc_nll_gradient(observed_features, mean_features_of_net_samples):
     return mean_features_of_net_samples - observed_features
 
 
+def get_sorted_type_pairs(types):
+    sorted_types = sorted(list(set(types)))
+    return list(itertools.product(sorted_types, sorted_types))
+
+
 def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
     """
     Calculate the density of edges between each pair of types in the network.
@@ -403,16 +408,15 @@ def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
 
         Array size is k^2 where k is number of types
     """
-
-    sorted_types = sorted(list(set(types)))
+    type_pairs = get_sorted_type_pairs(types)
     n = W.shape[0]
-    real_frequencies = {k: 0 for k in itertools.product(sorted_types, sorted_types)}
+    real_frequencies = {k: 0 for k in type_pairs}
 
     types_frequencies = dict(Counter(types))
     potential_frequencies = {}
 
     # Count how many potential edges can exist between each pair of types
-    for pair in itertools.product(sorted_types, sorted_types):
+    for pair in type_pairs:
         type_1 = pair[0]
         type_2 = pair[1]
 
@@ -491,7 +495,10 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
     """
     # TODO: trim to (eps, 1-eps) before taking the log? (the model can't give probabilities of strictly 0 or 1 in
     #  theory, but numerics...)?
-    return np.dot(np.log(predictions).T, ys) + np.dot(np.log(1 - predictions).T, 1 - ys)
+    individual_likelihoods = predictions.copy()
+    data_zero_indices = np.where(ys == 0)[0]
+    individual_likelihoods[data_zero_indices] = np.ones((data_zero_indices.size, 1)) - predictions[data_zero_indices]
+    return np.log(individual_likelihoods).sum()
 
 
 @njit
@@ -555,7 +562,7 @@ def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas
 
 
 # TODO: njit this and all related functions
-@njit
+# @njit
 def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_thetas: np.ndarray | None = None,
                                      lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-3):
     """
@@ -598,14 +605,16 @@ def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_the
     for i in range(max_iter):
         idx = i
         # log_like_history[i] = calc_logistic_regression_predictions_log_likelihood(prediction, ys)
-        cur_log_like = calc_logistic_regression_predictions_log_likelihood(prediction, ys)[0][0]
+        cur_log_like = calc_logistic_regression_predictions_log_likelihood(prediction, ys)
         if (i - 1) % 100 == 0:
             with objmode():
                 print("Iteration {0}, log-likelihood: {1}, time from start: {2} seconds".format(i, cur_log_like,
                                                                                                 time.perf_counter() - start))
         if i > 0:
             # log_like_frac_change = (log_like_history[i] - log_like_history[i - 1]) / log_like_history[i - 1]
-            log_like_frac_change = (cur_log_like - prev_log_like) / prev_log_like
+            log_like_frac_change = (cur_log_like - prev_log_like)
+            if cur_log_like != 0:
+                log_like_frac_change /= np.abs(prev_log_like)
             if 0 <= log_like_frac_change < stopping_thr:
                 with objmode():
                     print(
@@ -632,3 +641,10 @@ def logistic_regression_optimization(Xs: np.ndarray, ys: np.ndarray, initial_the
 
     # TODO: don't return the history
     return thetas.flatten(), prediction.flatten()  # , log_like_history[:idx]
+
+
+def generate_binomial_tensor(net_size, num_samples, p=0.5):
+    """
+    Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
+    """
+    return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)

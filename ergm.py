@@ -171,24 +171,8 @@ class ERGM():
             The estimated coefficients of the ERGM.
         """
 
-        Xs = np.zeros((self._n_nodes ** 2 - self._n_nodes, self._network_statistics.num_of_features))
-        ys = np.zeros((self._n_nodes ** 2 - self._n_nodes))
-
-        row_idx = 0
-        from tqdm import tqdm
-        for i in tqdm(range(self._n_nodes)):
-            for j in range(self._n_nodes):
-                if i == j:
-                    continue
-
-                y = observed_network[i, j]
-                W_minus = np.copy(observed_network)
-                W_minus[i, j] = 0
-
-                ys[row_idx] = y
-                Xs[row_idx, :] = self._network_statistics.calc_change_scores(W_minus, (i, j))
-
-                row_idx += 1
+        Xs = self._network_statistics.calculate_change_scores_all_edges(observed_network)
+        ys = observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()
 
         # TODO: decide whih one we use and clean
         # start = time.time()
@@ -202,7 +186,6 @@ class ERGM():
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
         self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
         return trained_thetas
-
 
     def _do_MPLE(self, theta_init_method):
         if not self._network_statistics._has_dyadic_dependent_metrics or theta_init_method == "mple":
