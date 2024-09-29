@@ -8,7 +8,6 @@ from metrics import *
 import networkx as nx
 import math
 
-
 class TestNumberOfEdgesUndirected(unittest.TestCase):
     def test_num_of_edges(self):
         metric = NumberOfEdgesUndirected()
@@ -742,3 +741,22 @@ class TestMetricsCollection(unittest.TestCase):
         # Deleting the 1+idx_to_ignore because the first entry is the NumberOfEdgesDirected metric
         expected_full_change_score = np.delete(expected_full_change_score, 1+idx_to_ignore, axis=1)
         self.assertTrue(np.all(expected_full_change_score == res))
+
+    def test_get_parameter_names(self):
+        n = 18
+        metrics = [NumberOfEdgesDirected(), InDegree(), OutDegree()]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
+
+        param_names = collection.get_parameter_names()
+
+        expected_names = ()
+        for metric in metrics:
+            metric_name = str(metric)
+            if metric_name  == "num_edges_directed":
+                expected_names += (metric_name, )
+            elif metric_name == "indegree" or metric_name == "outdegree":
+                for i in range(1,n):
+                    expected_names += (f"{metric_name}_{i+1}",)
+        
+
+        self.assertTrue(param_names == expected_names)
