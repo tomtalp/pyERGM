@@ -152,7 +152,7 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_network):
+    def _mple_fit(self, observed_network, is_distributed=False):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -172,7 +172,8 @@ class ERGM():
         thetas: np.ndarray
             The estimated coefficients of the ERGM.
         """
-        trained_thetas, prediction = logistic_regression_optimization(self._metrics_collection)
+        trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection, observed_network,
+                                                                           is_distributed=is_distributed)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
         self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
         return trained_thetas
