@@ -172,12 +172,7 @@ class ERGM():
         thetas: np.ndarray
             The estimated coefficients of the ERGM.
         """
-
-        Xs = self._metrics_collection.calculate_change_scores_all_edges(
-            np.zeros((observed_network.shape[0], observed_network.shape[0])))
-        ys = observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()
-
-        trained_thetas, prediction = logistic_regression_optimization(Xs, ys)
+        trained_thetas, prediction = logistic_regression_optimization(self._metrics_collection)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
         self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
         return trained_thetas

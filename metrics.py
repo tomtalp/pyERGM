@@ -76,6 +76,29 @@ class Metric(ABC):
             result[:, i] = self.calculate(network)
         return result
 
+    def calculate_mple_regressors(self, observed_network: np.ndarray | nx.Graph, edges_indices_lims: tuple[int]):
+        num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
+        Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count()))
+        edge_idx = 0
+        for i in range(self._n_nodes):
+            for j in range(self._n_nodes):
+                if i == j:
+                    continue
+                if edge_idx < edges_indices_lims[0]:
+                    edge_idx += 1
+                    continue
+                indices = (i, j)
+                observed_edge_off = observed_network.copy()
+                if self.requires_graph:
+                    if observed_edge_off.has_edge(i, j):
+                        observed_edge_off.remove_edge(i, j)
+                else:
+                    observed_edge_off[i, j] = 0
+                Xs[edge_idx - edges_indices_lims[0]] = self.calc_change_score(observed_edge_off, indices)
+                edge_idx += 1
+                if edge_idx == edges_indices_lims[1]:
+                    return Xs
+
 
 class NumberOfEdgesUndirected(Metric):
     def __str__(self):
@@ -128,10 +151,16 @@ class NumberOfEdgesDirected(Metric):
     # TODO: understand how to properly use numba here (the dtype=bool makes some trouble).
     # @njit
     def calculate_change_score_full_network(current_network: np.ndarray):
-        sign_matrix = np.where(current_network == 1, -1, 1)  # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
+        sign_matrix = np.where(current_network == 1, -1,
+                               1)  # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
         nondiag_signs = sign_matrix[~np.eye(sign_matrix.shape[0], dtype=bool)].flatten()
 
         return nondiag_signs[:, np.newaxis]
+
+    @staticmethod
+    @njit
+    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int]):
+        return np.ones((edges_indices_lims[1] - edges_indices_lims[0], 1))
 
 
 # TODO: change the name of this one to undirected and implement also a directed version?
@@ -542,6 +571,14 @@ class NumberOfEdgesTypesDirected(Metric):
         change_scores = change_scores.astype(np.int8)
         return np.delete(change_scores, self._indices_to_ignore, axis=1)
 
+    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int]):
+        num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
+        Xs = np.zeros((num_edges_to_take, len(self.sorted_type_pairs)))
+        nondiag_type_idx = self._edge_type_idx_assignment[
+                               ~np.eye(self._edge_type_idx_assignment.shape[0], dtype=bool)].flatten() - 1
+        Xs[np.arange(num_edges_to_take), nondiag_type_idx[edges_indices_lims[0]:edges_indices_lims[1]]] = 1
+        return Xs
+
 
 class NodeAttrSum(ExWeightNumEdges):
     def __init__(self, exogenous_attr: Collection, is_directed: bool):
@@ -946,10 +983,36 @@ class MetricsCollection:
                         edge_idx += 1
 
             feature_idx += n_features_from_metric
-            t2 = time.time()
 
         return change_scores
-    
+
+    def prepare_mple_data(self, observed_network: np.ndarray, edges_indices_lims: tuple[int] | None = None):
+        if self.requires_graph:
+            G1 = connectivity_matrix_to_G(observed_network, directed=self.is_directed)
+
+        n_nodes = observed_network.shape[0]
+        if edges_indices_lims is None:
+            num_edges_to_take = n_nodes * n_nodes - n_nodes
+        else:
+            num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
+        Xs = np.zeros((num_edges_to_take, self.num_of_features))
+
+        feature_idx = 0
+        for metric in self.metrics:
+            if metric.requires_graph:
+                input = G1
+            else:
+                input = observed_network
+
+            n_features_from_metric = metric._get_effective_feature_count()
+            Xs[:,
+            feature_idx:feature_idx + n_features_from_metric] = metric.calculate_mple_regressors(
+                input, edges_indices_lims=edges_indices_lims)
+
+            feature_idx += n_features_from_metric
+
+        return Xs, observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()
+
     def get_parameter_names(self):
         """
         Returns the names of the parameters of the metrics in the collection.
@@ -964,6 +1027,6 @@ class MetricsCollection:
                 for i in range(metric._get_total_feature_count()):
                     if i in metric._indices_to_ignore:
                         continue
-                    parameter_names += (f"{metric_name}_{i+1}",)
-            
+                    parameter_names += (f"{metric_name}_{i + 1}",)
+
         return parameter_names
