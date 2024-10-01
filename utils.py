@@ -623,6 +623,7 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         Xs, ys = metrics_collection.prepare_mple_data(observed_network)
     else:
         out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
+        os.makedirs(out_dir_path, exist_ok=True)
         data_path = (out_dir_path / "data").resolve()
 
         # Copy the `MetricsCollection` and the observed network to provide its path to children jobs, so they will be
