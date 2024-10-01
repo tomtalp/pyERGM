@@ -583,7 +583,7 @@ def local_mple_logistic_regression_optimization_step(Xs, ys, thetas):
     return prediction, log_like, grad, hessian
 
 
-@njit
+# @njit
 def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-6,
@@ -640,9 +640,9 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
     for i in range(max_iter):
         idx = i
         if not is_distributed:
-            prediction, log_like, grad, hessian = local_mple_logistic_regression_optimization_step(Xs, ys, thetas)
+            prediction, cur_log_like, grad, hessian = local_mple_logistic_regression_optimization_step(Xs, ys, thetas)
         else:
-            prediction, log_like, grad, hessian = distributed_logistic_regression_optimization_step(data_path, thetas)
+            prediction, cur_log_like, grad, hessian = distributed_logistic_regression_optimization_step(data_path, thetas)
         if (i - 1) % 100 == 0:
             with objmode():
                 print("Iteration {0}, log-likelihood: {1}, time from start: {2} seconds".format(i, cur_log_like,
@@ -668,7 +668,7 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
                 "Optimization reached max iterations of {0}!\nlast log-likelihood: {1}, time from start: {2} seconds".format(
                     max_iter, cur_log_like, time.perf_counter() - start))
 
-    if not is_distributed:
+    if is_distributed:
         shutil.rmtree(data_path)
 
     return thetas.flatten(), prediction.flatten()

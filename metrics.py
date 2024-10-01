@@ -993,6 +993,7 @@ class MetricsCollection:
         n_nodes = observed_network.shape[0]
         if edges_indices_lims is None:
             num_edges_to_take = n_nodes * n_nodes - n_nodes
+            edges_indices_lims = (0, num_edges_to_take)
         else:
             num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
         Xs = np.zeros((num_edges_to_take, self.num_of_features))
@@ -1011,7 +1012,7 @@ class MetricsCollection:
 
             feature_idx += n_features_from_metric
 
-        return Xs, observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()
+        return Xs, observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()[:, None]
 
     def get_parameter_names(self):
         """
