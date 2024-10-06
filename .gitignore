@@ -1,5 +1,7 @@
 neuronal_data.ipynb
 
+datasets/gal/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
