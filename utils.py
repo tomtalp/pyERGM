@@ -583,17 +583,18 @@ def local_mple_logistic_regression_optimization_step(Xs, ys, thetas):
     return prediction, log_like, grad, hessian
 
 
-# @njit
 def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-6,
-                                          is_distributed=False):
+                                          is_distributed: bool = False):
     """
     Optimize the parameters of a Logistic Regression model by maximizing the likelihood using Newton-Raphson.
     Parameters
     ----------
     metrics_collection
         The `MetricsCollection` with relation to which the optimization is carried out.
+        # TODO: we can't add a type hint for this, due to circular import (utils can't import from metrics, as metrics
+            already imports from utils). This might suggest that this isn't the right place for this function.
     observed_network
         The observed network used as data for the optimization.
     initial_thetas
