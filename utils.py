@@ -904,9 +904,6 @@ def _resend_failed_jobs(out_path: Path, job_indices: list, array_name: str) -> l
     num_failed_jobs = len(job_indices)
     job_array_ids = []
 
-    print(f"resending {num_failed_jobs} failed jobs")
-    sys.stdout.flush()
-
     for i in range(num_failed_jobs // LSF_ID_LIST_LEN_LIMIT + 1):
         cur_job_indices_str = ''
         for j_idx_in_list in range(i * LSF_ID_LIST_LEN_LIMIT, min((i + 1) * LSF_ID_LIST_LEN_LIMIT, num_failed_jobs)):
@@ -914,16 +911,9 @@ def _resend_failed_jobs(out_path: Path, job_indices: list, array_name: str) -> l
         cur_job_indices_str = cur_job_indices_str[:-1]
         single_batch_bash_path = os.path.join(out_path, "scripts", "single_batch.sh")
         resend_job_command = f'bsub -J {array_name}[{cur_job_indices_str}]'
-
-        print(f"{i+1} list of indices: {cur_job_indices_str}")
-        sys.stdout.flush()
-
         jobs_sending_res = subprocess.run(resend_job_command.split(), stdin=open(single_batch_bash_path, 'r'),
                                           stdout=subprocess.PIPE)
         job_array_ids += _parse_sent_job_array_ids(jobs_sending_res.stdout)
-
-        print(f"job_array_ids after {i+1} resends: {job_array_ids} ")
-        sys.stdout.flush()
 
     return job_array_ids
 

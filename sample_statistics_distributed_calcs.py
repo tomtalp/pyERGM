@@ -1,4 +1,6 @@
 import argparse
+import sys
+
 from utils import *
 
 
@@ -24,7 +26,13 @@ def main():
         metric_collection = pickle.load(f)
 
     sample_statistics = metric_collection.calc_statistics_for_binomial_tensor_local(num_samples_per_job, p=p)
+
     statistics_dir_path = os.path.join(out_dir_path, "sample_statistics")
     os.makedirs(statistics_dir_path, exist_ok=True)
+
     with open(os.path.join(statistics_dir_path, f'{func_id}.pkl'), 'wb') as f:
         pickle.dump(sample_statistics, f)
+
+
+if __name__ == "__main__":
+    main()
