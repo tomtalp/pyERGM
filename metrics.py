@@ -609,7 +609,8 @@ class NumberOfEdgesTypesDirected(Metric):
         nondiag_type_idx = self._edge_type_idx_assignment[
                                ~np.eye(self._edge_type_idx_assignment.shape[0], dtype=bool)].flatten() - 1
         Xs[np.arange(num_edges_to_take), nondiag_type_idx[edges_indices_lims[0]:edges_indices_lims[1]]] = 1
-        return Xs
+        Xs = Xs.astype(np.int8)
+        return np.delete(Xs, self._indices_to_ignore, axis=1)
 
     def _get_metric_names(self):
         parameter_names = tuple()
