@@ -698,7 +698,7 @@ def distributed_logistic_regression_optimization_step(data_path, thetas, num_edg
     # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
     hessian_path = (out_path / "hessian").resolve()
     os.makedirs(hessian_path, exist_ok=True)
-    wait_for_distributed_children_outputs(num_jobs, hessian_path, job_array_ids)
+    wait_for_distributed_children_outputs(num_jobs, hessian_path, job_array_ids, "log_reg_step")
     # Clean current scripts
     shutil.rmtree((out_path / "scripts").resolve())
 
@@ -787,7 +787,7 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, nu
     return num_jobs, out_path, job_array_ids
 
 
-def wait_for_distributed_children_outputs(num_jobs: int, out_path: Path, job_array_ids: list):
+def wait_for_distributed_children_outputs(num_jobs: int, out_path: Path, job_array_ids: list, array_name: str):
     is_all_done = False
     time_of_last_job_status_check = time.time()
     num_jobs_to_listen_to = num_jobs
@@ -811,7 +811,7 @@ def wait_for_distributed_children_outputs(num_jobs: int, out_path: Path, job_arr
         missing_jobs = [i for i in range(num_jobs) if f'{i}.pkl' not in out_dir_files_list]
         are_there_missing_jobs = (len(missing_jobs) > 0)
         if are_there_missing_jobs:
-            resent_job_array_ids = _resend_failed_jobs(out_path.parent, missing_jobs)
+            resent_job_array_ids = _resend_failed_jobs(out_path.parent, missing_jobs, array_name)
             print(f"sent missing jobs: {missing_jobs}")
             sys.stdout.flush()
             job_array_ids += resent_job_array_ids
@@ -900,19 +900,31 @@ def _check_if_all_done(job_array_ids: list, num_sent_jobs: int) -> bool:
                          f"sent jobs {num_sent_jobs}, wrong counting!\ncounts per line: {counted_finish_per_line}")
 
 
-def _resend_failed_jobs(out_path: Path, job_indices: list) -> list:
-    job_indices_str = ''
+def _resend_failed_jobs(out_path: Path, job_indices: list, array_name: str) -> list:
     num_failed_jobs = len(job_indices)
     job_array_ids = []
+
+    print(f"resending {num_failed_jobs} failed jobs")
+    sys.stdout.flush()
+
     for i in range(num_failed_jobs // LSF_ID_LIST_LEN_LIMIT + 1):
+        cur_job_indices_str = ''
         for j_idx_in_list in range(i * LSF_ID_LIST_LEN_LIMIT, min((i + 1) * LSF_ID_LIST_LEN_LIMIT, num_failed_jobs)):
-            job_indices_str += f'{job_indices[j_idx_in_list] + 1},'
-        job_indices_str = job_indices_str[:-1]
+            cur_job_indices_str += f'{job_indices[j_idx_in_list] + 1},'
+        cur_job_indices_str = cur_job_indices_str[:-1]
         single_batch_bash_path = os.path.join(out_path, "scripts", "single_batch.sh")
-        resend_job_command = f'bsub -J log_reg_step[{job_indices_str}]'
+        resend_job_command = f'bsub -J {array_name}[{cur_job_indices_str}]'
+
+        print(f"{i+1} list of indices: {cur_job_indices_str}")
+        sys.stdout.flush()
+
         jobs_sending_res = subprocess.run(resend_job_command.split(), stdin=open(single_batch_bash_path, 'r'),
                                           stdout=subprocess.PIPE)
         job_array_ids += _parse_sent_job_array_ids(jobs_sending_res.stdout)
+
+        print(f"job_array_ids after {i+1} resends: {job_array_ids} ")
+        sys.stdout.flush()
+
     return job_array_ids
 
 

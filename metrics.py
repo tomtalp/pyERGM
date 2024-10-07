@@ -849,7 +849,7 @@ class MetricsCollection:
         # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
         sample_stats_path = (out_dir_path / "sample_statistics").resolve()
         os.makedirs(sample_stats_path, exist_ok=True)
-        wait_for_distributed_children_outputs(num_jobs, sample_stats_path, job_array_ids)
+        wait_for_distributed_children_outputs(num_jobs, sample_stats_path, job_array_ids, "sample_stats")
 
         # Clean current scripts and data
         shutil.rmtree(data_path)
