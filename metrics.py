@@ -99,6 +99,38 @@ class Metric(ABC):
                 if edge_idx == edges_indices_lims[1]:
                     return Xs
 
+    def _get_metric_names(self):
+        """
+        Get the names of the features that this metric produces. Defaults to the name of the metric if the metric creates a single feature, and multiple
+        names if the metric creates multiple features.
+
+        Returns
+        -------
+        parameter_names: tuple
+            A tuple of strings, each string is the name of a parameter that this metric produces.
+        """
+        total_n_features = self._get_total_feature_count()
+        if total_n_features == 1:
+            return (str(self),)
+        else:
+            parameter_names = ()
+            for i in range(total_n_features):
+                if i in self._indices_to_ignore:
+                    continue
+                parameter_names += (f"{str(self)}_{i + 1}",)
+            return parameter_names
+
+    def _get_ignored_features(self):
+        if len(self._indices_to_ignore) == 0:
+            return tuple()
+
+        ignored_features = ()
+        for i in range(self._get_total_feature_count()):
+            if i in self._indices_to_ignore:
+                ignored_features += (f"{str(self)}_{i + 1}",)
+
+        return ignored_features
+
 
 class NumberOfEdgesUndirected(Metric):
     def __str__(self):
@@ -579,6 +611,32 @@ class NumberOfEdgesTypesDirected(Metric):
         Xs[np.arange(num_edges_to_take), nondiag_type_idx[edges_indices_lims[0]:edges_indices_lims[1]]] = 1
         return Xs
 
+    def _get_metric_names(self):
+        parameter_names = tuple()
+
+        metric_name = str(self)
+
+        for i in range(self._get_total_feature_count()):
+            if i in self._indices_to_ignore:
+                continue
+            type_pair = self.sorted_type_pairs[i][0] + "__" + self.sorted_type_pairs[i][1]
+            parameter_names += (f"{metric_name}_{type_pair}",)
+
+        return parameter_names
+
+    def _get_ignored_features(self):
+        if len(self._indices_to_ignore) == 0:
+            return tuple()
+
+        metric_name = str(self)
+        ignored_features = ()
+        for i in range(self._get_total_feature_count()):
+            if i in self._indices_to_ignore:
+                type_pair = self.sorted_type_pairs[i][0] + "__" + self.sorted_type_pairs[i][1]
+                ignored_features += (f"{metric_name}_{type_pair}",)
+
+        return ignored_features
+
 
 class NodeAttrSum(ExWeightNumEdges):
     def __init__(self, exogenous_attr: Collection, is_directed: bool):
@@ -754,7 +812,8 @@ class MetricsCollection:
             else:
                 cum_sum_num_feats += next_met_num_feats
 
-    def collinearity_fixer(self, sample_size=1000, thr=10 ** -5):
+    def collinearity_fixer(self, sample_size=1000, nonzero_thr=10 ** -1, ratio_threshold=10 ** -6,
+                           eigenvec_thr=10 ** -4):
         """
         Find collinearity between metrics in the collection.
 
@@ -806,7 +865,10 @@ class MetricsCollection:
             # defines a non-trivial linear combination that equals 0, for *all* the sampled feature vectors. This means
             # the features are linearly dependent.
             eigen_vals, eigen_vecs = np.linalg.eigh(features_cov_mat)
-            small_eigen_vals_indices = np.where(np.abs(eigen_vals) < thr)[0]
+
+            minimal_non_zero_eigen_val = np.min(np.abs(eigen_vals[np.abs(eigen_vals) > nonzero_thr]))
+            small_eigen_vals_indices = np.where(np.abs(eigen_vals) / minimal_non_zero_eigen_val < ratio_threshold)[0]
+
             if small_eigen_vals_indices.size == 0:
                 is_linearly_dependent = False
             else:
@@ -815,7 +877,7 @@ class MetricsCollection:
                 dependent_features_flags = np.zeros((small_eigen_vals_indices.size, self.num_of_features))
                 for i in range(small_eigen_vals_indices.size):
                     dependent_features_flags[
-                        i, np.where(np.abs(eigen_vecs[:, small_eigen_vals_indices[i]]) > thr)[0]] = 1
+                        i, np.where(np.abs(eigen_vecs[:, small_eigen_vals_indices[i]]) > eigenvec_thr)[0]] = 1
 
                 # Calculate the fraction of dependencies each feature is involved in.
                 fraction_of_dependencies_involved = dependent_features_flags.mean(axis=0)
@@ -1050,13 +1112,14 @@ class MetricsCollection:
         parameter_names = tuple()
 
         for metric in self.metrics:
-            metric_name = str(metric)
-            if metric._get_effective_feature_count() == 1:
-                parameter_names += (metric_name,)
-            else:
-                for i in range(metric._get_total_feature_count()):
-                    if i in metric._indices_to_ignore:
-                        continue
-                    parameter_names += (f"{metric_name}_{i + 1}",)
+            parameter_names += metric._get_metric_names()
+
+        return parameter_names
+
+    def get_ignored_features(self):
+        parameter_names = tuple()
+
+        for metric in self.metrics:
+            parameter_names += metric._get_ignored_features()
 
         return parameter_names

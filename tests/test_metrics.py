@@ -760,3 +760,21 @@ class TestMetricsCollection(unittest.TestCase):
         
 
         self.assertTrue(param_names == expected_names)
+
+        n = 4
+        metrics = [NumberOfEdgesTypesDirected(['A', 'B', 'A', 'B'])]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
+
+        param_names = collection.get_parameter_names()
+
+        expected_names = ("num_edges_between_types_directed_A__A", "num_edges_between_types_directed_A__B", "num_edges_between_types_directed_B__A", "num_edges_between_types_directed_B__B")
+        self.assertTrue(param_names == expected_names)
+    
+    def test_get_ignored_features(self):
+        n = 18
+        metrics = [NumberOfEdgesDirected(), InDegree(), OutDegree()]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
+
+        ignored_features = collection.get_ignored_features()
+        expected_ignored_features = ("indegree_1", "outdegree_1")
+        self.assertTrue(ignored_features == expected_ignored_features)
