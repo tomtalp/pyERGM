@@ -1,6 +1,6 @@
 #BSUB -q schneidman
 #BSUB -R "span[hosts=1]"
-#BSUB -R rusage[mem=1000]
+#BSUB -R rusage[mem=50000]
 #BSUB -o ../logs/outs.%J.%I.log
 #BSUB -e ../logs/errors.%J.%I.error.log
 #BSUB -C 1
