@@ -57,12 +57,19 @@ class ERGM():
         n_mcmc_steps : int
             The number of steps to run the MCMC sampler when sampling a network
         """
+
+        print("in ERGM init")
+        sys.stdout.flush()
+
         self._n_nodes = n_nodes
         self._is_directed = is_directed
         self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
                                                      use_sparse_matrix=use_sparse_matrix,
                                                      fix_collinearity=fix_collinearity,
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size)
+        print("initialized _metrics_collection")
+        sys.stdout.flush()
+
         if initial_thetas is not None:
             self._thetas = initial_thetas
         else:
@@ -172,6 +179,8 @@ class ERGM():
         thetas: np.ndarray
             The estimated coefficients of the ERGM.
         """
+        print("in fit")
+        sys.stdout.flush()
         trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection, observed_network,
                                                                            is_distributed=is_distributed)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))

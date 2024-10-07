@@ -29,6 +29,7 @@ def main():
     out_dir_path = args.out_dir_path
     num_edges_per_job = args.num_edges_per_job
     thetas = args.thetas
+    thetas = thetas[:, None]
     func_id = int(os.environ['LSB_JOBINDEX']) - 1
     with open(os.path.join(out_dir_path, 'data', 'metric_collection.pkl'), 'rb') as f:
         metric_collection = pickle.load(f)
@@ -36,7 +37,9 @@ def main():
         observed_network = pickle.load(f)
 
     # Get data chunk
-    edge_indices = (func_id * num_edges_per_job, (func_id + 1) * num_edges_per_job)
+    num_nodes = observed_network.shape[0]
+    edge_indices = (func_id * num_edges_per_job,
+                    min((func_id + 1) * num_edges_per_job, num_nodes * num_nodes - num_nodes))
     Xs_chunk, ys_chunk = metric_collection.prepare_mple_data(observed_network, edge_indices)
 
     # Calculate a chunk of the predictions and store it

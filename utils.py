@@ -612,6 +612,8 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
     -------
 
     """
+    print("in mple_logistic_regression_optimization")
+    sys.stdout.flush()
     num_features = metrics_collection.calc_num_of_features()
     if initial_thetas is None:
         thetas = np.random.rand(num_features, 1)
@@ -626,6 +628,9 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         data_path = (out_dir_path / "data").resolve()
         os.makedirs(data_path, exist_ok=True)
 
+        print("created data dir")
+        sys.stdout.flush()
+
         # Copy the `MetricsCollection` and the observed network to provide its path to children jobs, so they will be
         # able to access it.
         metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
@@ -634,20 +639,27 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         observed_net_path = os.path.join(data_path, 'observed_network.pkl')
         with open(observed_net_path, 'wb') as f:
             pickle.dump(observed_network, f)
+
+        print("dumped metric_collection and observed_network")
+        sys.stdout.flush()
+
     idx = 0
     with objmode(start='f8'):
         start = time.perf_counter()
     print("Logistic regression optimization started")
+    sys.stdout.flush()
     for i in range(max_iter):
         idx = i
         if not is_distributed:
             prediction, cur_log_like, grad, hessian = local_mple_logistic_regression_optimization_step(Xs, ys, thetas)
         else:
-            prediction, cur_log_like, grad, hessian = distributed_logistic_regression_optimization_step(data_path, thetas)
-        if (i - 1) % 100 == 0:
+            prediction, cur_log_like, grad, hessian = distributed_logistic_regression_optimization_step(data_path,
+                                                                                                        thetas)
+        if (i - 1) % 1 == 0:
             with objmode():
                 print("Iteration {0}, log-likelihood: {1}, time from start: {2} seconds".format(i, cur_log_like,
                                                                                                 time.perf_counter() - start))
+                sys.stdout.flush()
         if i > 0:
             log_like_frac_change = (cur_log_like - prev_log_like)
             if cur_log_like != 0:
@@ -676,12 +688,16 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
 
 
 def distributed_logistic_regression_optimization_step(data_path, thetas, num_edges_per_job=5000):
+    print("in distributed_logistic_regression_optimization_step")
+    sys.stdout.flush()
+
     # Arrange files and send the children jobs
     num_jobs, out_path, job_array_ids = _run_distributed_logistic_regression_children_jobs(data_path, thetas,
                                                                                            num_edges_per_job)
 
     # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
     hessian_path = (out_path / "hessian").resolve()
+    os.makedirs(hessian_path, exist_ok=True)
     _wait_for_distributed_children_outputs(num_jobs, hessian_path, job_array_ids)
     # Clean current scripts
     shutil.rmtree((out_path / "scripts").resolve())
@@ -702,20 +718,20 @@ def distributed_logistic_regression_optimization_step(data_path, thetas, num_edg
 
 def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, num_edges_per_job):
     out_path = data_path.parent
-    # Remove calculations, data and scripts from previous iterations.
-    for file_name in os.listdir(out_path):
-        os.unlink(os.path.join(out_path, file_name))
 
     # Construct a string with the current thetas, to pass using the command line to children jobs.
     thetas_str = ''
     for t in cur_thetas:
-        thetas_str += f'{t} '
+        thetas_str += f'{t[0]} '
     thetas_str = thetas_str[:-1]
 
     cmd_line_for_bsub = (f'python ./logistic_regression_distributed_calcs.py '
                          f'--out_dir_path {out_path} '
-                         f'--num_edges_per_job {num_edges_per_job}'
+                         f'--num_edges_per_job {num_edges_per_job} '
                          f'--thetas {thetas_str}')
+
+    print("constructed cmd_line_for_bsub")
+    sys.stdout.flush()
 
     # Create current bash scripts to send distributed calculations of the measure
     scripts_path = (out_path / "scripts").resolve()
@@ -727,16 +743,23 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, nu
         f.write(cmd_line_for_bsub)
     with open(os.path.join(data_path, "observed_network.pkl"), 'rb') as f:
         observed_network = pickle.load(f)
+
+    print("wrote single_batch script")
+    sys.stdout.flush()
+
     num_nodes = observed_network.shape[0]
     num_data_points = num_nodes * num_nodes - num_nodes
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
-    multiple_batches_bash_path = os.path.join(out_path, "multiple_batches.sh")
+    multiple_batches_bash_path = os.path.join(scripts_path, "multiple_batches.sh")
     with open(multiple_batches_bash_path, 'w') as f:
         num_rows = 1
         while (num_rows - 1) * 2000 < num_jobs:
             f.write(f'bsub < $1 -J log_reg_step'
                     f'[{(num_rows - 1) * 2000 + 1}-{min(num_rows * 2000, num_jobs)}]\n')
             num_rows += 1
+
+    print("wrote multiple_batches script")
+    sys.stdout.flush()
 
     # Make sure the logs directory for the children jobs exists and delete previous logs.
     with open(single_batch_bash_path, 'r') as f:
@@ -749,10 +772,22 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, nu
     for file_name in os.listdir(logs_dir):
         os.unlink(os.path.join(logs_dir, file_name))
 
+    print("cleaned logs ")
+    sys.stdout.flush()
+
     # Send the jobs
     send_jobs_command = f'bash {multiple_batches_bash_path} {single_batch_bash_path}'
+    print(f"sending \"bash {multiple_batches_bash_path} {single_batch_bash_path}\"")
+    sys.stdout.flush()
     jobs_sending_res = subprocess.run(send_jobs_command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    print(f"sen jobs, output: {jobs_sending_res.stdout}")
+    sys.stdout.flush()
+
     job_array_ids = _parse_sent_job_array_ids(jobs_sending_res.stdout)
+
+    print(f"parsed arrays {job_array_ids}")
+    sys.stdout.flush()
 
     return num_jobs, out_path, job_array_ids
 
@@ -878,7 +913,7 @@ def _resend_failed_jobs(out_path: Path, job_indices: list) -> list:
         for j_idx_in_list in range(i * LSF_ID_LIST_LEN_LIMIT, min((i + 1) * LSF_ID_LIST_LEN_LIMIT, num_failed_jobs)):
             job_indices_str += f'{job_indices[j_idx_in_list] + 1},'
         job_indices_str = job_indices_str[:-1]
-        single_batch_bash_path = os.path.join(out_path, "single_batch.sh")
+        single_batch_bash_path = os.path.join(out_path, "scripts", "single_batch.sh")
         resend_job_command = f'bsub -J log_reg_step[{job_indices_str}]'
         jobs_sending_res = subprocess.run(resend_job_command.split(), stdin=open(single_batch_bash_path, 'r'),
                                           stdout=subprocess.PIPE)
@@ -899,4 +934,6 @@ def generate_binomial_tensor(net_size, num_samples, p=0.5):
     """
     Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
     """
+    print("in generate_binomial_tensor")
+    sys.stdout.flush()
     return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)

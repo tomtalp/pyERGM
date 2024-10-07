@@ -159,7 +159,7 @@ class NumberOfEdgesDirected(Metric):
 
     @staticmethod
     @njit
-    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int]):
+    def calculate_mple_regressors(observed_network: np.ndarray, edges_indices_lims: tuple[int]):
         return np.ones((edges_indices_lims[1] - edges_indices_lims[0], 1))
 
 
@@ -650,10 +650,18 @@ class MetricsCollection:
                  collinearity_fixer_sample_size=1000,
                  # TODO: For tests only, find a better solution
                  do_copy_metrics=True):
+
+        print("in MetricsCollection init")
+        sys.stdout.flush()
+
         if not do_copy_metrics:
             self.metrics = tuple([metric for metric in metrics])
         else:
             self.metrics = tuple([deepcopy(metric) for metric in metrics])
+
+        print("after metrics init")
+        sys.stdout.flush()
+
         for m in self.metrics:
             m._n_nodes = n_nodes
             if hasattr(m, "_indices_to_ignore"):
@@ -664,6 +672,9 @@ class MetricsCollection:
                             f"{str(m)} got indices to ignore {m._indices_to_ignore} which are out of bound for "
                             f"{cur_num_features} features it has")
 
+        print("after indices_to_ignore loop")
+        sys.stdout.flush()
+
         self.is_directed = is_directed
         for x in self.metrics:
             if x._is_directed != self.is_directed:
@@ -671,6 +682,9 @@ class MetricsCollection:
                 metric_is_directed_str = "a directed" if x._is_directed else "an undirected"
                 raise ValueError(f"Trying to initialize {model_is_directed_str} model with {metric_is_directed_str} "
                                  f"metric `{str(x)}`!")
+
+        print("after is_directed loop")
+        sys.stdout.flush()
 
         self.n_nodes = n_nodes
 
@@ -747,14 +761,23 @@ class MetricsCollection:
         Currently this is a naive version that only handles the very simple cases.
         TODO: revisit the threshold and sample size
         """
+        print("in collinearity fixer")
+        sys.stdout.flush()
+
         is_linearly_dependent = True
 
         self.num_of_features = self.calc_num_of_features()
+
+        print("updated num_of_features")
+        sys.stdout.flush()
 
         # Sample networks from a maximum entropy distribution, for avoiding edge cases (such as a feature is 0 for
         # all networks in the sample).
         # sample = np.random.binomial(n=1, p=0.5, size=(self.n_nodes, self.n_nodes, sample_size)).astype(np.int8)
         sample = generate_binomial_tensor(self.n_nodes, sample_size)
+
+        print("sampled networks")
+        sys.stdout.flush()
 
         # Symmetrize samples if not directed
         if not self.is_directed:
@@ -771,6 +794,7 @@ class MetricsCollection:
         sample_features = self.calculate_sample_statistics(sample)
         t2 = time.time()
         print(f"done collecting samples. Took {t2 - t1} seconds")
+        sys.stdout.flush()
 
         while is_linearly_dependent:
             self.num_of_features = self.calc_num_of_features()
@@ -830,6 +854,8 @@ class MetricsCollection:
                     cur_metric._indices_to_ignore.append(idx_to_delete)
 
                     sample_features = np.delete(sample_features, removal_order[i], axis=0)
+
+            sys.stdout.flush()
 
     def calculate_statistics(self, W: np.ndarray):
         """
@@ -1006,13 +1032,16 @@ class MetricsCollection:
                 input = observed_network
 
             n_features_from_metric = metric._get_effective_feature_count()
-            Xs[:,
-            feature_idx:feature_idx + n_features_from_metric] = metric.calculate_mple_regressors(
-                input, edges_indices_lims=edges_indices_lims)
+            cur_regressors = metric.calculate_mple_regressors(input, edges_indices_lims=edges_indices_lims)
+            print(
+                f"metric name: {str(metric)}, num features: {n_features_from_metric}, current regressors shape: {cur_regressors.shape}")
+            sys.stdout.flush()
+            Xs[:, feature_idx:feature_idx + n_features_from_metric] = cur_regressors
 
             feature_idx += n_features_from_metric
 
-        return Xs, observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()[:, None]
+        return Xs, observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()[
+                   edges_indices_lims[0]:edges_indices_lims[1], None]
 
     def get_parameter_names(self):
         """
