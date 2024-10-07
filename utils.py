@@ -730,7 +730,8 @@ def _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas, 
     return cmd_line_for_bsub
 
 
-def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_template_file_name, num_jobs):
+def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_template_file_name, num_jobs,
+                                  array_name):
     # Create current bash scripts to send distributed calculations
     scripts_path = (out_path / "scripts").resolve()
     os.makedirs(scripts_path, exist_ok=True)
@@ -744,7 +745,7 @@ def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_
     with open(multiple_batches_bash_path, 'w') as f:
         num_rows = 1
         while (num_rows - 1) * 2000 < num_jobs:
-            f.write(f'bsub < $1 -J log_reg_step'
+            f.write(f'bsub < $1 -J {array_name}'
                     f'[{(num_rows - 1) * 2000 + 1}-{min(num_rows * 2000, num_jobs)}]\n')
             num_rows += 1
 
@@ -782,7 +783,7 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, nu
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
 
     job_array_ids = run_distributed_children_jobs(out_path, cmd_line_single_batch, "distributed_logistic_regression.sh",
-                                                  num_jobs)
+                                                  num_jobs, "log_reg_step")
     return num_jobs, out_path, job_array_ids
 
 

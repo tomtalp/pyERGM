@@ -844,7 +844,7 @@ class MetricsCollection:
         num_jobs = int(np.ceil(tensor_size / num_samples_per_job))
         job_array_ids = run_distributed_children_jobs(out_dir_path, cmd_line_for_bsub,
                                                       "distributed_binomial_tensor_statistics.sh",
-                                                      num_jobs)
+                                                      num_jobs, "sample_stats")
 
         # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
         sample_stats_path = (out_dir_path / "sample_statistics").resolve()
