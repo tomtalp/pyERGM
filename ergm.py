@@ -1,15 +1,8 @@
 import numpy as np
-import networkx as nx
 from scipy.optimize import minimize, OptimizeResult
-from scipy.spatial.distance import mahalanobis
 from scipy.stats import f
-from sklearn.linear_model import LogisticRegression
-import sys
-import time
-from typing import Collection
 import sampling
 
-from utils import *
 from metrics import *
 
 
