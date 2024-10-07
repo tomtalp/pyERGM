@@ -707,16 +707,10 @@ class MetricsCollection:
                  # TODO: For tests only, find a better solution
                  do_copy_metrics=True):
 
-        print("in MetricsCollection init")
-        sys.stdout.flush()
-
         if not do_copy_metrics:
             self.metrics = tuple([metric for metric in metrics])
         else:
             self.metrics = tuple([deepcopy(metric) for metric in metrics])
-
-        print("after metrics init")
-        sys.stdout.flush()
 
         for m in self.metrics:
             m._n_nodes = n_nodes
@@ -728,9 +722,6 @@ class MetricsCollection:
                             f"{str(m)} got indices to ignore {m._indices_to_ignore} which are out of bound for "
                             f"{cur_num_features} features it has")
 
-        print("after indices_to_ignore loop")
-        sys.stdout.flush()
-
         self.is_directed = is_directed
         for x in self.metrics:
             if x._is_directed != self.is_directed:
@@ -738,9 +729,6 @@ class MetricsCollection:
                 metric_is_directed_str = "a directed" if x._is_directed else "an undirected"
                 raise ValueError(f"Trying to initialize {model_is_directed_str} model with {metric_is_directed_str} "
                                  f"metric `{str(x)}`!")
-
-        print("after is_directed loop")
-        sys.stdout.flush()
 
         self.n_nodes = n_nodes
 
@@ -870,15 +858,9 @@ class MetricsCollection:
         Currently this is a naive version that only handles the very simple cases.
         TODO: revisit the threshold and sample size
         """
-        print("in collinearity fixer")
-        sys.stdout.flush()
-
         is_linearly_dependent = True
 
         self.num_of_features = self.calc_num_of_features()
-
-        print("updated num_of_features")
-        sys.stdout.flush()
 
         # Sample networks from a maximum entropy distribution, for avoiding edge cases (such as a feature is 0 for
         # all networks in the sample).
@@ -937,6 +919,7 @@ class MetricsCollection:
                 if not is_trimmable:
                     first_metric = self.get_metric_by_feat_idx(removal_order[0])
                     print(f"Removing the metric {str(first_metric)} from the collection to fix multi-collinearity")
+                    sys.stdout.flush()
                     self._delete_metric(metric=first_metric)
 
                     sample_features = np.delete(sample_features, removal_order[0], axis=0)
@@ -944,11 +927,10 @@ class MetricsCollection:
                 else:
                     idx_to_delete = self.get_feature_idx_within_metric(removal_order[i])
                     print(f"Removing the {idx_to_delete} feature of {str(cur_metric)} to fix multi-collinearity")
+                    sys.stdout.flush()
                     cur_metric._indices_to_ignore.append(idx_to_delete)
 
                     sample_features = np.delete(sample_features, removal_order[i], axis=0)
-
-            sys.stdout.flush()
 
     def calculate_statistics(self, W: np.ndarray):
         """
@@ -1126,9 +1108,6 @@ class MetricsCollection:
 
             n_features_from_metric = metric._get_effective_feature_count()
             cur_regressors = metric.calculate_mple_regressors(input, edges_indices_lims=edges_indices_lims)
-            print(
-                f"metric name: {str(metric)}, num features: {n_features_from_metric}, current regressors shape: {cur_regressors.shape}")
-            sys.stdout.flush()
             Xs[:, feature_idx:feature_idx + n_features_from_metric] = cur_regressors
 
             feature_idx += n_features_from_metric

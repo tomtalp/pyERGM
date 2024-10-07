@@ -612,8 +612,6 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
     -------
 
     """
-    print("in mple_logistic_regression_optimization")
-    sys.stdout.flush()
     num_features = metrics_collection.calc_num_of_features()
     if initial_thetas is None:
         thetas = np.random.rand(num_features, 1)
@@ -628,9 +626,6 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         data_path = (out_dir_path / "data").resolve()
         os.makedirs(data_path, exist_ok=True)
 
-        print("created data dir")
-        sys.stdout.flush()
-
         # Copy the `MetricsCollection` and the observed network to provide its path to children jobs, so they will be
         # able to access it.
         metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
@@ -639,9 +634,6 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         observed_net_path = os.path.join(data_path, 'observed_network.pkl')
         with open(observed_net_path, 'wb') as f:
             pickle.dump(observed_network, f)
-
-        print("dumped metric_collection and observed_network")
-        sys.stdout.flush()
 
     idx = 0
     with objmode(start='f8'):
@@ -688,9 +680,6 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
 
 
 def distributed_logistic_regression_optimization_step(data_path, thetas, num_edges_per_job=5000):
-    print("in distributed_logistic_regression_optimization_step")
-    sys.stdout.flush()
-
     # Arrange files and send the children jobs
     num_jobs, out_path, job_array_ids = _run_distributed_logistic_regression_children_jobs(data_path, thetas,
                                                                                            num_edges_per_job)
@@ -931,6 +920,4 @@ def generate_binomial_tensor(net_size, num_samples, p=0.5):
     """
     Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
     """
-    print("in generate_binomial_tensor")
-    sys.stdout.flush()
     return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)
