@@ -1,15 +1,11 @@
+import shutil
 from abc import ABC, abstractmethod
 from typing import Collection
 from copy import deepcopy
 
 import numpy as np
-import torch
-import networkx as nx
-from numba import njit
-import numba as nb
 
 from utils import *
-import time
 
 
 class Metric(ABC):
@@ -707,6 +703,7 @@ class MetricsCollection:
                  fix_collinearity=True,
                  use_sparse_matrix=False,
                  collinearity_fixer_sample_size=1000,
+                 is_collinearity_distributed=False,
                  # TODO: For tests only, find a better solution
                  do_copy_metrics=True):
 
@@ -753,7 +750,8 @@ class MetricsCollection:
         self._fix_collinearity = fix_collinearity
         self.collinearity_fixer_sample_size = collinearity_fixer_sample_size
         if self._fix_collinearity:
-            self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size)
+            self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
+                                    is_distributed=is_collinearity_distributed)
 
         # Returns the number of features that are being calculated. Since a single metric might return more than one
         # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
@@ -813,8 +811,59 @@ class MetricsCollection:
             else:
                 cum_sum_num_feats += next_met_num_feats
 
+    def calc_statistics_for_binomial_tensor_local(self, tensor_size, p=0.5):
+        sample = generate_binomial_tensor(self.n_nodes, tensor_size, p=p)
+
+        # Symmetrize samples if not directed
+        if not self.is_directed:
+            sample = np.round((sample + sample.transpose(1, 0, 2)) / 2)
+
+        # Make sure the main diagonal is 0
+        sample[np.arange(self.n_nodes, dtype=int), np.arange(self.n_nodes, dtype=int), :] = 0
+
+        # Calculate the features of the sample
+        return self.calculate_sample_statistics(sample)
+
+    def calc_statistics_for_binomial_tensor_distributed(self, tensor_size, p=0.5, num_samples_per_job=1):
+        # TODO: currently, if tensor_size % num_samples_per_job != 0 the sample size will be larger than tensor_size
+        #  specified by the user (it is (tensor_size // num_samples_per_job + 1) * num_samples_per_job). We can pass
+        #  tensor_size as an additional argument to children jobs, and validate in
+        #  sample_statistics_distributed_calcs.py that we don't calculate for too many networks.
+        out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
+        data_path = (out_dir_path / "data").resolve()
+        os.makedirs(data_path, exist_ok=True)
+
+        with open((data_path / 'metric_collection.pkl').resolve(), 'wb') as f:
+            pickle.dump(self, f)
+
+        cmd_line_for_bsub = (f'python ./sample_statistics_distributed_calcs.py '
+                             f'--out_dir_path {out_dir_path} '
+                             f'--num_samples_per_job {num_samples_per_job} '
+                             f'--p {p}')
+
+        num_jobs = int(np.ceil(tensor_size / num_samples_per_job))
+        job_array_ids = run_distributed_children_jobs(out_dir_path, cmd_line_for_bsub,
+                                                      "distributed_binomial_tensor_statistics.sh",
+                                                      num_jobs)
+
+        # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
+        sample_stats_path = (out_dir_path / "sample_statistics").resolve()
+        os.makedirs(sample_stats_path, exist_ok=True)
+        wait_for_distributed_children_outputs(num_jobs, sample_stats_path, job_array_ids)
+
+        # Clean current scripts and data
+        shutil.rmtree(data_path)
+        shutil.rmtree((out_dir_path / "scripts").resolve())
+
+        # Aggregate results
+        whole_sample_statistics = cat_children_jobs_outputs(num_jobs, sample_stats_path, axis=1)
+
+        # clean outputs
+        shutil.rmtree(sample_stats_path)
+        return whole_sample_statistics
+
     def collinearity_fixer(self, sample_size=1000, nonzero_thr=10 ** -1, ratio_threshold=10 ** -6,
-                           eigenvec_thr=10 ** -4):
+                           eigenvec_thr=10 ** -4, is_distributed=False):
         """
         Find collinearity between metrics in the collection.
 
@@ -833,29 +882,10 @@ class MetricsCollection:
 
         # Sample networks from a maximum entropy distribution, for avoiding edge cases (such as a feature is 0 for
         # all networks in the sample).
-        # sample = np.random.binomial(n=1, p=0.5, size=(self.n_nodes, self.n_nodes, sample_size)).astype(np.int8)
-        sample = generate_binomial_tensor(self.n_nodes, sample_size)
-
-        print("sampled networks")
-        sys.stdout.flush()
-
-        # Symmetrize samples if not directed
-        if not self.is_directed:
-            sample = np.round((sample + sample.transpose(1, 0, 2)) / 2)
-
-        # Make sure the main diagonal is 0
-        for i in range(self.n_nodes):
-            for k in range(sample_size):
-                sample[i, i, k] = 0
-
-        # Calculate the features of the sample
-        t1 = time.time()
-        print("Started collecting samples")
-        sample_features = self.calculate_sample_statistics(sample)
-        t2 = time.time()
-        print(f"done collecting samples. Took {t2 - t1} seconds")
-        sys.stdout.flush()
-
+        if not is_distributed:
+            sample_features = self.calc_statistics_for_binomial_tensor_local(sample_size)
+        else:
+            sample_features = self.calc_statistics_for_binomial_tensor_distributed(sample_size, num_samples_per_job=5)
         while is_linearly_dependent:
             self.num_of_features = self.calc_num_of_features()
 

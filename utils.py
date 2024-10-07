@@ -698,12 +698,12 @@ def distributed_logistic_regression_optimization_step(data_path, thetas, num_edg
     # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
     hessian_path = (out_path / "hessian").resolve()
     os.makedirs(hessian_path, exist_ok=True)
-    _wait_for_distributed_children_outputs(num_jobs, hessian_path, job_array_ids)
+    wait_for_distributed_children_outputs(num_jobs, hessian_path, job_array_ids)
     # Clean current scripts
     shutil.rmtree((out_path / "scripts").resolve())
 
     # Aggregate results
-    predictions = _cat_children_jobs_outputs(num_jobs, (out_path / "prediction").resolve())
+    predictions = cat_children_jobs_outputs(num_jobs, (out_path / "prediction").resolve())
     log_likelihood = _sum_children_jobs_outputs(num_jobs, (out_path / "log_like").resolve())
     grad = _sum_children_jobs_outputs(num_jobs, (out_path / "grad").resolve())
     hessian = _sum_children_jobs_outputs(num_jobs, (out_path / "hessian").resolve())
@@ -716,9 +716,7 @@ def distributed_logistic_regression_optimization_step(data_path, thetas, num_edg
     return predictions, log_likelihood, grad, hessian
 
 
-def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, num_edges_per_job):
-    out_path = data_path.parent
-
+def _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas, num_edges_per_job):
     # Construct a string with the current thetas, to pass using the command line to children jobs.
     thetas_str = ''
     for t in cur_thetas:
@@ -729,27 +727,19 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, nu
                          f'--out_dir_path {out_path} '
                          f'--num_edges_per_job {num_edges_per_job} '
                          f'--thetas {thetas_str}')
+    return cmd_line_for_bsub
 
-    print("constructed cmd_line_for_bsub")
-    sys.stdout.flush()
 
-    # Create current bash scripts to send distributed calculations of the measure
+def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_template_file_name, num_jobs):
+    # Create current bash scripts to send distributed calculations
     scripts_path = (out_path / "scripts").resolve()
     os.makedirs(scripts_path, exist_ok=True)
     single_batch_bash_path = os.path.join(scripts_path, "single_batch.sh")
-    shutil.copyfile(os.path.join(os.getcwd(), "ClusterScripts", "distributed_logistic_regression.sh"),
+    shutil.copyfile(os.path.join(os.getcwd(), "ClusterScripts", single_batch_template_file_name),
                     single_batch_bash_path)
     with open(single_batch_bash_path, 'a') as f:
-        f.write(cmd_line_for_bsub)
-    with open(os.path.join(data_path, "observed_network.pkl"), 'rb') as f:
-        observed_network = pickle.load(f)
+        f.write(cmd_line_single_batch)
 
-    print("wrote single_batch script")
-    sys.stdout.flush()
-
-    num_nodes = observed_network.shape[0]
-    num_data_points = num_nodes * num_nodes - num_nodes
-    num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
     multiple_batches_bash_path = os.path.join(scripts_path, "multiple_batches.sh")
     with open(multiple_batches_bash_path, 'w') as f:
         num_rows = 1
@@ -757,9 +747,6 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, nu
             f.write(f'bsub < $1 -J log_reg_step'
                     f'[{(num_rows - 1) * 2000 + 1}-{min(num_rows * 2000, num_jobs)}]\n')
             num_rows += 1
-
-    print("wrote multiple_batches script")
-    sys.stdout.flush()
 
     # Make sure the logs directory for the children jobs exists and delete previous logs.
     with open(single_batch_bash_path, 'r') as f:
@@ -772,27 +759,34 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, nu
     for file_name in os.listdir(logs_dir):
         os.unlink(os.path.join(logs_dir, file_name))
 
-    print("cleaned logs ")
-    sys.stdout.flush()
-
     # Send the jobs
     send_jobs_command = f'bash {multiple_batches_bash_path} {single_batch_bash_path}'
-    print(f"sending \"bash {multiple_batches_bash_path} {single_batch_bash_path}\"")
-    sys.stdout.flush()
     jobs_sending_res = subprocess.run(send_jobs_command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    print(f"sen jobs, output: {jobs_sending_res.stdout}")
-    sys.stdout.flush()
 
     job_array_ids = _parse_sent_job_array_ids(jobs_sending_res.stdout)
 
-    print(f"parsed arrays {job_array_ids}")
-    sys.stdout.flush()
+    return job_array_ids
 
+
+def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, num_edges_per_job):
+    out_path = data_path.parent
+
+    cmd_line_single_batch = _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas,
+                                                                                  num_edges_per_job)
+
+    with open(os.path.join(data_path, "observed_network.pkl"), 'rb') as f:
+        observed_network = pickle.load(f)
+
+    num_nodes = observed_network.shape[0]
+    num_data_points = num_nodes * num_nodes - num_nodes
+    num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
+
+    job_array_ids = run_distributed_children_jobs(out_path, cmd_line_single_batch, "distributed_logistic_regression.sh",
+                                                  num_jobs)
     return num_jobs, out_path, job_array_ids
 
 
-def _wait_for_distributed_children_outputs(num_jobs: int, out_path: Path, job_array_ids: list):
+def wait_for_distributed_children_outputs(num_jobs: int, out_path: Path, job_array_ids: list):
     is_all_done = False
     time_of_last_job_status_check = time.time()
     num_jobs_to_listen_to = num_jobs
@@ -841,7 +835,7 @@ def _sum_children_jobs_outputs(num_jobs: int, out_path: Path):
     return measure
 
 
-def _cat_children_jobs_outputs(num_jobs: int, out_path: Path):
+def cat_children_jobs_outputs(num_jobs: int, out_path: Path, axis: int = 0):
     measure = None
     for j in range(num_jobs):
         # Check that something was already written to avoid a race between the processes (this one tries to
@@ -852,7 +846,7 @@ def _cat_children_jobs_outputs(num_jobs: int, out_path: Path):
                 if measure is None:
                     measure = content
                 else:
-                    measure = np.concatenate((measure, content))
+                    measure = np.concatenate((measure, content), axis=axis)
     return measure
 
 

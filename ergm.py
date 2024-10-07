@@ -27,6 +27,7 @@ class ERGM():
                  use_sparse_matrix=False,
                  fix_collinearity=True,
                  collinearity_fixer_sample_size=1000,
+                 is_distributed_optimization=False,
                  optimization_options={}):
         """
         An ERGM model object. 
@@ -63,10 +64,12 @@ class ERGM():
 
         self._n_nodes = n_nodes
         self._is_directed = is_directed
+        self._is_distributed_optimization = is_distributed_optimization
         self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
                                                      use_sparse_matrix=use_sparse_matrix,
                                                      fix_collinearity=fix_collinearity,
-                                                     collinearity_fixer_sample_size=collinearity_fixer_sample_size)
+                                                     collinearity_fixer_sample_size=collinearity_fixer_sample_size,
+                                                     is_collinearity_distributed=self._is_distributed_optimization)
         print("initialized _metrics_collection")
         sys.stdout.flush()
 
@@ -159,7 +162,7 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_network, is_distributed=False, lr=1, stopping_thr: float = 1e-6):
+    def _mple_fit(self, observed_network, lr=1, stopping_thr: float = 1e-6):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -182,7 +185,7 @@ class ERGM():
         print("in fit")
         sys.stdout.flush()
         trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection, observed_network,
-                                                                           is_distributed=is_distributed,
+                                                                           is_distributed=self._is_distributed_optimization,
                                                                            lr=lr,
                                                                            stopping_thr=stopping_thr)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))

@@ -1,7 +1,4 @@
 import argparse
-import numpy as np
-import os
-import pickle
 from utils import *
 
 
@@ -14,7 +11,6 @@ class StoreNpArr(argparse._StoreAction):
 def parse_cmd_args(arg_list: list = None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--out_dir_path', type=str)
-    parser.add_argument('--function', type=str)
     parser.add_argument('--num_edges_per_job', type=int)
     parser.add_argument('--thetas', action=StoreNpArr, type=float, nargs='+')
     if arg_list is not None:
