@@ -440,6 +440,9 @@ class ERGM():
     def get_model_parameters(self):
         parameter_names = self._metrics_collection.get_parameter_names()
         return dict(zip(parameter_names, self._thetas))
+    
+    def get_ignored_features(self):
+        return self._metrics_collection.get_ignored_features()
 
 
 class BruteForceERGM(ERGM):
