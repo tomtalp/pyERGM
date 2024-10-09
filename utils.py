@@ -814,30 +814,24 @@ def wait_for_distributed_children_outputs(num_jobs: int, out_path: Path, job_arr
 def _sum_children_jobs_outputs(num_jobs: int, out_path: Path):
     measure = None
     for j in range(num_jobs):
-        # Check that something was already written to avoid a race between the processes (this one tries to
-        # read while the child still writes)
-        if Path(os.path.join(out_path, f'{j}.pkl')).stat().st_size:
-            with open(os.path.join(out_path, f'{j}.pkl'), 'rb') as f:
-                content = pickle.load(f)
-                if measure is None:
-                    measure = content
-                else:
-                    measure += content
+        with open(os.path.join(out_path, f'{j}.pkl'), 'rb') as f:
+            content = pickle.load(f)
+            if measure is None:
+                measure = content
+            else:
+                measure += content
     return measure
 
 
 def cat_children_jobs_outputs(num_jobs: int, out_path: Path, axis: int = 0):
     measure = None
     for j in range(num_jobs):
-        # Check that something was already written to avoid a race between the processes (this one tries to
-        # read while the child still writes)
-        if Path(os.path.join(out_path, f'{j}.pkl')).stat().st_size:
-            with open(os.path.join(out_path, f'{j}.pkl'), 'rb') as f:
-                content = pickle.load(f)
-                if measure is None:
-                    measure = content
-                else:
-                    measure = np.concatenate((measure, content), axis=axis)
+        with open(os.path.join(out_path, f'{j}.pkl'), 'rb') as f:
+            content = pickle.load(f)
+            if measure is None:
+                measure = content
+            else:
+                measure = np.concatenate((measure, content), axis=axis)
     return measure
 
 

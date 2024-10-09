@@ -8,15 +8,12 @@ class StoreNpArr(argparse._StoreAction):
         return super().__call__(parser, namespace, values, option_string)
 
 
-def parse_cmd_args(arg_list: list = None):
+def parse_cmd_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out_dir_path', type=str)
     parser.add_argument('--num_edges_per_job', type=int)
     parser.add_argument('--thetas', action=StoreNpArr, type=float, nargs='+')
-    if arg_list is not None:
-        args = parser.parse_args(arg_list)
-    else:
-        args = parser.parse_args()
+    args = parser.parse_args()
     return args
 
 
