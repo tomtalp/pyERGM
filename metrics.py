@@ -1,15 +1,11 @@
+import shutil
 from abc import ABC, abstractmethod
 from typing import Collection
 from copy import deepcopy
 
 import numpy as np
-import torch
-import networkx as nx
-from numba import njit
-import numba as nb
 
 from utils import *
-import time
 
 
 class Metric(ABC):
@@ -76,6 +72,29 @@ class Metric(ABC):
             result[:, i] = self.calculate(network)
         return result
 
+    def calculate_mple_regressors(self, observed_network: np.ndarray | nx.Graph, edges_indices_lims: tuple[int]):
+        num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
+        Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count()))
+        edge_idx = 0
+        for i in range(self._n_nodes):
+            for j in range(self._n_nodes):
+                if i == j:
+                    continue
+                if edge_idx < edges_indices_lims[0]:
+                    edge_idx += 1
+                    continue
+                indices = (i, j)
+                observed_edge_off = observed_network.copy()
+                if self.requires_graph:
+                    if observed_edge_off.has_edge(i, j):
+                        observed_edge_off.remove_edge(i, j)
+                else:
+                    observed_edge_off[i, j] = 0
+                Xs[edge_idx - edges_indices_lims[0]] = self.calc_change_score(observed_edge_off, indices)
+                edge_idx += 1
+                if edge_idx == edges_indices_lims[1]:
+                    return Xs
+
     def _get_metric_names(self):
         """
         Get the names of the features that this metric produces. Defaults to the name of the metric if the metric creates a single feature, and multiple
@@ -94,21 +113,20 @@ class Metric(ABC):
             for i in range(total_n_features):
                 if i in self._indices_to_ignore:
                     continue
-                parameter_names += (f"{str(self)}_{i+1}",)
+                parameter_names += (f"{str(self)}_{i + 1}",)
             return parameter_names
-    
+
     def _get_ignored_features(self):
         if len(self._indices_to_ignore) == 0:
             return tuple()
-        
+
         ignored_features = ()
         for i in range(self._get_total_feature_count()):
             if i in self._indices_to_ignore:
-                ignored_features += (f"{str(self)}_{i+1}",)
-        
+                ignored_features += (f"{str(self)}_{i + 1}",)
+
         return ignored_features
 
-                
 
 class NumberOfEdgesUndirected(Metric):
     def __str__(self):
@@ -161,10 +179,16 @@ class NumberOfEdgesDirected(Metric):
     # TODO: understand how to properly use numba here (the dtype=bool makes some trouble).
     # @njit
     def calculate_change_score_full_network(current_network: np.ndarray):
-        sign_matrix = np.where(current_network == 1, -1, 1)  # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
+        sign_matrix = np.where(current_network == 1, -1,
+                               1)  # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
         nondiag_signs = sign_matrix[~np.eye(sign_matrix.shape[0], dtype=bool)].flatten()
 
         return nondiag_signs[:, np.newaxis]
+
+    @staticmethod
+    @njit
+    def calculate_mple_regressors(observed_network: np.ndarray, edges_indices_lims: tuple[int]):
+        return np.ones((edges_indices_lims[1] - edges_indices_lims[0], 1))
 
 
 # TODO: change the name of this one to undirected and implement also a directed version?
@@ -490,7 +514,7 @@ class NumberOfEdgesTypesDirected(Metric):
     def _calc_edge_type_idx_assignment(self):
         """
         Each edge is assigned with the index of it's corresponding sorted type pair.
-        
+
         For example, for an n=4 matrix with types [A, B, A, B], the weight matrix is
             [ AA, AB, AA, AB
               BA, BB, BA, BB
@@ -498,7 +522,7 @@ class NumberOfEdgesTypesDirected(Metric):
               BA, BB, BA, BB ]
         but instead of AA, AB, ..., we save the corresponding index of the type pair
         in self._sorted_type_pairs (which is sorted alphabetically.)
-            
+
         """
         num_nodes = len(self.exogenous_attr)
         self._edge_type_idx_assignment = np.zeros((num_nodes, num_nodes)).astype(int)
@@ -553,7 +577,7 @@ class NumberOfEdgesTypesDirected(Metric):
         ----------
         current_network: np.ndarray
             Input network of size (n, n)
-        
+
         Returns
         -------
         np.ndarray
@@ -575,6 +599,15 @@ class NumberOfEdgesTypesDirected(Metric):
         change_scores = change_scores.astype(np.int8)
         return np.delete(change_scores, self._indices_to_ignore, axis=1)
 
+    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int]):
+        num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
+        Xs = np.zeros((num_edges_to_take, len(self.sorted_type_pairs)))
+        nondiag_type_idx = self._edge_type_idx_assignment[
+                               ~np.eye(self._edge_type_idx_assignment.shape[0], dtype=bool)].flatten() - 1
+        Xs[np.arange(num_edges_to_take), nondiag_type_idx[edges_indices_lims[0]:edges_indices_lims[1]]] = 1
+        Xs = Xs.astype(np.int8)
+        return np.delete(Xs, self._indices_to_ignore, axis=1)
+
     def _get_metric_names(self):
         parameter_names = tuple()
 
@@ -585,20 +618,20 @@ class NumberOfEdgesTypesDirected(Metric):
                 continue
             type_pair = self.sorted_type_pairs[i][0] + "__" + self.sorted_type_pairs[i][1]
             parameter_names += (f"{metric_name}_{type_pair}",)
-        
+
         return parameter_names
 
     def _get_ignored_features(self):
         if len(self._indices_to_ignore) == 0:
             return tuple()
-        
+
         metric_name = str(self)
         ignored_features = ()
         for i in range(self._get_total_feature_count()):
             if i in self._indices_to_ignore:
                 type_pair = self.sorted_type_pairs[i][0] + "__" + self.sorted_type_pairs[i][1]
                 ignored_features += (f"{metric_name}_{type_pair}",)
-        
+
         return ignored_features
 
 
@@ -670,12 +703,15 @@ class MetricsCollection:
                  fix_collinearity=True,
                  use_sparse_matrix=False,
                  collinearity_fixer_sample_size=1000,
+                 is_collinearity_distributed=False,
                  # TODO: For tests only, find a better solution
                  do_copy_metrics=True):
+
         if not do_copy_metrics:
             self.metrics = tuple([metric for metric in metrics])
         else:
             self.metrics = tuple([deepcopy(metric) for metric in metrics])
+
         for m in self.metrics:
             m._n_nodes = n_nodes
             if hasattr(m, "_indices_to_ignore"):
@@ -702,7 +738,8 @@ class MetricsCollection:
         self._fix_collinearity = fix_collinearity
         self.collinearity_fixer_sample_size = collinearity_fixer_sample_size
         if self._fix_collinearity:
-            self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size)
+            self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
+                                    is_distributed=is_collinearity_distributed)
 
         # Returns the number of features that are being calculated. Since a single metric might return more than one
         # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
@@ -762,7 +799,59 @@ class MetricsCollection:
             else:
                 cum_sum_num_feats += next_met_num_feats
 
-    def collinearity_fixer(self, sample_size=1000, nonzero_thr=10**-1, ratio_threshold=10**-6, eigenvec_thr=10**-4):
+    def calc_statistics_for_binomial_tensor_local(self, tensor_size, p=0.5):
+        sample = generate_binomial_tensor(self.n_nodes, tensor_size, p=p)
+
+        # Symmetrize samples if not directed
+        if not self.is_directed:
+            sample = np.round((sample + sample.transpose(1, 0, 2)) / 2)
+
+        # Make sure the main diagonal is 0
+        sample[np.arange(self.n_nodes, dtype=int), np.arange(self.n_nodes, dtype=int), :] = 0
+
+        # Calculate the features of the sample
+        return self.calculate_sample_statistics(sample)
+
+    def calc_statistics_for_binomial_tensor_distributed(self, tensor_size, p=0.5, num_samples_per_job=1):
+        # TODO: currently, if tensor_size % num_samples_per_job != 0 the sample size will be larger than tensor_size
+        #  specified by the user (it is (tensor_size // num_samples_per_job + 1) * num_samples_per_job). We can pass
+        #  tensor_size as an additional argument to children jobs, and validate in
+        #  sample_statistics_distributed_calcs.py that we don't calculate for too many networks.
+        out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
+        data_path = (out_dir_path / "data").resolve()
+        os.makedirs(data_path, exist_ok=True)
+
+        with open((data_path / 'metric_collection.pkl').resolve(), 'wb') as f:
+            pickle.dump(self, f)
+
+        cmd_line_for_bsub = (f'python ./sample_statistics_distributed_calcs.py '
+                             f'--out_dir_path {out_dir_path} '
+                             f'--num_samples_per_job {num_samples_per_job} '
+                             f'--p {p}')
+
+        num_jobs = int(np.ceil(tensor_size / num_samples_per_job))
+        job_array_ids = run_distributed_children_jobs(out_dir_path, cmd_line_for_bsub,
+                                                      "distributed_binomial_tensor_statistics.sh",
+                                                      num_jobs, "sample_stats")
+
+        # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
+        sample_stats_path = (out_dir_path / "sample_statistics").resolve()
+        os.makedirs(sample_stats_path, exist_ok=True)
+        wait_for_distributed_children_outputs(num_jobs, sample_stats_path, job_array_ids, "sample_stats")
+
+        # Clean current scripts and data
+        shutil.rmtree(data_path)
+        shutil.rmtree((out_dir_path / "scripts").resolve())
+
+        # Aggregate results
+        whole_sample_statistics = cat_children_jobs_outputs(num_jobs, sample_stats_path, axis=1)
+
+        # clean outputs
+        shutil.rmtree(sample_stats_path)
+        return whole_sample_statistics
+
+    def collinearity_fixer(self, sample_size=1000, nonzero_thr=10 ** -1, ratio_threshold=10 ** -6,
+                           eigenvec_thr=10 ** -4, is_distributed=False):
         """
         Find collinearity between metrics in the collection.
 
@@ -775,25 +864,10 @@ class MetricsCollection:
 
         # Sample networks from a maximum entropy distribution, for avoiding edge cases (such as a feature is 0 for
         # all networks in the sample).
-        # sample = np.random.binomial(n=1, p=0.5, size=(self.n_nodes, self.n_nodes, sample_size)).astype(np.int8)
-        sample = generate_binomial_tensor(self.n_nodes, sample_size)
-
-        # Symmetrize samples if not directed
-        if not self.is_directed:
-            sample = np.round((sample + sample.transpose(1, 0, 2)) / 2)
-
-        # Make sure the main diagonal is 0
-        for i in range(self.n_nodes):
-            for k in range(sample_size):
-                sample[i, i, k] = 0
-
-        # Calculate the features of the sample
-        t1 = time.time()
-        print("Started collecting samples")
-        sample_features = self.calculate_sample_statistics(sample)
-        t2 = time.time()
-        print(f"done collecting samples. Took {t2 - t1} seconds")
-
+        if not is_distributed:
+            sample_features = self.calc_statistics_for_binomial_tensor_local(sample_size)
+        else:
+            sample_features = self.calc_statistics_for_binomial_tensor_distributed(sample_size, num_samples_per_job=5)
         while is_linearly_dependent:
             self.num_of_features = self.calc_num_of_features()
 
@@ -807,7 +881,7 @@ class MetricsCollection:
 
             minimal_non_zero_eigen_val = np.min(np.abs(eigen_vals[np.abs(eigen_vals) > nonzero_thr]))
             small_eigen_vals_indices = np.where(np.abs(eigen_vals) / minimal_non_zero_eigen_val < ratio_threshold)[0]
-            
+
             if small_eigen_vals_indices.size == 0:
                 is_linearly_dependent = False
             else:
@@ -845,6 +919,7 @@ class MetricsCollection:
                 if not is_trimmable:
                     first_metric = self.get_metric_by_feat_idx(removal_order[0])
                     print(f"Removing the metric {str(first_metric)} from the collection to fix multi-collinearity")
+                    sys.stdout.flush()
                     self._delete_metric(metric=first_metric)
 
                     sample_features = np.delete(sample_features, removal_order[0], axis=0)
@@ -852,6 +927,7 @@ class MetricsCollection:
                 else:
                     idx_to_delete = self.get_feature_idx_within_metric(removal_order[i])
                     print(f"Removing the {idx_to_delete} feature of {str(cur_metric)} to fix multi-collinearity")
+                    sys.stdout.flush()
                     cur_metric._indices_to_ignore.append(idx_to_delete)
 
                     sample_features = np.delete(sample_features, removal_order[i], axis=0)
@@ -1008,10 +1084,37 @@ class MetricsCollection:
                         edge_idx += 1
 
             feature_idx += n_features_from_metric
-            t2 = time.time()
 
         return change_scores
-    
+
+    def prepare_mple_data(self, observed_network: np.ndarray, edges_indices_lims: tuple[int] | None = None):
+        if self.requires_graph:
+            G1 = connectivity_matrix_to_G(observed_network, directed=self.is_directed)
+
+        n_nodes = observed_network.shape[0]
+        if edges_indices_lims is None:
+            num_edges_to_take = n_nodes * n_nodes - n_nodes
+            edges_indices_lims = (0, num_edges_to_take)
+        else:
+            num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
+        Xs = np.zeros((num_edges_to_take, self.num_of_features))
+
+        feature_idx = 0
+        for metric in self.metrics:
+            if metric.requires_graph:
+                input = G1
+            else:
+                input = observed_network
+
+            n_features_from_metric = metric._get_effective_feature_count()
+            cur_regressors = metric.calculate_mple_regressors(input, edges_indices_lims=edges_indices_lims)
+            Xs[:, feature_idx:feature_idx + n_features_from_metric] = cur_regressors
+
+            feature_idx += n_features_from_metric
+
+        return Xs, observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()[
+                   edges_indices_lims[0]:edges_indices_lims[1], None]
+
     def get_parameter_names(self):
         """
         Returns the names of the parameters of the metrics in the collection.
@@ -1020,14 +1123,13 @@ class MetricsCollection:
 
         for metric in self.metrics:
             parameter_names += metric._get_metric_names()
-            
+
         return parameter_names
-    
+
     def get_ignored_features(self):
         parameter_names = tuple()
 
         for metric in self.metrics:
             parameter_names += metric._get_ignored_features()
-            
-        return parameter_names
 
+        return parameter_names

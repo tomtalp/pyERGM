@@ -8,6 +8,7 @@ from metrics import *
 import networkx as nx
 import math
 
+
 class TestNumberOfEdgesUndirected(unittest.TestCase):
     def test_num_of_edges(self):
         metric = NumberOfEdgesUndirected()
@@ -211,24 +212,24 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
     def test_calc_edge_weights(self):
         neuronal_types = ['A', 'B', 'A', 'B']
         metric = NumberOfEdgesTypesDirected(neuronal_types)
-        expected_edge_weights = np.array([[0, 1, 0, 1], 
-                                          [2, 3, 2, 3], 
-                                          [0, 1, 0, 1], 
+        expected_edge_weights = np.array([[0, 1, 0, 1],
+                                          [2, 3, 2, 3],
+                                          [0, 1, 0, 1],
                                           [2, 3, 2, 3]])
-    
-        expected_edge_weights += 1 # Increment because we also want a bin for nonexisting edges (which have the entry 0)
+
+        expected_edge_weights += 1  # Increment because we also want a bin for nonexisting edges (which have the entry 0)
 
         self.assertTrue(np.all(metric._edge_type_idx_assignment == expected_edge_weights))
 
         neuronal_types = ['A', 'B', 'B', 'A']
         metric = NumberOfEdgesTypesDirected(neuronal_types)
-        expected_edge_weights = np.array([[0, 1, 1, 0], 
-                                          [2, 3, 3, 2], 
+        expected_edge_weights = np.array([[0, 1, 1, 0],
+                                          [2, 3, 3, 2],
                                           [2, 3, 3, 2],
                                           [0, 1, 1, 0]])
-        
-        expected_edge_weights += 1 # Increment because we also want a bin for nonexisting edges (which have the entry 0)
-        
+
+        expected_edge_weights += 1  # Increment because we also want a bin for nonexisting edges (which have the entry 0)
+
         print(metric._edge_type_idx_assignment)
         print(expected_edge_weights)
         self.assertTrue(np.all(metric._edge_type_idx_assignment == expected_edge_weights))
@@ -308,7 +309,7 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         calculated_change_score = metric.calc_change_score(W2, (1, 2))
         expected_change_score = np.array([0, 0, 1, 0])
         self.assertTrue(np.all(expected_change_score == calculated_change_score))
-    
+
     def test_calculate_change_score_full_network(self):
         types = ['A', 'B', 'A', 'B']
         metric = NumberOfEdgesTypesDirected(types)
@@ -701,8 +702,8 @@ class TestMetricsCollection(unittest.TestCase):
         expected_result = [-1, 0, -1, 0]
 
         self.assertTrue(all(result == expected_result))
-    
-    def test_calculate_change_scores_all_edges(self): 
+
+    def test_calculate_change_scores_all_edges(self):
         types = ['A', 'B', 'A', 'B']
         metrics = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
 
@@ -728,19 +729,67 @@ class TestMetricsCollection(unittest.TestCase):
             [1, 0, 0, 0, 1],
             [-1, 0, 0, -1, 0]
         ])
-        
+
         collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
 
         # The collinearity fixer is supposed to remove one attribute from the NumberOfEdgesTypesDirected metric
         self.assertEqual(len(collection.metrics[1]._indices_to_ignore), 1)
-        
+
         idx_to_ignore = collection.metrics[1]._indices_to_ignore[0]
 
         res = collection.calculate_change_scores_all_edges(W1)
 
         # Deleting the 1+idx_to_ignore because the first entry is the NumberOfEdgesDirected metric
-        expected_full_change_score = np.delete(expected_full_change_score, 1+idx_to_ignore, axis=1)
+        expected_full_change_score = np.delete(expected_full_change_score, 1 + idx_to_ignore, axis=1)
         self.assertTrue(np.all(expected_full_change_score == res))
+
+    def test_prepare_mple_data(self):
+        types = ['A', 'B', 'A', 'B']
+        metrics = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
+
+        W1 = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [1, 1, 0, 0],
+            [0, 0, 1, 0]
+        ])
+
+        n_nodes = W1.shape[0]
+        expected_flattened_mat = np.array([1, 0, 0, 1, 0, 1, 1, 1, 0, 0, 0, 1]).reshape(n_nodes ** 2 - n_nodes, 1)
+
+        expected_mple_regressors = np.array([
+            [1, 0, 1, 0, 0],
+            [1, 1, 0, 0, 0],
+            [1, 0, 1, 0, 0],
+            [1, 0, 0, 1, 0],
+            [1, 0, 0, 1, 0],
+            [1, 0, 0, 0, 1],
+            [1, 1, 0, 0, 0],
+            [1, 0, 1, 0, 0],
+            [1, 0, 1, 0, 0],
+            [1, 0, 0, 1, 0],
+            [1, 0, 0, 0, 1],
+            [1, 0, 0, 1, 0]
+        ])
+
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
+
+        # The collinearity fixer is supposed to remove one attribute from the NumberOfEdgesTypesDirected metric
+        self.assertEqual(len(collection.metrics[1]._indices_to_ignore), 1)
+
+        idx_to_ignore = collection.metrics[1]._indices_to_ignore[0]
+
+        Xs_full, ys_full = collection.prepare_mple_data(W1)
+
+        Xs_half, ys_half = collection.prepare_mple_data(W1,
+                                                        edges_indices_lims=(0, expected_mple_regressors.shape[0] // 2))
+
+        # Deleting the 1+idx_to_ignore because the first entry is the NumberOfEdgesDirected metric
+        expected_mple_regressors = np.delete(expected_mple_regressors, 1 + idx_to_ignore, axis=1)
+        self.assertTrue(np.all(expected_mple_regressors == Xs_full))
+        self.assertTrue(np.all(expected_mple_regressors[:expected_mple_regressors.shape[0] // 2] == Xs_half))
+        self.assertTrue(np.all(expected_flattened_mat == ys_full))
+        self.assertTrue(np.all(expected_flattened_mat[:expected_mple_regressors.shape[0] // 2] == ys_half))
 
     def test_get_parameter_names(self):
         n = 18
@@ -752,12 +801,11 @@ class TestMetricsCollection(unittest.TestCase):
         expected_names = ()
         for metric in metrics:
             metric_name = str(metric)
-            if metric_name  == "num_edges_directed":
-                expected_names += (metric_name, )
+            if metric_name == "num_edges_directed":
+                expected_names += (metric_name,)
             elif metric_name == "indegree" or metric_name == "outdegree":
-                for i in range(1,n):
-                    expected_names += (f"{metric_name}_{i+1}",)
-        
+                for i in range(1, n):
+                    expected_names += (f"{metric_name}_{i + 1}",)
 
         self.assertTrue(param_names == expected_names)
 
@@ -767,9 +815,10 @@ class TestMetricsCollection(unittest.TestCase):
 
         param_names = collection.get_parameter_names()
 
-        expected_names = ("num_edges_between_types_directed_A__A", "num_edges_between_types_directed_A__B", "num_edges_between_types_directed_B__A", "num_edges_between_types_directed_B__B")
+        expected_names = ("num_edges_between_types_directed_A__A", "num_edges_between_types_directed_A__B",
+                          "num_edges_between_types_directed_B__A", "num_edges_between_types_directed_B__B")
         self.assertTrue(param_names == expected_names)
-    
+
     def test_get_ignored_features(self):
         n = 18
         metrics = [NumberOfEdgesDirected(), InDegree(), OutDegree()]

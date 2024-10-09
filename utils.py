@@ -3,10 +3,25 @@ from collections import Counter
 from typing import Collection
 import numpy as np
 import networkx as nx
-from numba import njit
+from numba import njit, objmode
 from scipy.spatial.distance import mahalanobis
 import torch
 import random
+import time
+from pathlib import Path
+import os
+import pickle
+import shutil
+import subprocess
+import sys
+
+# Indices of columns in the output of bjobs -A
+JOB_ARRAY_ID_IDX = 0
+ARRAY_SPEC_IDX = 1
+DONE_IDX = 5
+EXIT_IDX = 7
+
+LSF_ID_LIST_LEN_LIMIT = 100
 
 
 def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
@@ -440,7 +455,7 @@ def get_edge_density_per_type_pairs(W: np.ndarray, types: Collection):
     return normalized_real_frequencies
 
 
-def calc_hotteling_statistic_for_sample(observed_features: np.ndarray, sample_features: np.ndarray,
+def calc_hotelling_statistic_for_sample(observed_features: np.ndarray, sample_features: np.ndarray,
                                         cov_mat_est_method: str):
     mean_features = np.mean(sample_features, axis=1)
     cov_mat_est = covariance_matrix_estimation(sample_features, mean_features,
@@ -456,6 +471,446 @@ def calc_hotteling_statistic_for_sample(observed_features: np.ndarray, sample_fe
 
 
 @njit
+def sigmoid(x: np.ndarray | float):
+    return 1 / (1 + np.exp(-x))
+
+
+@njit
+def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
+    """
+    Calculate the predictions of a Logistic Regression model with input Xs and parameters thetas
+    Parameters
+    ----------
+    Xs
+        The input to the model (the regressors), of shape (num_samples X num_features)
+    thetas
+        The parameters of the model, of shape (num_features X 1)
+    Returns
+        sigmoid(Xs @ thetas)
+    -------
+    """
+    return sigmoid(Xs @ thetas)
+
+
+@njit
+def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray):
+    """
+    Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
+    Parameters
+    ----------
+    predictions
+        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
+        labeled 1). Of shape (num_samples X 1)
+    ys
+        The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+    Returns
+    -------
+    The probability to observe the vector `ys` under the distribution induced by `predictions`.
+    """
+    # TODO: trim to (eps, 1-eps) before taking the log? (the model can't give probabilities of strictly 0 or 1 in
+    #  theory, but numerics...)?
+    individual_likelihoods = predictions.copy()
+    data_zero_indices = np.where(ys == 0)[0]
+    individual_likelihoods[data_zero_indices] = np.ones((data_zero_indices.size, 1)) - predictions[data_zero_indices]
+    return np.log(individual_likelihoods).sum()
+
+
+@njit
+def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np.ndarray, ys: np.ndarray):
+    """
+    Calculates the gradient of the log-likelihood of labeled data with regard to the predictions of a Logistic
+    Regression model.
+    Parameters
+    ----------
+    Xs
+        The input to the model (the regressors), of shape (num_samples X num_features)
+    predictions
+        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
+        labeled 1). Of shape (num_samples X 1)
+    ys
+         The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+    Returns
+    -------
+    The gradient (partial derivatives with relation to thetas - the model parameters) of the log-likelihood of the data
+    given the model. Of shape (num_features X 1)
+    """
+    return Xs.T @ (ys - predictions)
+
+
+@njit
+def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions: np.ndarray):
+    """
+    Calculates the hessian of the log-likelihood of labeled data with regard to the predictions of a Logistic
+    Regression model.
+    Parameters
+    ----------
+    Xs
+        The input to the model (the regressors), of shape (num_samples X num_features)
+    predictions
+        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
+        labeled 1). Of shape (num_samples X 1)
+    Returns
+    -------
+    The hessian (partial second derivatives with relation to thetas - the model parameters) of the log-likelihood of the
+    data given the model. Of shape (num_features X num_features)
+    """
+    return Xs.T @ (predictions * (1 - predictions) * Xs)
+
+
+def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas: np.ndarray, ys: np.ndarray):
+    """
+    Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
+    Parameters
+    ----------
+    Xs
+        The input to the model (the regressors), of shape (num_samples X num_features)
+    thetas
+        The parameters of the model, of shape (num_features X 1)
+    ys
+        The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+    Returns
+    -------
+    The probability to observe the vector `ys` under the distribution induced by the model.
+    """
+    return (-np.log(1 + np.exp(-Xs @ thetas)) + (ys - 1) * Xs @ thetas).sum()
+
+
+def local_mple_logistic_regression_optimization_step(Xs, ys, thetas):
+    prediction = calc_logistic_regression_predictions(Xs, thetas)
+    log_like = calc_logistic_regression_predictions_log_likelihood(prediction, ys)
+    grad = calc_logistic_regression_log_likelihood_grad(Xs, prediction, ys)
+    hessian = calc_logistic_regression_log_likelihood_hessian(Xs, prediction)
+    return prediction, log_like, grad, hessian
+
+
+def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
+                                          initial_thetas: np.ndarray | None = None,
+                                          lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-6,
+                                          is_distributed: bool = False):
+    """
+    Optimize the parameters of a Logistic Regression model by maximizing the likelihood using Newton-Raphson.
+    Parameters
+    ----------
+    metrics_collection
+        The `MetricsCollection` with relation to which the optimization is carried out.
+        # TODO: we can't add a type hint for this, due to circular import (utils can't import from metrics, as metrics
+            already imports from utils). This might suggest that this isn't the right place for this function.
+    observed_network
+        The observed network used as data for the optimization.
+    initial_thetas
+        The initial vector of parameters. If `None`, the initial state is randomly sampled from (0,1)
+    lr
+        The learning rate of the gradient-ascent, scales the step size of the optimization.
+    max_iter
+        The maximum number of optimization iterations to run.
+    stopping_thr
+        The fraction of change in the objective function (which is the log-likelihood) that is used as stopping
+        criterion (i.e., if the percent change of the objective is smaller than this threshold we stop)
+    is_distributed
+        Whether the calculations are carried locally or distributed over many compute nodes of an IBM LSF cluster.
+    Returns
+        Parameters of the trained model.
+    -------
+
+    """
+    num_features = metrics_collection.calc_num_of_features()
+    if initial_thetas is None:
+        thetas = np.random.rand(num_features, 1)
+    else:
+        thetas = initial_thetas.copy()
+    cur_log_like = -np.inf
+    prev_log_like = -np.inf
+    if not is_distributed:
+        Xs, ys = metrics_collection.prepare_mple_data(observed_network)
+    else:
+        out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
+        data_path = (out_dir_path / "data").resolve()
+        os.makedirs(data_path, exist_ok=True)
+
+        # Copy the `MetricsCollection` and the observed network to provide its path to children jobs, so they will be
+        # able to access it.
+        metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
+        with open(metric_collection_path, 'wb') as f:
+            pickle.dump(metrics_collection, f)
+        observed_net_path = os.path.join(data_path, 'observed_network.pkl')
+        with open(observed_net_path, 'wb') as f:
+            pickle.dump(observed_network, f)
+
+    idx = 0
+    with objmode(start='f8'):
+        start = time.perf_counter()
+    print("Logistic regression optimization started")
+    sys.stdout.flush()
+    for i in range(max_iter):
+        idx = i
+        if not is_distributed:
+            prediction, cur_log_like, grad, hessian = local_mple_logistic_regression_optimization_step(Xs, ys, thetas)
+        else:
+            prediction, cur_log_like, grad, hessian = distributed_logistic_regression_optimization_step(data_path,
+                                                                                                        thetas)
+        if (i - 1) % 1 == 0:
+            with objmode():
+                print("Iteration {0}, log-likelihood: {1}, time from start: {2} seconds".format(i, cur_log_like,
+                                                                                                time.perf_counter() - start))
+                sys.stdout.flush()
+        if i > 0:
+            log_like_frac_change = (cur_log_like - prev_log_like)
+            if cur_log_like != 0:
+                log_like_frac_change /= np.abs(prev_log_like)
+            if 0 <= log_like_frac_change < stopping_thr:
+                with objmode():
+                    print(
+                        "Optimization terminated successfully! (the log-likelihood doesn't increase)\nLast iteration: {0}, final log-likelihood: {1}, time from start: {2} seconds".format(
+                            i, cur_log_like, time.perf_counter() - start))
+                break
+
+        hessian_inv = np.linalg.pinv(hessian)
+        thetas += lr * hessian_inv @ grad
+        prev_log_like = cur_log_like
+
+    if idx == max_iter:
+        with objmode():
+            print(
+                "Optimization reached max iterations of {0}!\nlast log-likelihood: {1}, time from start: {2} seconds".format(
+                    max_iter, cur_log_like, time.perf_counter() - start))
+
+    if is_distributed:
+        shutil.rmtree(data_path)
+
+    return thetas.flatten(), prediction.flatten()
+
+
+def distributed_logistic_regression_optimization_step(data_path, thetas, num_edges_per_job=5000):
+    # Arrange files and send the children jobs
+    num_jobs, out_path, job_array_ids = _run_distributed_logistic_regression_children_jobs(data_path, thetas,
+                                                                                           num_edges_per_job)
+
+    # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
+    hessian_path = (out_path / "hessian").resolve()
+    os.makedirs(hessian_path, exist_ok=True)
+    wait_for_distributed_children_outputs(num_jobs, hessian_path, job_array_ids, "log_reg_step")
+    # Clean current scripts
+    shutil.rmtree((out_path / "scripts").resolve())
+
+    # Aggregate results
+    predictions = cat_children_jobs_outputs(num_jobs, (out_path / "prediction").resolve())
+    log_likelihood = _sum_children_jobs_outputs(num_jobs, (out_path / "log_like").resolve())
+    grad = _sum_children_jobs_outputs(num_jobs, (out_path / "grad").resolve())
+    hessian = _sum_children_jobs_outputs(num_jobs, (out_path / "hessian").resolve())
+
+    # Clean current outputs
+    shutil.rmtree((out_path / "prediction").resolve())
+    shutil.rmtree((out_path / "log_like").resolve())
+    shutil.rmtree((out_path / "grad").resolve())
+    shutil.rmtree((out_path / "hessian").resolve())
+    return predictions, log_likelihood, grad, hessian
+
+
+def _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas, num_edges_per_job):
+    # Construct a string with the current thetas, to pass using the command line to children jobs.
+    thetas_str = ''
+    for t in cur_thetas:
+        thetas_str += f'{t[0]} '
+    thetas_str = thetas_str[:-1]
+
+    cmd_line_for_bsub = (f'python ./logistic_regression_distributed_calcs.py '
+                         f'--out_dir_path {out_path} '
+                         f'--num_edges_per_job {num_edges_per_job} '
+                         f'--thetas {thetas_str}')
+    return cmd_line_for_bsub
+
+
+def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_template_file_name, num_jobs,
+                                  array_name):
+    # Create current bash scripts to send distributed calculations
+    scripts_path = (out_path / "scripts").resolve()
+    os.makedirs(scripts_path, exist_ok=True)
+    single_batch_bash_path = os.path.join(scripts_path, "single_batch.sh")
+    shutil.copyfile(os.path.join(os.getcwd(), "ClusterScripts", single_batch_template_file_name),
+                    single_batch_bash_path)
+    with open(single_batch_bash_path, 'a') as f:
+        f.write(cmd_line_single_batch)
+
+    multiple_batches_bash_path = os.path.join(scripts_path, "multiple_batches.sh")
+    with open(multiple_batches_bash_path, 'w') as f:
+        num_rows = 1
+        while (num_rows - 1) * 2000 < num_jobs:
+            f.write(f'bsub < $1 -J {array_name}'
+                    f'[{(num_rows - 1) * 2000 + 1}-{min(num_rows * 2000, num_jobs)}]\n')
+            num_rows += 1
+
+    # Make sure the logs directory for the children jobs exists and delete previous logs.
+    with open(single_batch_bash_path, 'r') as f:
+        single_batch_bash_txt = f.read()
+    logs_rel_dir_start = single_batch_bash_txt.find('-o') + 3
+    log_rel_dir_end = single_batch_bash_txt.find('outs.%J.%I.log')
+    logs_rel_dir = single_batch_bash_txt[logs_rel_dir_start:log_rel_dir_end]
+    logs_dir = os.path.join(os.getcwd(), logs_rel_dir)
+    os.makedirs(logs_dir, exist_ok=True)
+    for file_name in os.listdir(logs_dir):
+        os.unlink(os.path.join(logs_dir, file_name))
+
+    # Send the jobs
+    send_jobs_command = f'bash {multiple_batches_bash_path} {single_batch_bash_path}'
+    jobs_sending_res = subprocess.run(send_jobs_command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    job_array_ids = _parse_sent_job_array_ids(jobs_sending_res.stdout)
+
+    return job_array_ids
+
+
+def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, num_edges_per_job):
+    out_path = data_path.parent
+
+    cmd_line_single_batch = _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas,
+                                                                                  num_edges_per_job)
+
+    with open(os.path.join(data_path, "observed_network.pkl"), 'rb') as f:
+        observed_network = pickle.load(f)
+
+    num_nodes = observed_network.shape[0]
+    num_data_points = num_nodes * num_nodes - num_nodes
+    num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
+
+    job_array_ids = run_distributed_children_jobs(out_path, cmd_line_single_batch, "distributed_logistic_regression.sh",
+                                                  num_jobs, "log_reg_step")
+    return num_jobs, out_path, job_array_ids
+
+
+def wait_for_distributed_children_outputs(num_jobs: int, out_path: Path, job_array_ids: list, array_name: str):
+    is_all_done = False
+    time_of_last_job_status_check = time.time()
+    num_jobs_to_listen_to = num_jobs
+    are_there_missing_jobs = True
+    # Wait that all output files will be there (all jobs finished successfully).
+    while are_there_missing_jobs:
+        # Wait for the current running jobs to finish
+        while not is_all_done:
+            if time.time() - time_of_last_job_status_check > 60:
+                is_all_done = _check_if_all_done(job_array_ids, num_jobs_to_listen_to)
+                time_of_last_job_status_check = time.time()
+        print("is_all_done is True")
+        sys.stdout.flush()
+
+        # Reset the ids of arrays and number of jobs to listen to, as previous ones are done.
+        job_array_ids = []
+        num_jobs_to_listen_to = 0
+
+        # Identify missing output files
+        out_dir_files_list = os.listdir(out_path)
+        missing_jobs = [i for i in range(num_jobs) if f'{i}.pkl' not in out_dir_files_list]
+        are_there_missing_jobs = (len(missing_jobs) > 0)
+        if are_there_missing_jobs:
+            resent_job_array_ids = _resend_failed_jobs(out_path.parent, missing_jobs, array_name)
+            print(f"sent missing jobs: {missing_jobs}")
+            sys.stdout.flush()
+            job_array_ids += resent_job_array_ids
+            num_jobs_to_listen_to += len(missing_jobs)
+            is_all_done = False
+    print("All output files exist")
+    sys.stdout.flush()
+
+
+def _sum_children_jobs_outputs(num_jobs: int, out_path: Path):
+    measure = None
+    for j in range(num_jobs):
+        with open(os.path.join(out_path, f'{j}.pkl'), 'rb') as f:
+            content = pickle.load(f)
+            if measure is None:
+                measure = content
+            else:
+                measure += content
+    return measure
+
+
+def cat_children_jobs_outputs(num_jobs: int, out_path: Path, axis: int = 0):
+    measure = None
+    for j in range(num_jobs):
+        with open(os.path.join(out_path, f'{j}.pkl'), 'rb') as f:
+            content = pickle.load(f)
+            if measure is None:
+                measure = content
+            else:
+                measure = np.concatenate((measure, content), axis=axis)
+    return measure
+
+
+def _check_if_all_done(job_array_ids: list, num_sent_jobs: int) -> bool:
+    job_stats_res = subprocess.run(['bjobs', '-A'], stdout=subprocess.PIPE)
+    job_stats = job_stats_res.stdout
+
+    # split into different lines, without the header line (and the last empty line which is an artifact of the
+    # splitting).
+    lines = job_stats.split(b'\n')[1:-1]
+
+    # remove retry lines
+    indices_to_remove = []
+    for i in range(len(lines)):
+        if b'Batch system concurrent query limit exceeded' in lines[i]:
+            indices_to_remove.append(i)
+    for i in indices_to_remove:
+        lines.remove(lines[i])
+
+    # clean spaces
+    for i, line in enumerate(lines):
+        lines[i] = [c for c in line.split(b' ') if c != b'']
+
+    # Count finished jobs in relevant lines
+    num_finished_jobs = 0
+    counted_finish_per_line = {}
+    array_ids_from_output = [int(lines[i][JOB_ARRAY_ID_IDX]) for i in range(len(lines))]
+    for job_arr_id in job_array_ids:
+        try:
+            relevant_line_idx_in_output = array_ids_from_output.index(job_arr_id)
+        except ValueError:
+            # There is no line matching this array id in the output of bjobs -A, so it probably hasn't been sent
+            # yet.
+            print(f"job array {job_arr_id} is not found in bjobs -A output, found ids: {array_ids_from_output}."
+                  f"returning False from _check_if_all_done")
+            sys.stdout.flush()
+            return False
+        num_done = int(lines[relevant_line_idx_in_output][DONE_IDX])
+        num_exit = int(lines[relevant_line_idx_in_output][EXIT_IDX])
+        num_finished_jobs += num_done
+        num_finished_jobs += num_exit
+        counted_finish_per_line[job_arr_id] = {'done': num_done, 'exit': num_exit}
+
+    if num_finished_jobs < num_sent_jobs:
+        return False
+    elif num_finished_jobs == num_sent_jobs:
+        return True
+    else:
+        raise ValueError(f"The number of finished jobs {num_finished_jobs} is larger than the total number of "
+                         f"sent jobs {num_sent_jobs}, wrong counting!\ncounts per line: {counted_finish_per_line}")
+
+
+def _resend_failed_jobs(out_path: Path, job_indices: list, array_name: str) -> list:
+    num_failed_jobs = len(job_indices)
+    job_array_ids = []
+
+    for i in range(num_failed_jobs // LSF_ID_LIST_LEN_LIMIT + 1):
+        cur_job_indices_str = ''
+        for j_idx_in_list in range(i * LSF_ID_LIST_LEN_LIMIT, min((i + 1) * LSF_ID_LIST_LEN_LIMIT, num_failed_jobs)):
+            cur_job_indices_str += f'{job_indices[j_idx_in_list] + 1},'
+        cur_job_indices_str = cur_job_indices_str[:-1]
+        single_batch_bash_path = os.path.join(out_path, "scripts", "single_batch.sh")
+        resend_job_command = f'bsub -J {array_name}[{cur_job_indices_str}]'
+        jobs_sending_res = subprocess.run(resend_job_command.split(), stdin=open(single_batch_bash_path, 'r'),
+                                          stdout=subprocess.PIPE)
+        job_array_ids += _parse_sent_job_array_ids(jobs_sending_res.stdout)
+
+    return job_array_ids
+
+
+def _parse_sent_job_array_ids(process_stdout) -> list:
+    split_array_lines = process_stdout.split(b'\n')[:-1]
+    job_array_ids = []
+    for line in split_array_lines:
+        array_id = int(line.split(b'<')[1].split(b'>')[0])
+        job_array_ids.append(array_id)
+    return job_array_ids
+
+
 def generate_binomial_tensor(net_size, num_samples, p=0.5):
     """
     Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable

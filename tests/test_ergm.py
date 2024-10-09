@@ -190,7 +190,7 @@ class TestERGM(unittest.TestCase):
 
         # TODO - what criteria to use for testing convergence? From manual tests, it doesn't seem to perfectly converge on the true thetas...
         # Nevertheless, even without an assert, this will catch errors - fit won't work if something breaks.
-    
+
     def test_MPLE(self):
         n = 4
 
@@ -201,21 +201,15 @@ class TestERGM(unittest.TestCase):
             [1, 0, 1, 0]
         ])
 
-
         types = ["A", "A", "B", "B"]
         metrics = [NumberOfEdgesTypesDirected(types)]
         model = ERGM(n, metrics, is_directed=True)
         model.fit(M1)
 
-        inferred_probas_per_type_pairs = list(np.exp(model._thetas) / (1+np.exp(model._thetas)))
+        inferred_probas_per_type_pairs = list(np.exp(model._thetas) / (1 + np.exp(model._thetas)))
 
         real_densities_per_type = get_edge_density_per_type_pairs(M1, types)
         real_densities_per_type = list(real_densities_per_type.values())
 
         for inferred_proba, real_density in zip(inferred_probas_per_type_pairs, real_densities_per_type):
             self.assertAlmostEqual(inferred_proba, real_density, places=4)
-
-        
-        
-
-
