@@ -17,11 +17,11 @@ class ERGM():
     def __init__(self,
                  n_nodes,
                  metrics_collection: Collection[Metric],
-                 is_directed=False,
+                 is_directed,
                  initial_thetas=None,
                  initial_normalization_factor=None,
                  seed_MCMC_proba=0.25,
-                 sample_size=100,
+                 sample_size=1000,
                  n_mcmc_steps=500,
                  verbose=True,
                  use_sparse_matrix=False,
@@ -33,29 +33,37 @@ class ERGM():
         
         Parameters
         ----------
-        n_nodes : int
-            The number of nodes in the network.
-        
-        metrics_collection : list
+        n_nodes : int 
+            Number of nodes in the network.
+
+        metrics_collection : Collectionetric] 
             A list of Metric objects for calculating statistics of a network.
+
+        is_directed : bool 
+            Whether the graph is directed or not.
+
+        initial_thetas : npdarray 
+            Optional. The initial values of the coefficients of the ERGM. If not provided, they are randomly initialized.
+
+        initial_normalization_factor : float 
+            Optional. The initial value of the normalization factor. If not provided, it is randomly initialized.
+
+        seed_MCMC_proba : float 
+            Optional. The probability of a connection in the seed network for MCMC sampling, in case no seed network is provided. *Defaults to 0.25*
+
+        sample_size : int 
+            Optional. The number of networks to sample via MCMC. If number of samples is odd, it is increased by 1. This is because downstream algorithms assume the sample size is even (e.g. the Covariance matrix estimation). *Defaults to 1000*
+
+        use_sparse_matrix : bool
+            Optional. Whether to use sparse matrices for the adjacency matrix. 
+            Sparse matrices are implemented via PyTorch's Sparse Tensor's, which are still in beta.  *Defaults to False*
         
-        is_directed : bool
-            Whether the network is directed or not.
+        fix_collinearity : bool
+            Optional. Whether to fix collinearity in the metrics. *Defaults to True*
+
+        collinearity_fixer_sample_size : int
+            Optional. The number of networks to sample for fixing collinearity. *Defaults to 1000*
         
-        initial_thetas : np.ndarray
-            The initial values of the coefficients of the ERGM. If not provided, they are randomly initialized.
-        
-        initial_normalization_factor : float
-            The initial value of the normalization factor. If not provided, it is randomly initialized.
-        
-        seed_MCMC_proba : float
-            The probability of a connection in the seed network for MCMC sampling, in case no seed network is provided.
-        
-        sample_size : int
-            The number of networks to sample for approximating the normalization factor.
-        
-        n_mcmc_steps : int
-            The number of steps to run the MCMC sampler when sampling a network
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
@@ -82,13 +90,15 @@ class ERGM():
         if sample_size % 2 != 0:
             sample_size += 1
         self.sample_size = sample_size
-        self.n_mcmc_steps = n_mcmc_steps
         self.verbose = verbose
         self.optimization_options = optimization_options
 
         self._exact_average_mat = None
 
     def print_model_parameters(self):
+        """
+        Prints the parameters of the ERGM model.
+        """
         print(f"Number of nodes: {self._n_nodes}")
         print(f"Thetas: {self._thetas}")
         print(f"Normalization factor approx: {self._normalization_factor}")
@@ -208,7 +218,7 @@ class ERGM():
         return sample
 
     def fit(self, observed_network,
-            lr=0.001,
+            lr=0.1,
             opt_steps=1000,
             steps_for_decay=100,
             lr_decay_pct=0.01,
@@ -217,7 +227,7 @@ class ERGM():
             max_sliding_window_size=100,
             max_nets_for_sample=1000,
             sample_pct_growth=0.02,
-            optimization_method="gradient_descent",
+            optimization_method="newton_raphson",
             convergence_criterion="hotelling",
             cov_matrix_estimation_method="batch",
             cov_matrix_num_batches=25,
@@ -227,41 +237,85 @@ class ERGM():
             mcmc_burn_in=1000,
             mcmc_steps_per_sample=10):
         """
-        Fit an ERGM model to a given network.
+        Fit an ERGM model to a given network with one of the two fitting methods - MPLE or MCMLE.
 
         Parameters
         ----------
         observed_network : np.ndarray
-            The adjacency matrix of the observed network.
+            The adjacency matrix of the observed network. #TODO - how do we support nx.Graph?
 
         lr : float
-            The learning rate for the optimization.
+            Optional. The learning rate for the optimization. *Defaults to 0.1*
 
         opt_steps : int
-            The number of optimization steps to run.
+            Optional. The number of optimization steps to run. *Defaults to 1000*
 
         steps_for_decay : int
-            The number of steps after which to decay the optimization params. (## TODO - Pick a different step value for different params? Right now all params are decayed with the same interval)
+            Optional. The number of steps after which to decay the optimization params. 
+            *Defaults to 100* # TODO - redundant parameter?
 
         lr_decay_pct : float
-            The decay factor for the learning rate
+            Optional. The decay factor for the learning rate. *Defaults to 0.01*
 
         l2_grad_thresh : float
-            The threshold for the L2 norm of the gradient to stop the optimization.
+            Optional. The threshold for the L2 norm of the gradient to stop the optimization. 
+            Relevant only for convergence criterion "zero_grad_norm". *Defaults to 0.001*
 
         sliding_grad_window_k : int
-            The size of the sliding window for the gradient, for which we use to calculate the mean gradient norm. This value is then tested against l2_grad_thresh to decide whether optimization halts.
+            Optional. The size of the sliding window for the gradient, for which we use to calculate the mean gradient norm. 
+            This value is then tested against l2_grad_thresh to decide whether optimization halts.
+            Relevant only for convergence criterion "zero_grad_norm". *Defaults to 10*
 
         max_sliding_window_size : int
-            The maximum size of the sliding window for the gradient.
+            Optional. The maximum size of the sliding window for the gradient. 
+            Relevant only for convergence criterion "zero_grad_norm". *Defaults to 100*
 
         max_nets_for_sample : int
-            The maximum number of networks to sample when approximating the expected network statistics (i.e. E[g(y)])
-
+            Optional. The maximum number of networks to sample with MCMC. *Defaults to 1000*
+            #TODO - Do we still need this? Seems like increasing the sample size isn't necessary (we'll gonna pick large sample sizes anyway)
+            
         sample_pct_growth : float
-            The percentage growth of the number of networks to sample, which we want to increase over time
+            Optional. The percentage growth of the number of networks to sample, which we want to increase over time.
+            *Defaults to 0.02*. #TODO - Same as `max_nets_for_sample`. Do we still need this?
 
+        optimization_method : str
+            Optional. The optimization method to use. Can be either "newton_raphson" or "gradient_descent".
+            *Defaults to "newton_raphson"*.
 
+        convergence_criterion : str
+            Optional. The criterion for convergence. Can be either "hotelling" or "zero_grad_norm".
+            *Defaults to "zero_grad_norm"*.
+            # TODO - Revisit this when we fix convergence criterion.
+            
+        cov_matrix_estimation_method : str
+            Optional. The method to estimate the covariance matrix. 
+            Supported methods - `naive`, `batch`, `multivariate_initial_sequence`. *Defaults to "batch"*.
+        
+        cov_matrix_num_batches : int
+            Optional. The number of batches to use for estimating the covariance matrix.
+            Relevant only for `cov_matrix_estimation_method="batch"`. *Defaults to 25*.
+
+        hotelling_confidence : float
+            Optional. The confidence level for the Hotelling's T-squared test. *Defaults to 0.99*.
+        
+        theta_init_method : str
+            Optional. The method to initialize the theta values. Can be either "uniform" or "mple".
+            *Defaults to "mple"*.
+
+        no_mple : bool
+            Optional. Whether to skip the MPLE step and go directly to MCMLE. *Defaults to False*.
+        
+        mcmc_burn_in : int
+            Optional. The number of burn-in steps for the MCMC sampler. *Defaults to 1000*.
+        
+        mcmc_steps_per_sample : int
+            Optional. The number of steps to run the MCMC sampler for each sample. *Defaults to 10*.
+            
+        
+        Returns 
+        -------
+        (grads, hotelling_statistics) : (np.ndarray, list)
+        # TODO - what do we want to return?
         """
 
         if not no_mple and self._do_MPLE(theta_init_method):
@@ -276,6 +330,9 @@ class ERGM():
 
         else:
             raise ValueError(f"Theta initialization method {theta_init_method} not supported")
+    
+        if optimization_method not in ["newton_raphson", "gradient_descent"]:
+            raise ValueError(f"Optimization method {optimization_method} not supported.")
 
             # As in the constructor, the sample size must be even.
         if max_nets_for_sample % 2 != 0:
@@ -371,7 +428,6 @@ class ERGM():
                         f"hotelling - {hotelling_as_f_statistic}, hotelling_critical_value={hotelling_critical_value}")
                     grads = grads[:i]
                     break
-
 
             elif convergence_criterion == "zero_grad_norm":
                 if np.linalg.norm(sliding_window_grads) <= l2_grad_thresh:
