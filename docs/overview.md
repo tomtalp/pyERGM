@@ -19,7 +19,7 @@ which is optimized using numerical optimization techniques (such as Gradient Des
 $$\theta^* = \arg \max \ \ell(\theta | y_{\text{obs}}) = \arg \min \ - \ell(\theta | y_{\text{obs}})$$
 
 ## How to sample from an ERGM?
-It is computationally infeasible to directly draw networks from the distribution - Calculating the normalization factor $Z=\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z))$ requires an iteration over the entire space of networks, which is exponential. Instead, we can use Markov Chain Monte Carlo (**MCMC**) methods to sample from the distribution. The Metropolis-Hastings algorithm is a popular choice for sampling from ERGMs, and is the default sampling method in pyERGM.
+It is computationally infeasible to directly draw networks from the distribution - Calculating the normalization factor $Z=\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z))$ requires an iteration over the entire space of networks, which is exponential in size. Instead, we can use Markov Chain Monte Carlo (**MCMC**) methods to sample from the distribution. The Metropolis-Hastings algorithm is a popular choice for sampling from ERGMs, and is the default sampling method in pyERGM.
 
 In it's simplest form the Metropolis-Hastings algorithm iteratively collects samples from the distribution by following these steps -
 
