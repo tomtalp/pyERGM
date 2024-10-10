@@ -300,6 +300,7 @@ class ERGM():
         
         theta_init_method : str
             Optional. The method to initialize the theta values. Can be either "uniform" or "mple".
+            The MPLE method can be used even for dyadic dependent models, since it serves as a good starting point for the MCMLE.
             *Defaults to "mple"*.
 
         no_mple : bool

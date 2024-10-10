@@ -26,26 +26,29 @@ class pyERGM.ERGM(n_nodes, metrics_collection, is_directed, **kwargs)
 
 **Parameters**:
 
-* **n_nodes** (*int*) - Number of nodes in the network.
-* **metrics_collection** (*Collection[Metric]*) - A list of Metric objects for calculating statistics of a network.
+* **n_nodes** (*int*) - Number of nodes in the graph.
+* **metrics_collection** (*Collection[Metric]*) - A list of Metric objects for calculating statistics of a graph.
 * **is_directed** (*bool*) - Whether the graph is directed or not.
 * **initial_thetas** (*np.ndarray*) - Optional. The initial values of the coefficients of the ERGM. If not provided, they are randomly initialized.
 * **initial_normalization_factor** (*float*) - Optional. The initial value of the normalization factor. If not provided, it is randomly initialized.
-* **seed_MCMC_proba** (*float*) - Optional. The probability of a connection in the seed network for MCMC sampling, in case no seed network is provided. *Defaults to 0.25*
-* **sample_size** (*int*) - Optional. The number of networks to sample via MCMC. If number of samples is odd, it is increased by 1. This is because downstream algorithms assume the sample size is even (e.g. the Covariance matrix estimation). *Defaults to 1000*
+* **seed_MCMC_proba** (*float*) - Optional. The probability of a connection in the seed graph for MCMC sampling, in case no seed graph is provided. *Defaults to 0.25*
+* **sample_size** (*int*) - Optional. The number of graphs to sample via MCMC. If number of samples is odd, it is increased by 1. This is because downstream algorithms assume the sample size is even (e.g. the Covariance matrix estimation). *Defaults to 1000*
 * **use_sparse_matrix** (*bool*) - Optional. Whether to use sparse matrices for the adjacency matrix.  Sparse matrices are implemented via PyTorch's Sparse Tensor's, which are still in beta.  *Defaults to False*
 * **fix_collinearity** (*bool*) - Optional. Whether to fix collinearity in the metrics. *Defaults to True*
-* **collinearity_fixer_sample_size** (*int*) - Optional. The number of networks to sample for fixing collinearity. *Defaults to 1000*
+* **collinearity_fixer_sample_size** (*int*) - Optional. The number of graphs to sample for fixing collinearity. *Defaults to 1000*
 
 ### fit
 ```python
-pyERGM.ERGM.fit(observed_network, **kwargs)
+pyERGM.ERGM.fit(observed_graph, **kwargs)
 ```
-Fit an ERGM model to a given network with one of the two fitting methods - MPLE or MCMLE.
+Fit an ERGM model to a given graph with one of the two fitting methods - MPLE or MCMLE.
+
+With the exception of dyadic dependent models, all models are fit using the MCMLE method. Dyadic dependent models are fit using the MPLE method, which simply amounts to running a logistic regression.
+
 
 **Parameters**:
 
-* **observed_network** (*np.ndarray*) - The adjacency matrix of the observed network. #TODO - how do we support nx.Graph?
+* **observed_graph** (*np.ndarray*) - The adjacency matrix of the observed graph. #TODO - how do we support nx.Graph?
 * **lr** (*float*) - Optional. The learning rate for the optimization. *Defaults to 0.1*
 * **opt_steps** (*int*) - Optional. The number of optimization steps to run. *Defaults to 1000*
 * **steps_for_decay** (*int*) - Optional. The number of steps after which to decay the optimization params. *Defaults to 100* # TODO - redundant parameter?
@@ -53,14 +56,14 @@ Fit an ERGM model to a given network with one of the two fitting methods - MPLE 
 * **l2_grad_thresh** (*float*) - Optional. The threshold for the L2 norm of the gradient to stop the optimization. Relevant only for convergence criterion `zero_grad_norm`. *Defaults to 0.001*
 * **sliding_grad_window_k** (*int*) - Optional. The size of the sliding window for the gradient, for which we use to calculate the mean gradient norm. This value is then tested against l2_grad_thresh to decide whether optimization halts.Relevant only for convergence criterion `zero_grad_norm`. *Defaults to 10*
 * **max_sliding_window_size** (*int*) - Optional. The maximum size of the sliding window for the gradient. Relevant only for convergence criterion `zero_grad_norm`. *Defaults to 100*
-* **max_nets_for_sample** (*int*) - Optional. The maximum number of networks to sample with MCMC. *Defaults to 1000* #TODO - Do we still need this? Seems like increasing the sample size isn't necessary (we'll gonna pick large sample sizes anyway)    
-* **sample_pct_growth** (*float*) - Optional. The percentage growth of the number of networks to sample, which we want to increase over time. *Defaults to 0.02*. #TODO - Same as `max_nets_for_sample`. Do we still need this?
+* **max_nets_for_sample** (*int*) - Optional. The maximum number of graphs to sample with MCMC. *Defaults to 1000* #TODO - Do we still need this? Seems like increasing the sample size isn't necessary (we'll gonna pick large sample sizes anyway)    
+* **sample_pct_growth** (*float*) - Optional. The percentage growth of the number of graphs to sample, which we want to increase over time. *Defaults to 0.02*. #TODO - Same as `max_nets_for_sample`. Do we still need this?
 * **optimization_method** (*str*) - Optional. The optimization method to use. Can be either "newton_raphson" or "gradient_descent". *Defaults to "newton_raphson"*.
 * **convergence_criterion** (*str*) - Optional. The criterion for convergence. Can be either "hotelling" or "zero_grad_norm". *Defaults to "zero_grad_norm"*. # TODO - Revisit this when we fix convergence criterion.
 * **cov_matrix_estimation_method** (*str*) - Optional. The method to estimate the covariance matrix. Supported methods - `naive`, `batch`, `multivariate_initial_sequence`. *Defaults to "batch"*.
 * **cov_matrix_num_batches** (*int*) - Optional. The number of batches to use for estimating the covariance matrix.Relevant only for `cov_matrix_estimation_method="batch"`. *Defaults to 25*.
 * **hotelling_confidence** (*float*) - Optional. The confidence level for the Hotelling's T-squared test. *Defaults to 0.99*.
-* **theta_init_method** (*str*) - Optional. The method to initialize the theta values. Can be either "uniform" or "mple". *Defaults to "mple"*.
+* **theta_init_method** (*str*) - Optional. The method to initialize the theta values. Can be either "uniform" or "mple". The MPLE method can be used even for dyadic dependent models, since it serves as a good starting point for the MCMLE. *Defaults to "mple"*.
 * **no_mple** (*bool*) - Optional. Whether to skip the MPLE step and go directly to MCMLE. *Defaults to False*.
 * **mcmc_burn_in** (*int*) - Optional. The number of burn-in steps for the MCMC sampler. *Defaults to 1000*.
 * **mcmc_steps_per_sample** (*int*) - Optional. The number of steps to run the MCMC sampler for each sample. *Defaults to 10*.

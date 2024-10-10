@@ -12,8 +12,9 @@ nav:
   - Fitting a model: fitting.md
   - Evaluating model performance: evaluating.md
   - Metrics:
-    - List of metrics: metrics.md
+    - Introduction to graph metrics: metrics.md
     - Creating custom metrics: custom_metrics.md
+    - List of metrics: metrics_reference.md
 
 markdown_extensions:
   - pymdownx.superfences 
