@@ -1,15 +1,8 @@
 import numpy as np
-import networkx as nx
 from scipy.optimize import minimize, OptimizeResult
-from scipy.spatial.distance import mahalanobis
 from scipy.stats import f
-from sklearn.linear_model import LogisticRegression
-import sys
-import time
-from typing import Collection
 import sampling
 
-from utils import *
 from metrics import *
 
 
@@ -27,6 +20,7 @@ class ERGM():
                  use_sparse_matrix=False,
                  fix_collinearity=True,
                  collinearity_fixer_sample_size=1000,
+                 is_distributed_optimization=False,
                  optimization_options={}):
         """
         An ERGM model object. 
@@ -67,10 +61,13 @@ class ERGM():
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
+        self._is_distributed_optimization = is_distributed_optimization
         self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
                                                      use_sparse_matrix=use_sparse_matrix,
                                                      fix_collinearity=fix_collinearity,
-                                                     collinearity_fixer_sample_size=collinearity_fixer_sample_size)
+                                                     collinearity_fixer_sample_size=collinearity_fixer_sample_size,
+                                                     is_collinearity_distributed=self._is_distributed_optimization)
+
         if initial_thetas is not None:
             self._thetas = initial_thetas
         else:
@@ -162,7 +159,7 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_network):
+    def _mple_fit(self, observed_network, lr=1, stopping_thr: float = 1e-6):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -182,19 +179,13 @@ class ERGM():
         thetas: np.ndarray
             The estimated coefficients of the ERGM.
         """
-
-        Xs = self._metrics_collection.calculate_change_scores_all_edges(np.zeros((observed_network.shape[0], observed_network.shape[0])))
-        ys = observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()
-
-        print("Done collecting data, now performing logistic regression")
-        t1 = time.time()
-        clf = LogisticRegression(fit_intercept=False, penalty=None, max_iter=5000).fit(Xs, ys)
-        t2 = time.time()
-        print(f"Logistic regression took {t2 - t1} seconds")
+        trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection, observed_network,
+                                                                           is_distributed=self._is_distributed_optimization,
+                                                                           lr=lr,
+                                                                           stopping_thr=stopping_thr)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
-        self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = clf.predict_proba(Xs)[:, 1]
-        return clf.coef_[0]
-
+        self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
+        return trained_thetas
 
     def _do_MPLE(self, theta_init_method):
         if not self._metrics_collection._has_dyadic_dependent_metrics or theta_init_method == "mple":
@@ -493,11 +484,11 @@ class ERGM():
         network = sampler.sample(seed_network, num_of_nets=1)
 
         return network
-    
+
     def get_model_parameters(self):
         parameter_names = self._metrics_collection.get_parameter_names()
         return dict(zip(parameter_names, self._thetas))
-    
+
     def get_ignored_features(self):
         return self._metrics_collection.get_ignored_features()
 
