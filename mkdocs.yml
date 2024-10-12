@@ -1,5 +1,5 @@
 site_name: pyERGM
-site_url: https://tomtalp.github.io/pyERGM/docs/
+site_url: https://tomtalp.github.io/pyERGM/
 theme:
   name: material
   palette:
