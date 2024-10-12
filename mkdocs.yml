@@ -28,4 +28,4 @@ extra_javascript:
 
 repo_name: 'pyERGM'
 repo_url: 'https://github.com/tomtalp/pyERGM'
-site_url: https://squidfunk.github.io/mkdocs-material/ 
+site_url: https://tomtalp.github.io/pyERGM/
