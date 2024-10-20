@@ -2,7 +2,7 @@
 
 An exponential random graphs model (**ERGM**) is a statistical model that describes a distribution of random graphs. This package provides a simple and easy way to fit and sample from ERGMs.
 
-An ERGM defines random variable $\mathbf{Y}$, which is simply a random graph on $n$ nodes. The probability of observing a graph $y\in\mathcal{Y}$ is given by -
+An ERGM defines a random variable $\mathbf{Y}$, which is simply a random graph on $n$ nodes. The probability of observing a graph $y\in\mathcal{Y}$ is given by -
 
 $$\Pr(\mathbf{Y}=y | \theta) = \frac{\exp(\theta^Tg(y))}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z))}$$
 

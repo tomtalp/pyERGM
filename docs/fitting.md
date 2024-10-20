@@ -67,6 +67,10 @@ With the exception of dyadic dependent models, all models are fit using the MCML
 * **no_mple** (*bool*) - Optional. Whether to skip the MPLE step and go directly to MCMLE. *Defaults to False*.
 * **mcmc_burn_in** (*int*) - Optional. The number of burn-in steps for the MCMC sampler. *Defaults to 1000*.
 * **mcmc_steps_per_sample** (*int*) - Optional. The number of steps to run the MCMC sampler for each sample. *Defaults to 10*.
+* **mple_lr** (*float*) - Optional. The learning rate for the logistic regression model in the MPLE step. *Defaults to 0.001*.
+* **mple_stopping_thr** (*float*) - Optional. The stopping threshold for the logistic regression model in the MPLE step. *Defaults to 1e-6*.
+* **mple_max_iter** (*int*) - Optional. The maximum number of iterations for the logistic regression model in the MPLE step. *Defaults to 1000*.
+
 
 **Returns**:
 

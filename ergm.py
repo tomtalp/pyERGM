@@ -159,7 +159,7 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_network, lr=1, stopping_thr: float = 1e-6):
+    def _mple_fit(self, observed_network, lr=0.001, stopping_thr: float = 1e-6, logistic_reg_max_iter=1000):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -179,10 +179,12 @@ class ERGM():
         thetas: np.ndarray
             The estimated coefficients of the ERGM.
         """
+        print(f"MPLE with lr {lr}")
         trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection, observed_network,
                                                                            is_distributed=self._is_distributed_optimization,
                                                                            lr=lr,
-                                                                           stopping_thr=stopping_thr)
+                                                                           stopping_thr=stopping_thr,
+                                                                           max_iter=logistic_reg_max_iter)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
         self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
         return trained_thetas
@@ -226,7 +228,11 @@ class ERGM():
             theta_init_method="mple",
             no_mple=False,
             mcmc_burn_in=1000,
-            mcmc_steps_per_sample=10):
+            mcmc_steps_per_sample=10,
+            mple_lr=0.001,
+            mple_stopping_thr=1e-6,
+            mple_max_iter=1000,
+            ):
         """
         Fit an ERGM model to a given network with one of the two fitting methods - MPLE or MCMLE.
 
@@ -302,16 +308,24 @@ class ERGM():
         
         mcmc_steps_per_sample : int
             Optional. The number of steps to run the MCMC sampler for each sample. *Defaults to 10*.
-            
+        
+        mple_lr : float
+            Optional. The learning rate for the logistic regression model in the MPLE step. *Defaults to 0.001*.
+        
+        mple_stopping_thr : float
+            Optional. The stopping threshold for the logistic regression model in the MPLE step. *Defaults to 1e-6*.
+        
+        mple_max_iter : int
+            Optional. The maximum number of iterations for the logistic regression model in the MPLE step. *Defaults to 1000*.
         
         Returns 
         -------
         (grads, hotelling_statistics) : (np.ndarray, list)
         # TODO - what do we want to return?
         """
-
         if not no_mple and self._do_MPLE(theta_init_method):
-            self._thetas = self._mple_fit(observed_network)
+            self._thetas = self._mple_fit(observed_network, lr=mple_lr, stopping_thr=mple_stopping_thr,
+                                          logistic_reg_max_iter=mple_max_iter)
 
             if not self._metrics_collection._has_dyadic_dependent_metrics:
                 print(f"Model is dyadic independent - using only MPLE instead of MCMLE")
