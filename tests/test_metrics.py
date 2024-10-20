@@ -91,6 +91,49 @@ class TestNumberOfTriangles(unittest.TestCase):
 
         self.assertEqual(result, expected_result)
 
+        random_graph = nx.fast_gnp_random_graph(6, 0.5, directed=False, seed=42)
+        triangles = nx.triangles(random_graph)
+        total_num_triangles = sum(triangles.values()) / 3
+
+        G_as_W = nx.to_numpy_array(random_graph)
+        calculated_number_of_triangles = metric.calculate(G_as_W)
+
+        self.assertEqual(total_num_triangles, calculated_number_of_triangles)
+    
+    def test_calc_change_score(self):
+        metric = NumberOfTriangles()
+
+        W = np.array([
+            [0, 1, 1],
+            [1, 0, 1],
+            [1, 1, 0]
+        ])
+
+        idx_to_toggle = (0, 1)
+        result = metric.calc_change_score(W, idx_to_toggle)
+        self.assertEqual(result, -1)
+
+        W = np.array([
+            [0, 0, 0, 1],
+            [0, 0, 1, 1],
+            [0, 1, 0, 1],
+            [1, 1, 1, 0]
+        ])
+
+        result = metric.calc_change_score(W, idx_to_toggle)
+        self.assertEqual(result, 1)
+
+        W = np.array([
+            [0, 1, 0, 1],
+            [1, 0, 1, 0],
+            [0, 1, 0, 1],
+            [1, 0, 1, 0]
+        ])
+
+        idx_to_toggle = (1, 3)
+        result = metric.calc_change_score(W, idx_to_toggle)
+        self.assertEqual(result, 2)
+
 
 class TestReciprocity(unittest.TestCase):
     def test_calculate(self):

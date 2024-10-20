@@ -213,3 +213,26 @@ class TestERGM(unittest.TestCase):
 
         for inferred_proba, real_density in zip(inferred_probas_per_type_pairs, real_densities_per_type):
             self.assertAlmostEqual(inferred_proba, real_density, places=4)
+
+    def test_MPLE_convergence_with_auto_LR_decay(self):
+        n = 4
+
+        M1 = np.array([
+            [0, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 0, 0, 0],
+            [1, 0, 1, 0]
+        ])
+
+        types = ["A", "A", "B", "B"]
+        metrics = [NumberOfEdgesTypesDirected(types)]
+        model = ERGM(n, metrics, is_directed=True)
+        model.fit(M1, mple_max_iter=1000, mple_lr=1000, mple_stopping_thr=1e-10)
+
+        inferred_probas_per_type_pairs = list(np.exp(model._thetas) / (1 + np.exp(model._thetas)))
+
+        real_densities_per_type = get_edge_density_per_type_pairs(M1, types)
+        real_densities_per_type = list(real_densities_per_type.values())
+
+        for inferred_proba, real_density in zip(inferred_probas_per_type_pairs, real_densities_per_type):
+            self.assertAlmostEqual(inferred_proba, real_density, places=4)
