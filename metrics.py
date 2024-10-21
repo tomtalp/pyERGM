@@ -220,6 +220,9 @@ class NumberOfTriangles(Metric):
         sign = -1 if current_network[indices[0], indices[1]] else 1
         return sign * np.dot(current_network[indices[0]], current_network[:, indices[1]])
 
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return np.einsum('ijk,jlk,lik->k', networks_sample, networks_sample, networks_sample) // (3 * 2)
+
 
 class BaseDegreeVector(Metric):
     """

@@ -99,7 +99,7 @@ class TestNumberOfTriangles(unittest.TestCase):
         calculated_number_of_triangles = metric.calculate(G_as_W)
 
         self.assertEqual(total_num_triangles, calculated_number_of_triangles)
-    
+
     def test_calc_change_score(self):
         metric = NumberOfTriangles()
 
@@ -133,6 +133,20 @@ class TestNumberOfTriangles(unittest.TestCase):
         idx_to_toggle = (1, 3)
         result = metric.calc_change_score(W, idx_to_toggle)
         self.assertEqual(result, 2)
+
+    def test_calculate_for_sample(self):
+        np.random.seed(678)
+        sample_size = 50
+        n = 10
+        networks_sample = np.zeros((n, n, sample_size))
+        expected_triangles = np.zeros(sample_size)
+        for i in range(sample_size):
+            cur_graph = nx.fast_gnp_random_graph(n, 0.5, seed=np.random)
+            expected_triangles[i] = sum(nx.triangles(cur_graph).values()) / 3
+            networks_sample[:, :, i] = nx.to_numpy_array(cur_graph)
+
+        res = NumberOfTriangles().calculate_for_sample(networks_sample)
+        self.assertTrue(np.all(res == expected_triangles))
 
 
 class TestReciprocity(unittest.TestCase):
