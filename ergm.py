@@ -186,7 +186,15 @@ class ERGM():
                                                                            stopping_thr=stopping_thr,
                                                                            max_iter=logistic_reg_max_iter)
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
-        self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
+
+        if self._is_directed:
+            self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
+        else:
+            upper_triangle_indices = np.triu_indices(self._n_nodes, k=1)
+            self._exact_average_mat[upper_triangle_indices] = prediction
+            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
+            self._exact_average_mat[lower_triangle_indices_aligned] = prediction
+
         return trained_thetas
 
     def _do_MPLE(self, theta_init_method):
@@ -323,7 +331,10 @@ class ERGM():
         (grads, hotelling_statistics) : (np.ndarray, list)
         # TODO - what do we want to return?
         """
-        if not no_mple and self._do_MPLE(theta_init_method):
+        if theta_init_method == "use_existing":
+            print(f"Using existing thetas")
+            pass
+        elif not no_mple and self._do_MPLE(theta_init_method):
             self._thetas = self._mple_fit(observed_network, lr=mple_lr, stopping_thr=mple_stopping_thr,
                                           logistic_reg_max_iter=mple_max_iter)
 
@@ -333,7 +344,6 @@ class ERGM():
 
         elif theta_init_method == "uniform":
             self._thetas = self._get_random_thetas(sampling_method="uniform")
-
         else:
             raise ValueError(f"Theta initialization method {theta_init_method} not supported")
     
@@ -374,10 +384,12 @@ class ERGM():
             if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):
                 # This is for allowing numba to compile and pickle the large function
                 sys.setrecursionlimit(2000)
+                print(f"Started estimating cov matrix ")
                 estimated_cov_matrix = covariance_matrix_estimation(features_of_net_samples,
                                                                     mean_features,
                                                                     method=cov_matrix_estimation_method,
                                                                     num_batches=cov_matrix_num_batches)
+                print(f"Done estimating cov matrix ")
                 inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
             if optimization_method == "newton_raphson":
                 self._thetas = self._thetas - lr * inv_estimated_cov_matrix @ grad
@@ -396,6 +408,8 @@ class ERGM():
                     f"Step {i + 1} - lr: {lr:.7f}, time from start: {delta_t:.2f}, window_grad: {sliding_window_grads:.2f}")
 
                 lr *= (1 - lr_decay_pct)
+
+                print(self._thetas)
 
                 if self.sample_size < max_nets_for_sample:
                     self.sample_size *= (1 + sample_pct_growth)

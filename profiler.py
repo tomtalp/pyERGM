@@ -79,5 +79,20 @@ elif args.type == "big_network":
                             hotelling_confidence=hotelling_conf,
                             mcmc_burn_in=1000, mcmc_steps_per_sample=1000
                             )
+elif args.type == "arxiv_network":
+    W = np.loadtxt("./datasets/arxiv/csNE_adjacency_matrix.csv", delimiter=",")
+    n_nodes = W.shape[0]
+    is_directed = False
+
+    metrics = [NumberOfEdgesUndirected(), UndirectedDegree()]
+
+    mcmle_model = ERGM(n_nodes, metrics, is_directed=is_directed, fix_collinearity=True, sample_size=20000)
+    mcmle_opt_results = mcmle_model.fit(W, no_mple=True, 
+                                    steps_for_decay=1, theta_init_method="uniform", lr=1, 
+                                    opt_steps=10, convergence_criterion="zero_grad_norm", mcmc_burn_in=1000,
+                                    cov_matrix_estimation_method="multivariate_initial_sequence")
+
+    print(f"Model parameters - ")
+    print(mcmle_model.get_model_parameters())
 else:
     raise ValueError(f"Type {args.type} is invalid")

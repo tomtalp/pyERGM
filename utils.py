@@ -671,8 +671,9 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
                     lr /= 2
                 else:
                     with objmode():
-                        raise Exception("Learning rate decreased to minimal value while log-likelihood is still decreasing. Stopping optimization.")
-    
+                        # raise Exception("Learning rate decreased to minimal value while log-likelihood is still decreasing. Stopping optimization.")
+                        print("Learning rate decreased to minimal value while log-likelihood is still decreasing. Stopping optimization.")
+                    break
                 continue
 
         prev_thetas = thetas.copy()
