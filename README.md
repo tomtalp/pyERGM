@@ -2,11 +2,11 @@
 
 An exponential random graphs model (**ERGM**) is a statistical model that describes a distribution of random graphs. This package provides a simple and easy way to fit and sample from ERGMs.
 
-An ERGM defines a random variable $\mathbf{Y}$, which is simply a random graph on $n$ nodes. The probability of observing a graph $y\in\mathcal{Y}$ is given by -
+An ERGM defines a random variable $\mathbf{Y}$, which is simply a random graph on $n$ nodes. The probability of observing a specific graph $y\in \lbrace 0,1 \rbrace ^{n \times n}$ is given by -
 
 $$\Pr(\mathbf{Y}=y | \theta) = \frac{\exp(\theta^Tg(y))}{\sum_{z\in\mathcal{Y}} \exp(\theta^Tg(z))}$$
 
-where $\mathcal{Y}$ is the set of all $n$ node graphs, $g(y)$ is a vector of statistics that describe the graph $y$, and $\theta \in \mathbb{R}^q$ is a vector of model parameters. Each graph is represented by a binary adjacency matrix, where $y_{ij}=1$ if there is an edge between nodes $i$ and $j$ (and $y_{ji}=1$ in the undirected case).
+where $g(y)$ is a vector of statistics that describe the graph $y$, and $\theta \in \mathbb{R}^q$ is a vector of model parameters. Each graph is represented by a binary adjacency matrix, where $y_{ij}=1$ if there is an edge between nodes $i$ and $j$ (and $y_{ji}=1$ in the undirected case).
 
 
 
