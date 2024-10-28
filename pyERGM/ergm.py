@@ -237,7 +237,7 @@ class ERGM():
             no_mple=False,
             mcmc_burn_in=1000,
             mcmc_steps_per_sample=10,
-            mple_lr=0.001,
+            mple_lr=1,
             mple_stopping_thr=1e-6,
             mple_max_iter=1000,
             ):

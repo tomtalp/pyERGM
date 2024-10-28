@@ -2,8 +2,8 @@ import unittest
 
 import numpy as np
 
-from utils import *
-from metrics import *
+from pyERGM.utils import *
+from pyERGM.metrics import *
 
 import networkx as nx
 import math

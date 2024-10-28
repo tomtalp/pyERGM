@@ -2,10 +2,10 @@ import unittest
 import numpy as np
 import networkx as nx
 
-from utils import *
-from metrics import *
-from ergm import ERGM, BruteForceERGM
-import sampling
+from pyERGM.utils import *
+from pyERGM.metrics import *
+from pyERGM.ergm import ERGM, BruteForceERGM
+from pyERGM import sampling
 
 
 class Test_MetropolisHastings(unittest.TestCase):

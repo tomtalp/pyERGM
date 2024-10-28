@@ -1,6 +1,6 @@
 import unittest
-from utils import *
-from metrics import MetricsCollection, NumberOfEdgesDirected, TotalReciprocity
+from pyERGM.utils import *
+from pyERGM.metrics import MetricsCollection, NumberOfEdgesDirected, TotalReciprocity
 from scipy.linalg import eigh
 
 from matplotlib import pyplot as plt

@@ -1,7 +1,7 @@
 import unittest
-from utils import *
-from metrics import *
-from ergm import ERGM, BruteForceERGM
+from pyERGM.utils import *
+from pyERGM.metrics import *
+from pyERGM.ergm import ERGM, BruteForceERGM
 import sys
 from scipy.linalg import eigh
 
@@ -15,7 +15,7 @@ class TestERGM(unittest.TestCase):
         self.thetas = np.ones(MetricsCollection(self.metrics, is_directed=False, n_nodes=self.n_nodes).num_of_features)
 
     def test_calculate_weight(self):
-        ergm = ERGM(self.n_nodes, self.metrics, initial_thetas=self.thetas, initial_normalization_factor=self.K)
+        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False, initial_thetas=self.thetas, initial_normalization_factor=self.K)
 
         W = np.array([[0, 1, 1],
                       [1, 0, 1],
@@ -40,7 +40,7 @@ class TestERGM(unittest.TestCase):
         self.assertEqual(weight, expected_weight)
 
     def test_calculate_probability(self):
-        ergm = ERGM(self.n_nodes, self.metrics, initial_thetas=self.thetas, initial_normalization_factor=self.K)
+        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False, initial_thetas=self.thetas, initial_normalization_factor=self.K)
 
         W = np.array([[0, 1, 1],
                       [1, 0, 1],
@@ -58,7 +58,7 @@ class TestERGM(unittest.TestCase):
         thetas = [-np.log(2), np.log(3)]
         K = 29 / 8
 
-        ergm = ERGM(self.n_nodes, self.metrics, initial_thetas=thetas, initial_normalization_factor=K)
+        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False, initial_thetas=thetas, initial_normalization_factor=K)
 
         W_0_edges = np.array([[0, 0, 0],
                               [0, 0, 0],
@@ -204,7 +204,7 @@ class TestERGM(unittest.TestCase):
         types = ["A", "A", "B", "B"]
         metrics = [NumberOfEdgesTypesDirected(types)]
         model = ERGM(n, metrics, is_directed=True)
-        model.fit(M1)
+        model.fit(M1, mple_lr=1)
 
         inferred_probas_per_type_pairs = list(np.exp(model._thetas) / (1 + np.exp(model._thetas)))
 
