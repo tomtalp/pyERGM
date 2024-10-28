@@ -1,9 +1,9 @@
 import numpy as np
 from scipy.optimize import minimize, OptimizeResult
 from scipy.stats import f
-import sampling
+from pyERGM import sampling
 
-from metrics import *
+from pyERGM.metrics import *
 
 
 class ERGM():

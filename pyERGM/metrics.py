@@ -5,7 +5,7 @@ from copy import deepcopy
 
 import numpy as np
 
-from utils import *
+from pyERGM.utils import *
 
 
 class Metric(ABC):

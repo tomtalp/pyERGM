@@ -1,7 +1,7 @@
 from copy import deepcopy
 import numpy as np
-from utils import *
-from metrics import MetricsCollection
+from pyERGM.utils import *
+from pyERGM.metrics import MetricsCollection
 
 
 class Sampler():

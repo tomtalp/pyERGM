@@ -618,8 +618,11 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         thetas = np.random.rand(num_features, 1)
     else:
         thetas = initial_thetas.copy()
+    
     cur_log_like = -np.inf
     prev_log_like = -np.inf
+    prev_thetas = thetas.copy()
+
     if not is_distributed:
         Xs, ys = metrics_collection.prepare_mple_data(observed_network)
     else:
