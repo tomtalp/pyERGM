@@ -74,6 +74,8 @@ Out-degree: [1 2 2 1]
 ### Exogenous metrics
 So far we've seen metrics that are only based on the graph's connectivity matrix. However, there are many scenarios in which the graph nodes & edges have additional attributes that are external to the connectivity matrix. For example, in a graph that represents a social network, each node might have an attribute representing the age of a person. These are called **exogenous attributes**. 
 
+The exogenous attributes are passed to the metric as a collection of external attributes. The order of these attributes should correspond to the node order in the connectivity matrix.
+
 In the following example, we take a graph with 3 nodes, and assign a number to each node. We then wish to sum these attributes across nodes that are connected to each other. This is done using the `NodeAttrSum` metric.
 
 ```python
@@ -107,4 +109,4 @@ Let's verify this calculation, by observing the attribute sum for every edge -
 
 which sums up to 13.
 
-## Speeding up metric calculations
+## Fixing collinearity 
