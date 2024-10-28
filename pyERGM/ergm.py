@@ -30,7 +30,7 @@ class ERGM():
         n_nodes : int 
             Number of nodes in the network.
 
-        metrics_collection : Collectionetric] 
+        metrics_collection : Collection[Metric] 
             A list of Metric objects for calculating statistics of a network.
 
         is_directed : bool 
