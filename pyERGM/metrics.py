@@ -5,7 +5,7 @@ from copy import deepcopy
 
 import numpy as np
 
-from utils import *
+from pyERGM.utils import *
 
 
 class Metric(ABC):
@@ -76,24 +76,51 @@ class Metric(ABC):
         num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
         Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count()))
         edge_idx = 0
-        for i in range(self._n_nodes):
-            for j in range(self._n_nodes):
-                if i == j:
-                    continue
-                if edge_idx < edges_indices_lims[0]:
+
+        if self._is_directed:
+            for i in range(self._n_nodes):
+                for j in range(self._n_nodes):
+                    if i == j:
+                        continue
+                    if edge_idx < edges_indices_lims[0]:
+                        edge_idx += 1
+                        continue
+                    indices = (i, j)
+                    observed_edge_off = observed_network.copy()
+                    if self.requires_graph:
+                        if observed_edge_off.has_edge(i, j):
+                            observed_edge_off.remove_edge(i, j)
+                    else:
+                        observed_edge_off[i, j] = 0
+
+                    Xs[edge_idx - edges_indices_lims[0]] = self.calc_change_score(observed_edge_off, indices)
                     edge_idx += 1
-                    continue
-                indices = (i, j)
-                observed_edge_off = observed_network.copy()
-                if self.requires_graph:
-                    if observed_edge_off.has_edge(i, j):
-                        observed_edge_off.remove_edge(i, j)
-                else:
-                    observed_edge_off[i, j] = 0
-                Xs[edge_idx - edges_indices_lims[0]] = self.calc_change_score(observed_edge_off, indices)
-                edge_idx += 1
-                if edge_idx == edges_indices_lims[1]:
-                    return Xs
+                    if edge_idx == edges_indices_lims[1]:
+                        return Xs
+        
+        else:
+            Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count())) 
+            for i in range(self._n_nodes-1):
+                for j in range(i+1, self._n_nodes):
+                    if edge_idx < edges_indices_lims[0]:
+                        edge_idx += 1
+                        continue
+
+                    indices = (i, j)
+
+                    observed_edge_off = observed_network.copy()
+                    if self.requires_graph:
+                        if observed_edge_off.has_edge(i, j):
+                            observed_edge_off.remove_edge(i, j)
+                    else:
+                        observed_edge_off[i, j] = 0
+                        observed_edge_off[j, i] = 0
+
+                    Xs[edge_idx - edges_indices_lims[0]] = self.calc_change_score(observed_edge_off, indices)
+                    edge_idx += 1
+                    if edge_idx == edges_indices_lims[1]:
+                        return Xs
+
 
     def _get_metric_names(self):
         """
@@ -219,6 +246,9 @@ class NumberOfTriangles(Metric):
 
         sign = -1 if current_network[indices[0], indices[1]] else 1
         return sign * np.dot(current_network[indices[0]], current_network[:, indices[1]])
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return np.einsum('ijk,jlk,lik->k', networks_sample, networks_sample, networks_sample) // (3 * 2)
 
 
 class BaseDegreeVector(Metric):
@@ -1094,6 +1124,8 @@ class MetricsCollection:
         n_nodes = observed_network.shape[0]
         if edges_indices_lims is None:
             num_edges_to_take = n_nodes * n_nodes - n_nodes
+            if not self.is_directed:
+                num_edges_to_take = num_edges_to_take // 2
             edges_indices_lims = (0, num_edges_to_take)
         else:
             num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
@@ -1112,8 +1144,12 @@ class MetricsCollection:
 
             feature_idx += n_features_from_metric
 
-        return Xs, observed_network[~np.eye(observed_network.shape[0], dtype=bool)].flatten()[
+        if self.is_directed:
+            ys = observed_network[~np.eye(n_nodes, dtype=bool)].flatten()[
                    edges_indices_lims[0]:edges_indices_lims[1], None]
+        else:
+            ys = observed_network[np.triu_indices(n_nodes, 1)][edges_indices_lims[0]:edges_indices_lims[1], None]
+        return Xs, ys
 
     def get_parameter_names(self):
         """

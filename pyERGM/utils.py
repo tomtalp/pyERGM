@@ -493,7 +493,7 @@ def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
 
 
 @njit
-def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray):
+def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray, eps=1e-10):
     """
     Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
     Parameters
@@ -507,12 +507,11 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
     -------
     The probability to observe the vector `ys` under the distribution induced by `predictions`.
     """
-    # TODO: trim to (eps, 1-eps) before taking the log? (the model can't give probabilities of strictly 0 or 1 in
-    #  theory, but numerics...)?
-    individual_likelihoods = predictions.copy()
+    trimmed_likelihoods = np.clip(predictions, eps, 1 - eps)
     data_zero_indices = np.where(ys == 0)[0]
-    individual_likelihoods[data_zero_indices] = np.ones((data_zero_indices.size, 1)) - predictions[data_zero_indices]
-    return np.log(individual_likelihoods).sum()
+    trimmed_likelihoods[data_zero_indices] = np.ones((data_zero_indices.size, 1)) - trimmed_likelihoods[data_zero_indices]
+
+    return np.log(trimmed_likelihoods).sum()
 
 
 @njit
@@ -586,7 +585,8 @@ def local_mple_logistic_regression_optimization_step(Xs, ys, thetas):
 def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-6,
-                                          is_distributed: bool = False):
+                                          is_distributed: bool = False,
+                                          minimal_lr=1e-10):
     """
     Optimize the parameters of a Logistic Regression model by maximizing the likelihood using Newton-Raphson.
     Parameters
@@ -618,8 +618,11 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         thetas = np.random.rand(num_features, 1)
     else:
         thetas = initial_thetas.copy()
+    
     cur_log_like = -np.inf
     prev_log_like = -np.inf
+    prev_thetas = thetas.copy()
+
     if not is_distributed:
         Xs, ys = metrics_collection.prepare_mple_data(observed_network)
     else:
@@ -650,20 +653,33 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
                                                                                                         thetas)
         if (i - 1) % 1 == 0:
             with objmode():
-                print("Iteration {0}, log-likelihood: {1}, time from start: {2} seconds".format(i, cur_log_like,
-                                                                                                time.perf_counter() - start))
+                print("Iteration {0}, log-likelihood: {1}, time from start: {2} seconds, lr: {3}".format(i, cur_log_like,
+                                                                                                time.perf_counter() - start, lr))
                 sys.stdout.flush()
         if i > 0:
             log_like_frac_change = (cur_log_like - prev_log_like)
             if cur_log_like != 0:
                 log_like_frac_change /= np.abs(prev_log_like)
-            if 0 <= log_like_frac_change < stopping_thr:
+            if 0 < log_like_frac_change < stopping_thr: # TODO - If the lr is extremely small, then "by definition" we will have very small changes in the log-likelihood. So we need to account for small lr's 
                 with objmode():
                     print(
                         "Optimization terminated successfully! (the log-likelihood doesn't increase)\nLast iteration: {0}, final log-likelihood: {1}, time from start: {2} seconds".format(
                             i, cur_log_like, time.perf_counter() - start))
                 break
+            elif log_like_frac_change < 0:
+                print(f"\tLog-likelihood decreased from {prev_log_like} to {cur_log_like} in iteration {i}! Decreasing learning rate and reverting to previous thetas.")
 
+                thetas = prev_thetas
+                if lr > minimal_lr:
+                    lr /= 2
+                else:
+                    with objmode():
+                        # raise Exception("Learning rate decreased to minimal value while log-likelihood is still decreasing. Stopping optimization.")
+                        print("Learning rate decreased to minimal value while log-likelihood is still decreasing. Stopping optimization.")
+                    break
+                continue
+
+        prev_thetas = thetas.copy()
         hessian_inv = np.linalg.pinv(hessian)
         thetas += lr * hessian_inv @ grad
         prev_log_like = cur_log_like

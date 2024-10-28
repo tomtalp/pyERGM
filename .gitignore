@@ -3,6 +3,8 @@ distributed_mple_fit.py
 datasets
 SavedOutputs
 
+datasets/gal/*
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
