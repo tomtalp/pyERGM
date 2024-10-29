@@ -2,7 +2,7 @@ from copy import deepcopy
 import numpy as np
 from pyERGM.utils import *
 from pyERGM.metrics import MetricsCollection
-
+import time
 
 class Sampler():
     def __init__(self, thetas, network_stats_calculator):
@@ -97,6 +97,7 @@ class NaiveMetropolisHastings(Sampler):
         networks_count = 0
         mcmc_iter_count = 0
 
+        t1 = time.time()
         while networks_count != num_of_nets:
             random_entry = edges_to_flip[:, mcmc_iter_count % edges_to_flip.shape[1]]
 
@@ -119,7 +120,8 @@ class NaiveMetropolisHastings(Sampler):
                         sampled_networks[:, :, networks_count] = np.zeros((net_size, net_size))
                 else:
                     networks_count += 1
+                    t2 = time.time()
+                    print(f"Sampled {networks_count}/{num_of_nets} networks, time taken: {t2-t1}")
 
             mcmc_iter_count += 1
-
         return sampled_networks

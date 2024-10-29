@@ -659,7 +659,7 @@ class NumberOfEdgesTypesDirected(Metric):
         ignored_features = ()
         for i in range(self._get_total_feature_count()):
             if i in self._indices_to_ignore:
-                type_pair = self.sorted_type_pairs[i][0] + "__" + self.sorted_type_pairs[i][1]
+                type_pair = str(self.sorted_type_pairs[i][0]) + "__" + str(self.sorted_type_pairs[i][1])
                 ignored_features += (f"{metric_name}_{type_pair}",)
 
         return ignored_features

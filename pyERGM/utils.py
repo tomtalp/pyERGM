@@ -932,3 +932,18 @@ def generate_binomial_tensor(net_size, num_samples, p=0.5):
     Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
     """
     return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)
+
+def sample_from_independent_probabilities_matrix(probability_matrix, sample_size):
+    """
+    Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j)
+    """
+    n_nodes = probability_matrix.shape[0]
+    sample = np.zeros((n_nodes, n_nodes, sample_size))
+
+    for i in range(n_nodes):
+        for j in range(n_nodes):
+            if i == j:
+                continue
+            sample[i, j, :] = np.random.binomial(1, probability_matrix[i, j], size=sample_size)
+            
+    return sample
