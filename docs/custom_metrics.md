@@ -59,11 +59,9 @@ Let's break down the steps in the above example -
 3. The `calculate` function receives the input graph as a numpy adjacency matrix and calculates the number of nodes with in-degree greater than or equal to $\frac{n}{2}$ and returns a single scalar value.
 
 ## Supporting multiple statistics
-Some metrics return multiple statistics. For example, the `InDegree` metric calculate the indegree of each node in the graph. To support multiple statistics, the `calculate` function should simply return a numpy array of statistics, instead of a scalar value. 
+Some metrics return multiple statistics. For example, the `InDegree` metric calculates the indegree of each node in the graph. To support multiple statistics, the `calculate` function should simply return a collection of statistics, instead of a scalar value. This can either be a list or a numpy array. 
 
-Moreover, metrics with multiple statistics should also support the `indices_to_ignore` attribute, which allows the user to exclude certain statistics from the calculation (see the [Introduction to graph metrics](../metrics/) page for more information). 
-
-The `Metric` class already has an `_indices_to_ignore` attribute, so your new metric should allow the user to pass a list of indices to ignore to the metric constructor - 
+Moreover, metrics with multiple statistics should also support the `indices_to_ignore` attribute, which allows pyERGM to exclude certain statistics from the calculation (see the [Introduction to graph metrics](../metrics/) page for more information). Your new metric should allow the user to pass a list of indices to ignore to the metric constructor, and it has to save it as `self._indices_to_ignore` - 
 
 ```python
 from copy import deepcopy
@@ -79,6 +77,7 @@ class MetricWithMultipleStatistics(Metric):
         else:
             self._indices_to_ignore = deepcopy(indices_to_ignore)
 ```
+
 
 Finally, the `calculate` method can use the `_indices_to_ignore` attribute to exclude certain statistics from the calculation - 
 
