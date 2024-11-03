@@ -23,7 +23,7 @@ Fitting an ERGM model requires a graph and a set of statistics that describe the
 The following example demonstrates how to fit a simple ERGM model from [Sampson's monastery data](https://networkdata.ics.uci.edu/netdata/html/sampson.html).
 
 ```python
-from pyERGM import ERGM
+from pyERGM.ergm import ERGM
 from pyERGM.metrics import *
 from pyERGM.datasets import load_sampson
 
