@@ -129,13 +129,13 @@ Collineraity is a common issue in regression models, where two or more variables
 
 As an example, let's initialize a model with two metrics - one that counts the number of edges, and one that counts the degree of every node in the graph.
 
-1. `NumberOfEdgesDirected`
+1. `NumberOfEdgesUndirected`
 2. `UndirectedDegree`
 
 
 ```python
 
-from pyERGM.metrics import NumberOfEdgesDirected, UndirectedDegree
+from pyERGM.metrics import NumberOfEdgesUndirected, UndirectedDegree
 
 W = np.array([
     [0, 1, 0],
@@ -144,7 +144,7 @@ W = np.array([
 ])
 
 
-num_edges = NumberOfEdgesDirected()
+num_edges = NumberOfEdgesUndirected()
 degrees = UndirectedDegree()
 
 print(f"Number of edges: {num_edges.calculate(W)}")
@@ -165,9 +165,74 @@ The most straightforward solution is to remove one of the conflicting metrics. p
 
 **Manual removal** - As the user building the model, you can manually remove metrics that you know are collinear. This can either be done in any of the following ways - 
 
-1. By removing the metric from the list of metrics passed to the ERGM constructor.
-2. Metrics with more than a single statistic have an `indices_to_ignore` attribute that can be used to ignore specific statistics within the metric. It is a list of indices that should be ignored when calculating the statistics vector, and is passed when initializing the metric. 
+1. <ins>Removing a full metric</ins> - Removing the metric from the list of metrics passed to the ERGM constructor is the most straightforward way to fix collinearity, but it might not always be the best solution. In the example above, the `NumberOfEdgesUndirected` metric seems more informative than the `UndirectedDegree` metric, so completely removing it might not be desired.
+2. <ins>Ignoring a specific metric statistic</ins> - Metrics with more than a single statistic have an `indices_to_ignore` attribute that can be used to ignore specific statistics within the metric. It is a list of indices that should be ignored when calculating the statistics vector, and is passed when initializing the metric. 
 The order of indices within the metric depends on the metric type - 
-    * If the metric statistics depend onlu on the graph's connectivity matrix (e.g. `UndirectedDegree`), the indices correspond to the original ordering of the nodes in the graph. 
+    * If the metric statistics depend only on the graph's connectivity matrix (e.g. `UndirectedDegree`), the indices correspond to the original ordering of the nodes in the graph. 
     * If the metric statistics depend on exogenous attributes, the indices correspond to the lexicographic ordering of the exogenous attributes passed to the metric, i.e. `sorted(external_attributes)`.
     In a metric such as `NumberOfEdgesTypesDirected` that creates statistics for type pairs, the ordering is the lexicographic ordering of the cartesian product of the node types. For example if `external_attributes=["A", "A", "B"]`, the metric will produce features for type pairs `["AA", "AB", "BA", "BB"]`, in a lexicographical ordering.
+
+
+Let's see how we could have fixed the collinearity issue in the previous example.
+
+**Automatic fixing** - 
+```python
+from pyERGM.metrics import NumberOfEdgesUndirected, UndirectedDegree
+from pyERGM.metrics import MetricsCollection
+
+W = np.array([
+    [0, 1, 0],
+    [1, 0, 0],
+    [1, 0, 0],
+])
+
+num_edges = NumberOfEdgesUndirected()
+degrees = UndirectedDegree()
+
+metrics = MetricsCollection(metrics=[num_edges, degrees], is_directed=False, n_nodes=3, fix_collinearity=True)
+```
+
+which will output - 
+```
+Removing the 0 feature of undirected_degree to fix multi-collinearity
+```
+telling us that the 0-th idx feature of the `UndirectedDegree` metric was removed to fix the collinearity issue. We can also verify this by running - 
+
+```python
+print(f"Ignored features - ")
+print(metrics.get_ignored_features())
+
+print(f"Remaining features")
+print(metrics.get_parameter_names())
+```
+
+with outputs -
+```
+Ignored features -
+('undirected_degree_1',)
+Remaining features
+('num_edges_undirected', 'undirected_degree_2', 'undirected_degree_3')
+```
+
+**Ignoring the first statistic in** `UndirectedDegree` -
+```python
+from pyERGM.metrics import NumberOfEdgesUndirected, UndirectedDegree
+
+W = np.array([
+    [0, 1, 0],
+    [1, 0, 0],
+    [1, 0, 0],
+])
+
+num_edges = NumberOfEdgesUndirected()
+degrees = UndirectedDegree(indices_to_ignore=[0])
+
+print(f"Number of edges: {num_edges.calculate(W)}")
+print(f"Degrees: {degrees.calculate(W)}")
+```
+
+Output:
+```
+Number of edges: 3
+Degrees: [1, 0]
+```
