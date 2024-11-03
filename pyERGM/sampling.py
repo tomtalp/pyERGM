@@ -5,16 +5,16 @@ from pyERGM.metrics import MetricsCollection
 import time
 
 class Sampler():
-    def __init__(self, thetas, network_stats_calculator):
+    def __init__(self, thetas, metrics_collection: MetricsCollection):
         self.thetas = deepcopy(thetas)
-        self.network_stats_calculator = deepcopy(network_stats_calculator)
+        self.metrics_collection = deepcopy(metrics_collection)
 
     def sample(self, initial_state, n_iterations):
         pass
 
 
 class NaiveMetropolisHastings(Sampler):
-    def __init__(self, thetas, network_stats_calculator: MetricsCollection, burn_in=1000, steps_per_sample=10):
+    def __init__(self, thetas, metrics_collection: MetricsCollection, burn_in=1000, steps_per_sample=10):
         """
         An implementation for the symmetric proposal Metropolis-Hastings algorithm for ERGMS, using the logit
         of the acceptance rate. See docs for more details.
@@ -25,10 +25,10 @@ class NaiveMetropolisHastings(Sampler):
         thetas : np.ndarray
             Coefficients of the ERGM
         
-        network_stats_calculator : MetricsCollection
+        metrics_collection : MetricsCollection
             A MetricsCollection object that can calculate statistics of a network.
         """
-        super().__init__(thetas, network_stats_calculator)
+        super().__init__(thetas, metrics_collection)
 
         ## TODO - these two params need to be dependent on the network size
         self.burn_in = burn_in
@@ -39,7 +39,7 @@ class NaiveMetropolisHastings(Sampler):
         """
         Calculate g(proposed_network)-g(current_network) and then inner product with thetas.
         """
-        change_score = self.network_stats_calculator.calc_change_scores(current_network, indices)
+        change_score = self.metrics_collection.calc_change_scores(current_network, indices)
         return np.dot(self.thetas, change_score)
 
     def _flip_network_edge(self, current_network, i, j):
@@ -48,7 +48,7 @@ class NaiveMetropolisHastings(Sampler):
         NOTE! This function changes the network that is passed by reference
         """
         current_network[i, j] = 1 - current_network[i, j]
-        if not self.network_stats_calculator.is_directed:
+        if not self.metrics_collection.is_directed:
             current_network[j, i] = 1 - current_network[j, i]
 
 
@@ -57,7 +57,7 @@ class NaiveMetropolisHastings(Sampler):
     #     Flip the edge between nodes i, j. If it's an undirected network, we flip entries W_i,j and W_j,i.
     #     NOTE! This function changes the network that is passed by reference
     #     """
-    #     _is_directed = self.network_stats_calculator.is_directed
+    #     _is_directed = self.metrics_collection.is_directed
     #     self._static_flip_edge(current_network, i, j, _is_directed)
     
     # @staticmethod

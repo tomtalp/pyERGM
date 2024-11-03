@@ -462,7 +462,58 @@ class ERGM():
             else:
                 raise ValueError(f"Convergence criterion {convergence_criterion} not defined")
 
+
+        self._last_mcmc_chain_features = features_of_net_samples
+
         return grads, hotelling_statistics
+
+    def get_mcmc_diagnostics(self, sampled_networks=None, observed_network=None):
+        """
+        Get MCMC diagnostics for the last chain or a sample of networks.
+
+        Parameters
+        ----------
+        sampled_networks : np.ndarray
+            Optional. A (n, n, k) tensor of sampled networks. If not provided, the last chain is used.
+        observed_network : np.ndarray
+            Optional. The adjacency matrix of the observed network. If provided, the traces of the features across the
+            chain are normalized based on the observed network features.
+        """
+        if sampled_networks is not None:
+            print(f"Calculating MCMC diagnostics for a sample of {sampled_networks.shape[2]} networks")
+            features = self._metrics_collection.calculate_sample_statistics(sampled_networks)
+        elif self._last_mcmc_chain_features is not None:
+            print(f"Calculating MCMC diagnostics for the last chain, with {self._last_mcmc_chain_features.shape[1]} networks")
+            features = self._last_mcmc_chain_features.copy()
+        else:
+            # TODO: decide what to do in this case. Maybe give the user an option to generate a new chain.
+            raise ValueError("No sampled networks provided and no last chain found. Either rerun with a `sampled_networks` parameter, or run the `fit` function first." )
+        
+        features_mean = np.mean(features, axis=1)
+        features_std = np.std(features, axis=1)
+
+        # Normalize the features based on the observed network
+        if observed_network is not None:
+            observed_features = self._metrics_collection.calculate_statistics(observed_network)
+            features = features - observed_features[:, None]
+
+        trace_per_features = {}
+        for i, feature in enumerate(self._metrics_collection.metrics):
+            trace = features[i, :]
+            trace_per_features[str(feature)] = trace
+
+
+        quantlies_to_calculate = [0.025, 0.25, 0.5, 0.75, 0.975]
+        quantiles = np.quantile(features, quantlies_to_calculate, axis=1)
+
+        quantile_values = {k: q for k, q in zip(quantlies_to_calculate, quantiles)}
+
+        return {
+            "trace": trace_per_features,
+            "quantiles": quantile_values,
+            "mean": features_mean,
+            "std": features_std
+        }
 
     def calculate_probability(self, W: np.ndarray):
         """
