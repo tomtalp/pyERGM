@@ -476,16 +476,17 @@ class ERGM():
         sampled_networks : np.ndarray
             Optional. A (n, n, k) tensor of sampled networks. If not provided, the last chain is used.
         observed_network : np.ndarray
-            Optional. The adjacency matrix of the observed network. If not provided, the mcmc diagnostics
-            are normalized based on the observed network features.
+            Optional. The adjacency matrix of the observed network. If provided, the traces of the features across the
+            chain are normalized based on the observed network features.
         """
         if sampled_networks is not None:
             print(f"Calculating MCMC diagnostics for a sample of {sampled_networks.shape[2]} networks")
-            features = self._metrics_collection.calculate_sample_statistics(sampled_networks).copy()
+            features = self._metrics_collection.calculate_sample_statistics(sampled_networks)
         elif self._last_mcmc_chain_features is not None:
             print(f"Calculating MCMC diagnostics for the last chain, with {self._last_mcmc_chain_features.shape[1]} networks")
             features = self._last_mcmc_chain_features.copy()
         else:
+            # TODO: decide what to do in this case. Maybe give the user an option to generate a new chain.
             raise ValueError("No sampled networks provided and no last chain found. Either rerun with a `sampled_networks` parameter, or run the `fit` function first." )
         
         features_mean = np.mean(features, axis=1)
