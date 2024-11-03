@@ -17,7 +17,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         thetas = np.array([np.log(2)])
 
         # UNDIRECTED VERSION
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, )
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, metrics_collection=stats_calculator)
 
         test_W = np.array([
             [0., 0., 0., 1.],
