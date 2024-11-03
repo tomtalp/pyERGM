@@ -6,13 +6,31 @@ from scipy.linalg import eigh
 from matplotlib import pyplot as plt
 import sys
 
+
 class GeneralUtilsTester(unittest.TestCase):
     def test_get_sorted_type_pairs(self):
         types = ["A", "B", "B", "B"]
         sorted_type_pairs = get_sorted_type_pairs(types)
         expected_sorted_type_pairs = [("A", "A"), ("A", "B"), ("B", "A"), ("B", "B")]
         self.assertTrue(sorted_type_pairs == expected_sorted_type_pairs)
-        
+
+    def test_convert_non_flat_non_diag_to_i_j(self):
+        n = 4
+        i_j = convert_flat_no_diag_idx_to_i_j([7], n)
+        expected_i_j = np.array([[2],
+                                 [1]])
+        self.assertTrue(np.all(expected_i_j == i_j))
+
+        flat_no_diags = np.array([0, 5, 11])
+        expected_i_js = np.array([[0, 1, 3],
+                                  [1, 3, 2]])
+        i_js = convert_flat_no_diag_idx_to_i_j(flat_no_diags, n)
+        self.assertTrue(np.all(expected_i_js == i_js))
+
+        with self.assertRaises(IndexError):
+            convert_flat_no_diag_idx_to_i_j([13], n)
+
+
 class TestGreatestConvexMinorant(unittest.TestCase):
     DO_PLOT = False
 
@@ -87,10 +105,11 @@ class TestGreatestConvexMinorant(unittest.TestCase):
         self.assertTrue(np.all(minorant_vals <= values))
         self.assertTrue(np.all(np.diff(minorant_vals, n=2) >= -10 ** -10))
 
+
 class TestSparseTensorUtilities(unittest.TestCase):
     def test_transpose_sample_matrices(self):
-        np_tensor = np.random.choice([0, 1],  size=(5, 5, 1), p=[0.8, 0.2])
-        expected_np_tensor_T = np.transpose(np_tensor, axes=(1, 0, 2)) 
+        np_tensor = np.random.choice([0, 1], size=(5, 5, 1), p=[0.8, 0.2])
+        expected_np_tensor_T = np.transpose(np_tensor, axes=(1, 0, 2))
 
         sparse_tensor = np_tensor_to_sparse_tensor(np_tensor)
 
@@ -189,7 +208,8 @@ class TestCovarianceMatrixEstimation(unittest.TestCase):
         mean_features = features_of_sample.mean(axis=1)
 
         sys.setrecursionlimit(2000)
-        batch_estimation = covariance_matrix_estimation(features_of_sample, mean_features, method='batch', num_batches=3)
+        batch_estimation = covariance_matrix_estimation(features_of_sample, mean_features, method='batch',
+                                                        num_batches=3)
         self.assertTrue(np.abs(expected_covariance_batch_estimation - batch_estimation).max() < 10 ** -15)
 
     def test_naive_covariance_matrix_estimation(self):
