@@ -498,7 +498,8 @@ class ERGM():
             features = features - observed_features[:, None]
 
         trace_per_features = {}
-        for i, feature in enumerate(self._metrics_collection.metrics):
+        parameter_names = self._metrics_collection.get_parameter_names()
+        for i, feature in enumerate(parameter_names):
             trace = features[i, :]
             trace_per_features[str(feature)] = trace
 

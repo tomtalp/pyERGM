@@ -16,7 +16,7 @@ class Metric(ABC):
         self._is_directed = None
         self._is_dyadic_independent = True
         self._n_nodes = None
-        self._indices_to_ignore = []
+        self._indices_to_ignore = np.array([False] * self._get_total_feature_count())
 
     @abstractmethod
     def calculate(self, input: np.ndarray | nx.Graph):
@@ -26,7 +26,7 @@ class Metric(ABC):
         """
         How many features does this metric produce. Defaults to 1.
         """
-        return 1
+        return np.sum(~self._indices_to_ignore)
 
     def _get_total_feature_count(self):
         """
@@ -528,9 +528,12 @@ class NumberOfEdgesTypesDirected(Metric):
             self._indices_to_ignore = []
         else:
             self._indices_to_ignore = deepcopy(indices_to_ignore)
+        
+        self.unique_types = sorted(list(set(self.exogenous_attr)))
+
         super().__init__()
         self._is_directed = True
-        self.unique_types = sorted(list(set(self.exogenous_attr)))
+
         self.indices_of_types = {}
         for i, t in enumerate(self.exogenous_attr):
             if t not in self.indices_of_types.keys():
@@ -540,6 +543,15 @@ class NumberOfEdgesTypesDirected(Metric):
 
         self.sorted_type_pairs = get_sorted_type_pairs(self.unique_types)
         self._calc_edge_type_idx_assignment()
+
+        self._update_indices_to_keep()
+
+    def _update_indices_to_keep(self):
+        self._indices_to_keep[self._indices_to_ignore] = False
+
+    def update_indices_to_ignore(self, indices_to_ignore):
+        self._indices_to_ignore += indices_to_ignore
+        self._update_indices_to_keep()
 
     def _calc_edge_type_idx_assignment(self):
         """
@@ -591,13 +603,19 @@ class NumberOfEdgesTypesDirected(Metric):
             idx += 1
         return stats
 
+    def _keep_before_return(self, change_score):
+        return change_score[self._indices_to_keep]
+
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         edge_type_pair = (self.exogenous_attr[indices[0]], self.exogenous_attr[indices[1]])
         idx_in_features_vec = self.sorted_type_pairs.index(edge_type_pair)
         sign = -1 if current_network[indices[0], indices[1]] else 1
         change_score = np.zeros(len(self.sorted_type_pairs))
         change_score[idx_in_features_vec] = sign
-        return np.delete(change_score, self._indices_to_ignore)
+
+        # return np.delete(change_score, self._indices_to_ignore)
+        return self._keep_before_return(change_score)
+    
 
     def calculate_change_score_full_network(self, current_network: np.ndarray):
         """
@@ -958,7 +976,10 @@ class MetricsCollection:
                     idx_to_delete = self.get_feature_idx_within_metric(removal_order[i])
                     print(f"Removing the {idx_to_delete} feature of {str(cur_metric)} to fix multi-collinearity")
                     sys.stdout.flush()
-                    cur_metric._indices_to_ignore.append(idx_to_delete)
+                    if hasattr(cur_metric, "update_indices_to_ignore"):
+                        cur_metric.update_indices_to_ignore([idx_to_delete])
+                    else:
+                        cur_metric._indices_to_ignore.append(idx_to_delete)
 
                     sample_features = np.delete(sample_features, removal_order[i], axis=0)
 
