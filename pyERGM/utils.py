@@ -157,10 +157,11 @@ def get_greatest_convex_minorant(xs: np.ndarray, ys: np.ndarray):
 
 
 @njit
-def get_random_edges_to_flip(num_nodes, num_pairs):
+def get_uniform_random_edges_to_flip(num_nodes, num_pairs):
     """
     Create a matrix of size (2 x num_pairs), where each column represents a pair of nodes.
     These nodes represent the edge we wish to flip.
+    The pairs are sampled randomly.
     """
 
     edges_to_flip = np.zeros((2, num_pairs), dtype=np.int32)
@@ -172,6 +173,57 @@ def get_random_edges_to_flip(num_nodes, num_pairs):
     edges_to_flip[1, :] = (edges_to_flip[0, :] - diff) % num_nodes
 
     return edges_to_flip
+
+
+def convert_flat_no_diag_idx_to_i_j(flat_no_diag_idx: Collection[int], full_mat_size: int) -> np.ndarray[int]:
+    """
+    Converts the index in the flattened square matrix without the main diagonal to the pair of indices in the original
+    matrix.
+    For a square matrix A, the flattened-no-diagonal form is given by A[~np.eye(A.shape[0], dtype=bool)].
+    E.g., given a 3X3 matrix, the third element in its flattened-no-diagonal form (idx 2) is the (1,0) entry.
+    Parameters
+    ----------
+    flat_no_diag_idx
+        The index in the flattened-no-diagonal form
+        #TODO: force this to be a np.ndarray and use numba?
+    full_mat_size
+        The number of rows/columns in the original squared matrix.
+    Returns
+    -------
+    The tuple of indices of the entry in the original square matrix.
+    """
+    flat_no_diag_idx = np.array(flat_no_diag_idx)
+    if np.any(flat_no_diag_idx >= full_mat_size * (full_mat_size - 1)):
+        raise IndexError(
+            f"Got a too large `flat_no_diag_idx` {flat_no_diag_idx} for original matrix size of {full_mat_size}")
+    rows = np.array(flat_no_diag_idx) // (full_mat_size - 1)
+    cols = np.array(flat_no_diag_idx) % (full_mat_size - 1)
+    cols[cols >= rows] += 1
+    return np.stack((rows, cols), axis=0).astype(np.int32)
+
+
+def get_custom_distribution_random_edges_to_flip(num_pairs, edge_probs):
+    """
+    Sample pairs of indices for edge flips according to a given probability distribution over all possible edges (all
+    entries of the adjacency matrix but the main diagonal).
+    Parameters
+    ----------
+    num_pairs
+        The sample size
+    edge_probs
+        The probability distribution over all possible edges. The indexing here is in the flattened-no-diagonal format.
+        This is equivalent to having a matrix A of nXn probabilities, where the i,j-th entry is the probability of the
+        i,j-th edge to be sampled, and passing A[~np.eye(A.shape[0], dtype=bool)].
+    Returns
+    -------
+    A sample of num_pairs pairs of indices, sampled according to edge_probs.
+    """
+    num_possible_edges = edge_probs.size
+    # The solution for the equation n(n-1)=num_possible_edges
+    num_nodes = np.round((1 + np.sqrt(1 + 4 * num_possible_edges)) / 2)  # TODO: validate that this is indeed an int?
+    flat_no_diag_indices = np.random.choice(edge_probs.size, p=edge_probs, size=num_pairs)
+    # TODO: force the following to be pre-complied with numba, and the current as well?
+    return convert_flat_no_diag_idx_to_i_j(flat_no_diag_indices, num_nodes)
 
 
 def np_tensor_to_sparse_tensor(np_tensor: np.ndarray) -> torch.Tensor:
@@ -509,7 +561,8 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
     """
     trimmed_likelihoods = np.clip(predictions, eps, 1 - eps)
     data_zero_indices = np.where(ys == 0)[0]
-    trimmed_likelihoods[data_zero_indices] = np.ones((data_zero_indices.size, 1)) - trimmed_likelihoods[data_zero_indices]
+    trimmed_likelihoods[data_zero_indices] = np.ones((data_zero_indices.size, 1)) - trimmed_likelihoods[
+        data_zero_indices]
 
     return np.log(trimmed_likelihoods).sum()
 
@@ -618,7 +671,7 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         thetas = np.random.rand(num_features, 1)
     else:
         thetas = initial_thetas.copy()
-    
+
     cur_log_like = -np.inf
     prev_log_like = -np.inf
     prev_thetas = thetas.copy()
@@ -653,21 +706,24 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
                                                                                                         thetas)
         if (i - 1) % 1 == 0:
             with objmode():
-                print("Iteration {0}, log-likelihood: {1}, time from start: {2} seconds, lr: {3}".format(i, cur_log_like,
-                                                                                                time.perf_counter() - start, lr))
+                print(
+                    "Iteration {0}, log-likelihood: {1}, time from start: {2} seconds, lr: {3}".format(i, cur_log_like,
+                                                                                                       time.perf_counter() - start,
+                                                                                                       lr))
                 sys.stdout.flush()
         if i > 0:
             log_like_frac_change = (cur_log_like - prev_log_like)
             if cur_log_like != 0:
                 log_like_frac_change /= np.abs(prev_log_like)
-            if 0 < log_like_frac_change < stopping_thr: # TODO - If the lr is extremely small, then "by definition" we will have very small changes in the log-likelihood. So we need to account for small lr's 
+            if 0 < log_like_frac_change < stopping_thr:  # TODO - If the lr is extremely small, then "by definition" we will have very small changes in the log-likelihood. So we need to account for small lr's
                 with objmode():
                     print(
                         "Optimization terminated successfully! (the log-likelihood doesn't increase)\nLast iteration: {0}, final log-likelihood: {1}, time from start: {2} seconds".format(
                             i, cur_log_like, time.perf_counter() - start))
                 break
             elif log_like_frac_change < 0:
-                print(f"\tLog-likelihood decreased from {prev_log_like} to {cur_log_like} in iteration {i}! Decreasing learning rate and reverting to previous thetas.")
+                print(
+                    f"\tLog-likelihood decreased from {prev_log_like} to {cur_log_like} in iteration {i}! Decreasing learning rate and reverting to previous thetas.")
 
                 thetas = prev_thetas
                 if lr > minimal_lr:
@@ -675,7 +731,8 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
                 else:
                     with objmode():
                         # raise Exception("Learning rate decreased to minimal value while log-likelihood is still decreasing. Stopping optimization.")
-                        print("Learning rate decreased to minimal value while log-likelihood is still decreasing. Stopping optimization.")
+                        print(
+                            "Learning rate decreased to minimal value while log-likelihood is still decreasing. Stopping optimization.")
                     break
                 continue
 
@@ -933,6 +990,7 @@ def generate_binomial_tensor(net_size, num_samples, p=0.5):
     """
     return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)
 
+
 def sample_from_independent_probabilities_matrix(probability_matrix, sample_size):
     """
     Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j)
@@ -945,5 +1003,5 @@ def sample_from_independent_probabilities_matrix(probability_matrix, sample_size
             if i == j:
                 continue
             sample[i, j, :] = np.random.binomial(1, probability_matrix[i, j], size=sample_size)
-            
+
     return sample
