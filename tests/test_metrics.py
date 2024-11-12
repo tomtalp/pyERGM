@@ -7,7 +7,7 @@ from pyERGM.metrics import *
 
 import networkx as nx
 import math
-
+import pandas as pd
 
 class TestNumberOfEdgesUndirected(unittest.TestCase):
     def test_num_of_edges(self):
@@ -884,3 +884,31 @@ class TestMetricsCollection(unittest.TestCase):
         ignored_features = collection.get_ignored_features()
         expected_ignored_features = ("indegree_1", "outdegree_1")
         self.assertTrue(ignored_features == expected_ignored_features)
+
+
+class TestSumDistancesConnectedNeurons(unittest.TestCase):
+    def test_sum_distances(self):
+        positions = pd.DataFrame({"x_pos": [0, 0, 4], "y_pos": [0, 3, 0], "z_pos": [2, 2, 2]})
+        W = np.array([[0, 1, 0],
+                      [1, 0, 1],
+                      [1, 0, 0]])
+
+        # Dataframe with multiple columns
+        metric_1 = SumDistancesConnectedNeurons(positions)
+        expected_res_1 = 3 + 3 + 5 + 4
+        self.assertTrue(metric_1.calculate(W) == expected_res_1)
+
+        # 2D numpy array
+        metric_2 = SumDistancesConnectedNeurons(positions.to_numpy())
+        expected_res_2 = 3 + 3 + 5 + 4
+        self.assertTrue(metric_2.calculate(W) == expected_res_2)
+
+        # Series
+        metric_3 = SumDistancesConnectedNeurons(positions.x_pos)
+        expected_res_3 = 4 + 4
+        self.assertTrue(metric_3.calculate(W) == expected_res_3)
+
+        # 1D numpy array
+        metric_4 = SumDistancesConnectedNeurons(positions.z_pos.to_numpy())
+        expected_res_4 = 0
+        self.assertTrue(metric_4.calculate(W) == expected_res_4)

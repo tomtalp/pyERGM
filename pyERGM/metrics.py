@@ -646,7 +646,7 @@ class NumberOfEdgesTypesDirected(Metric):
         for i in range(self._get_total_feature_count()):
             if i in self._indices_to_ignore:
                 continue
-            type_pair = self.sorted_type_pairs[i][0] + "__" + self.sorted_type_pairs[i][1]
+            type_pair = str(self.sorted_type_pairs[i][0]) + "__" + str(self.sorted_type_pairs[i][1])
             parameter_names += (f"{metric_name}_{type_pair}",)
 
         return parameter_names
@@ -659,7 +659,7 @@ class NumberOfEdgesTypesDirected(Metric):
         ignored_features = ()
         for i in range(self._get_total_feature_count()):
             if i in self._indices_to_ignore:
-                type_pair = self.sorted_type_pairs[i][0] + "__" + self.sorted_type_pairs[i][1]
+                type_pair = str(self.sorted_type_pairs[i][0]) + "__" + str(self.sorted_type_pairs[i][1])
                 ignored_features += (f"{metric_name}_{type_pair}",)
 
         return ignored_features
@@ -1169,3 +1169,27 @@ class MetricsCollection:
             parameter_names += metric._get_ignored_features()
 
         return parameter_names
+
+
+    class SumDistancesConnectedNeurons(Metric):
+        """
+        This function calculates the sum of euclidean distances between all pairs of connected neurons.
+        rows = samples, columns = axes
+        """
+
+        def __init__(self, positions):
+            super().__init__(requires_graph=False)
+            self._is_directed = True
+            self._is_dyadic_independent = True
+            self._positions = positions
+
+        def calculate(self, input_graph: np.ndarray):
+            if isinstance(self._positions, (pd.DataFrame, pd.Series)):
+                self._positions = self._positions.values
+            if len(self._positions.shape) == 1:
+                self._positions = self._positions.reshape(-1, 1)
+            dist_matrix = distance.pdist(self._positions, metric='euclidean')
+            dist_square = distance.squareform(dist_matrix)
+            distances = dist_square[np.where(input_graph)]
+            return sum(distances)
+
