@@ -4,6 +4,9 @@ from typing import Collection
 from copy import deepcopy
 
 import numpy as np
+import pandas as pd
+from scipy.spatial import distance
+
 
 from pyERGM.utils import *
 
@@ -1171,25 +1174,25 @@ class MetricsCollection:
         return parameter_names
 
 
-    class SumDistancesConnectedNeurons(Metric):
-        """
-        This function calculates the sum of euclidean distances between all pairs of connected neurons.
-        rows = samples, columns = axes
-        """
+class SumDistancesConnectedNeurons(Metric):
+    """
+    This function calculates the sum of euclidean distances between all pairs of connected neurons.
+    rows = samples, columns = axes
+    """
 
-        def __init__(self, positions):
-            super().__init__(requires_graph=False)
-            self._is_directed = True
-            self._is_dyadic_independent = True
-            self._positions = positions
+    def __init__(self, positions):
+        super().__init__(requires_graph=False)
+        self._is_directed = True
+        self._is_dyadic_independent = True
+        self._positions = positions
 
-        def calculate(self, input_graph: np.ndarray):
-            if isinstance(self._positions, (pd.DataFrame, pd.Series)):
-                self._positions = self._positions.values
-            if len(self._positions.shape) == 1:
-                self._positions = self._positions.reshape(-1, 1)
-            dist_matrix = distance.pdist(self._positions, metric='euclidean')
-            dist_square = distance.squareform(dist_matrix)
-            distances = dist_square[np.where(input_graph)]
-            return sum(distances)
+    def calculate(self, input_graph: np.ndarray):
+        if isinstance(self._positions, (pd.DataFrame, pd.Series)):
+            self._positions = self._positions.values
+        if len(self._positions.shape) == 1:
+            self._positions = self._positions.reshape(-1, 1)
+        dist_matrix = distance.pdist(self._positions, metric='euclidean')
+        dist_square = distance.squareform(dist_matrix)
+        distances = dist_square[np.where(input_graph)]
+        return sum(distances)
 
