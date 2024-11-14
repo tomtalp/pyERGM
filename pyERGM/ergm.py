@@ -1,7 +1,7 @@
 import numpy as np
 from scipy.optimize import minimize, OptimizeResult
 from scipy.stats import f
-from pyERGM import sampling
+from pyERGM.sampling import NaiveMetropolisHastings
 
 from pyERGM.metrics import *
 
@@ -85,6 +85,8 @@ class ERGM():
 
         self._exact_average_mat = None
 
+        self.mh_sampler = NaiveMetropolisHastings(self._thetas, self._metrics_collection)
+
     def print_model_parameters(self):
         """
         Prints the parameters of the ERGM model.
@@ -116,32 +118,20 @@ class ERGM():
                                      burn_in=10000,
                                      mcmc_steps_per_sample=1000,
                                      sampling_method="metropolis_hastings",
+                                     edge_proposal_method='uniform'
                                      ):
         if sampling_method == "metropolis_hastings":
-            sampler = sampling.NaiveMetropolisHastings(self._thetas, self._metrics_collection, burn_in,
-                                                       mcmc_steps_per_sample)
-
             if seed_network is None:
                 G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
                 seed_network = nx.to_numpy_array(G)
-
-            return sampler.sample(seed_network, sample_size, replace=replace)
+            self.mh_sampler.set_thetas(self._thetas)
+            return self.mh_sampler.sample(seed_network, sample_size, replace=replace, burn_in=burn_in,
+                                          steps_per_sample=mcmc_steps_per_sample,
+                                          edge_proposal_method=edge_proposal_method)
         elif sampling_method == "exact":
             return self._generate_exact_sample(sample_size)
         else:
             raise ValueError(f"Unrecognized sampling method {sampling_method}")
-
-    # def _approximate_normalization_factor(self):
-    #     networks_for_sample = self.generate_networks_for_sample(replace=False)
-
-    #     self._normalization_factor = 0
-
-    #     for network_idx in range(self.sample_size):
-    #         network = networks_for_sample[:, :, network_idx]
-    #         weight = self.calculate_weight(network)
-    #         self._normalization_factor += weight
-
-    #     # print(f"Finished generating networks for Z, which is estimated at {self._normalization_factor}")
 
     @staticmethod
     def do_estimate_covariance_matrix(optimization_method, convergence_criterion):
@@ -200,9 +190,8 @@ class ERGM():
         if self._exact_average_mat is None:
             raise ValueError("Cannot sample exactly from a model that is not trained! Call `model.fit()` and pass an "
                              "observed network!")
-    
-        return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size)
 
+        return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size)
 
     def fit(self, observed_network,
             lr=0.1,
@@ -228,6 +217,7 @@ class ERGM():
             mple_lr=1,
             mple_stopping_thr=1e-6,
             mple_max_iter=1000,
+            edge_proposal_method='uniform'
             ):
         """
         Fit an ERGM model to a given network with one of the two fitting methods - MPLE or MCMLE.
@@ -320,6 +310,11 @@ class ERGM():
         
         mple_max_iter : int
             Optional. The maximum number of iterations for the logistic regression model in the MPLE step. *Defaults to 1000*.
+
+        edge_proposal_method : str
+            Optional. The method for the MCMC proposal distribution. This is defined as a distribution over the edges
+            of the network, which implies how to choose a proposed graph out of all graphs that are 1-edge-away from the
+            current graph. *Defaults to "uniform"*.
         
         Returns 
         -------
@@ -330,7 +325,6 @@ class ERGM():
         # calc_capital_gammas).
         if mcmc_sample_size % 2 != 0:
             mcmc_sample_size += 1
-
 
         if theta_init_method == "use_existing":
             print(f"Using existing thetas")
@@ -347,7 +341,7 @@ class ERGM():
             self._thetas = self._get_random_thetas(sampling_method="uniform")
         else:
             raise ValueError(f"Theta initialization method {theta_init_method} not supported")
-    
+
         if optimization_method not in ["newton_raphson", "gradient_descent"]:
             raise ValueError(f"Optimization method {optimization_method} not supported.")
 
@@ -378,7 +372,8 @@ class ERGM():
                 burn_in = 0
             networks_for_sample = self.generate_networks_for_sample(sample_size=mcmc_sample_size,
                                                                     seed_network=mcmc_seed_network, burn_in=burn_in,
-                                                                    mcmc_steps_per_sample=mcmc_steps_per_sample)
+                                                                    mcmc_steps_per_sample=mcmc_steps_per_sample,
+                                                                    edge_proposal_method=edge_proposal_method)
             mcmc_seed_network = networks_for_sample[:, :, -1]
 
             features_of_net_samples = self._metrics_collection.calculate_sample_statistics(networks_for_sample)
@@ -462,7 +457,6 @@ class ERGM():
             else:
                 raise ValueError(f"Convergence criterion {convergence_criterion} not defined")
 
-
         self._last_mcmc_chain_features = features_of_net_samples
 
         return grads, hotelling_statistics
@@ -483,12 +477,14 @@ class ERGM():
             print(f"Calculating MCMC diagnostics for a sample of {sampled_networks.shape[2]} networks")
             features = self._metrics_collection.calculate_sample_statistics(sampled_networks)
         elif self._last_mcmc_chain_features is not None:
-            print(f"Calculating MCMC diagnostics for the last chain, with {self._last_mcmc_chain_features.shape[1]} networks")
+            print(
+                f"Calculating MCMC diagnostics for the last chain, with {self._last_mcmc_chain_features.shape[1]} networks")
             features = self._last_mcmc_chain_features.copy()
         else:
             # TODO: decide what to do in this case. Maybe give the user an option to generate a new chain.
-            raise ValueError("No sampled networks provided and no last chain found. Either rerun with a `sampled_networks` parameter, or run the `fit` function first." )
-        
+            raise ValueError(
+                "No sampled networks provided and no last chain found. Either rerun with a `sampled_networks` parameter, or run the `fit` function first.")
+
         features_mean = np.mean(features, axis=1)
         features_std = np.std(features, axis=1)
 
@@ -502,7 +498,6 @@ class ERGM():
         for i, feature in enumerate(parameter_names):
             trace = features[i, :]
             trace_per_features[str(feature)] = trace
-
 
         quantlies_to_calculate = [0.025, 0.25, 0.5, 0.75, 0.975]
         quantiles = np.quantile(features, quantlies_to_calculate, axis=1)
@@ -539,37 +534,6 @@ class ERGM():
 
         return prob
 
-    def sample_network(self, sampling_method="NaiveMetropolisHastings", seed_network=None, steps=500):
-        """
-        Sample a network from the ERGM model using MCMC methods
-
-        Parameters
-        ----------
-        sampling_method : str
-            The method of sampling to use. Currently only `NaiveMetropolisHastings` is supported.
-        seed_network : np.ndarray
-            A seed connectivity matrix to start the MCMC sampler from.
-        steps : int
-            The number of steps to run the MCMC sampler.
-
-        Returns
-        -------
-        W : np.ndarray
-            The sampled connectivity matrix.
-        """
-        if sampling_method == "NaiveMetropolisHastings":
-            sampler = sampling.NaiveMetropolisHastings(self._thetas, self._metrics_collection)
-        else:
-            raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
-
-        if seed_network is None:
-            G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
-            seed_network = nx.to_numpy_array(G)
-
-        network = sampler.sample(seed_network, num_of_nets=1)
-
-        return network
-
     def get_model_parameters(self):
         parameter_names = self._metrics_collection.get_parameter_names()
         return dict(zip(parameter_names, self._thetas))
@@ -585,10 +549,8 @@ class ERGM():
 
         if self._is_directed:
             exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
-        
+
         return exact_average_mat
-
-
 
 
 class BruteForceERGM(ERGM):
