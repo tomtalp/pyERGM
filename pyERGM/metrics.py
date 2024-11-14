@@ -97,11 +97,11 @@ class Metric(ABC):
                     edge_idx += 1
                     if edge_idx == edges_indices_lims[1]:
                         return Xs
-        
+
         else:
-            Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count())) 
-            for i in range(self._n_nodes-1):
-                for j in range(i+1, self._n_nodes):
+            Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count()))
+            for i in range(self._n_nodes - 1):
+                for j in range(i + 1, self._n_nodes):
                     if edge_idx < edges_indices_lims[0]:
                         edge_idx += 1
                         continue
@@ -120,7 +120,6 @@ class Metric(ABC):
                     edge_idx += 1
                     if edge_idx == edges_indices_lims[1]:
                         return Xs
-
 
     def _get_metric_names(self):
         """
@@ -1146,7 +1145,7 @@ class MetricsCollection:
 
         if self.is_directed:
             ys = observed_network[~np.eye(n_nodes, dtype=bool)].flatten()[
-                   edges_indices_lims[0]:edges_indices_lims[1], None]
+                 edges_indices_lims[0]:edges_indices_lims[1], None]
         else:
             ys = observed_network[np.triu_indices(n_nodes, 1)][edges_indices_lims[0]:edges_indices_lims[1], None]
         return Xs, ys
@@ -1169,3 +1168,62 @@ class MetricsCollection:
             parameter_names += metric._get_ignored_features()
 
         return parameter_names
+
+    def bootstrap_observed_features(self, observed_network: np.ndarray, num_subsamples: int = 1000):
+        observed_net_size = observed_network.shape[0]
+        second_half_size = observed_net_size // 2
+        first_half_size = observed_net_size - second_half_size
+        first_halves = np.zeros((first_half_size, first_half_size, num_subsamples))
+        second_halves = np.zeros((second_half_size, second_half_size, num_subsamples))
+        first_halves_indices = np.zeros((first_half_size, num_subsamples))
+        second_halves_indices = np.zeros((second_half_size, num_subsamples))
+        for i in range(num_subsamples):
+            first_half_indices = np.random.choice(observed_net_size, size=first_half_size, replace=False).reshape(
+                (first_half_size, 1))
+            second_half_indices = np.array(
+                [i for i in range(observed_net_size) if i not in first_half_indices]).reshape((second_half_size, 1))
+            first_halves[:, :, i] = observed_network[first_half_indices, first_half_indices.T]
+            second_halves[:, :, i] = observed_network[second_half_indices, second_half_indices.T]
+            first_halves_indices[:, i] = first_half_indices
+            second_halves_indices[:, i] = second_half_indices
+
+        bootstrapped_features = np.zeros((self.num_of_features, num_subsamples))
+        # TODO: the next code section is copied from `calculate_for_sample`. The difference is that here we use
+        #  `first_halves` and `second_halves` instead of `networks_sample` and a different callable for each metric.
+        #  Maybe is can be handled in a single method that gets a callable for metrics and **kwargs or something like
+        #  that.
+        if self.requires_graph:
+            first_halves_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in first_halves]
+            second_halves_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in second_halves]
+
+        if self.use_sparse_matrix:
+            first_halves_as_sparse_tensor = np_tensor_to_sparse_tensor(first_halves)
+            second_halves_as_sparse_tensor = np_tensor_to_sparse_tensor(second_halves)
+
+        feature_idx = 0
+        for metric in self.metrics:
+            n_features_from_metric = metric._get_effective_feature_count()
+
+            if metric.requires_graph:
+                first_halves_to_use = first_halves_as_graphs
+                second_halves_to_use = second_halves_as_graphs
+            elif self.use_sparse_matrix:
+                first_halves_to_use = first_halves_as_sparse_tensor
+                second_halves_to_use = second_halves_as_sparse_tensor
+            else:
+                first_halves_to_use = first_halves
+                second_halves_to_use = second_halves
+
+            cur_metric_bootstrapped_features = metric.calculate_bootstrapped_features(
+                first_halves_to_use, second_halves_to_use,
+                first_halves_indices, second_halves_indices)
+
+            if isinstance(cur_metric_bootstrapped_features, torch.Tensor):
+                if cur_metric_bootstrapped_features.is_sparse:
+                    cur_metric_bootstrapped_features = cur_metric_bootstrapped_features.to_dense()
+                cur_metric_bootstrapped_features = cur_metric_bootstrapped_features.numpy()
+
+            bootstrapped_features[feature_idx:feature_idx + n_features_from_metric] = cur_metric_bootstrapped_features
+            feature_idx += n_features_from_metric
+
+        return bootstrapped_features
