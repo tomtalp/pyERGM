@@ -23,11 +23,11 @@ class Metric(ABC):
 
         if hasattr(self, "_indices_from_user") and self._indices_from_user is not None:
             self.update_indices_to_ignore(self._indices_from_user)
-    
+
     def _handle_indices_to_ignore(self, res, axis=0):
         if self._indices_to_ignore is None:
             return res
-        
+
         if axis > 1:
             raise ValueError("Axis should be 0 or 1")
         if axis == 1:
@@ -341,8 +341,9 @@ class BaseDegreeVector(Metric):
 
         self._is_directed = is_directed
 
-    def _get_total_feature_count(self): 
+    def _get_total_feature_count(self):
         return self._n_nodes
+
 
 class InDegree(BaseDegreeVector):
     """
@@ -596,7 +597,7 @@ class NumberOfEdgesTypesDirected(Metric):
 
     def __init__(self, exogenous_attr: Collection, indices_from_user=None):
         self.exogenous_attr = exogenous_attr
-        
+
         self.unique_types = sorted(list(set(self.exogenous_attr)))
 
         super().__init__()
@@ -613,7 +614,6 @@ class NumberOfEdgesTypesDirected(Metric):
 
         self.sorted_type_pairs = get_sorted_type_pairs(self.unique_types)
         self._calc_edge_type_idx_assignment()
-
 
     def _calc_edge_type_idx_assignment(self):
         """
@@ -673,7 +673,6 @@ class NumberOfEdgesTypesDirected(Metric):
         change_score[idx_in_features_vec] = sign
 
         return self._handle_indices_to_ignore(change_score)
-    
 
     def calculate_change_score_full_network(self, current_network: np.ndarray):
         """
@@ -1238,7 +1237,8 @@ class MetricsCollection:
 
         return parameter_names
 
-    def bootstrap_observed_features(self, observed_network: np.ndarray, num_subsamples: int = 1000):
+    def bootstrap_observed_features(self, observed_network: np.ndarray, num_subsamples: int = 1000,
+                                    splitting_method: str = 'uniform'):
         observed_net_size = observed_network.shape[0]
         second_half_size = observed_net_size // 2
         first_half_size = observed_net_size - second_half_size
@@ -1255,14 +1255,13 @@ class MetricsCollection:
             #  values of all metrics.
             #  NOTE! If there are multiple type metrics, we will probably need to sample according to sub-types defined
             #  as the Cartesian product of all types.
-            first_half_indices = np.random.choice(observed_net_size, size=first_half_size, replace=False).reshape(
-                (first_half_size, 1))
-            second_half_indices = np.array(
-                [i for i in range(observed_net_size) if i not in first_half_indices]).reshape((second_half_size, 1))
+            first_half_indices, second_half_indices = split_network_for_bootstrapping(observed_net_size,
+                                                                                      first_half_size,
+                                                                                      splitting_method=splitting_method)
             first_halves[:, :, i] = observed_network[first_half_indices, first_half_indices.T]
             second_halves[:, :, i] = observed_network[second_half_indices, second_half_indices.T]
-            first_halves_indices[:, i] = first_half_indices
-            second_halves_indices[:, i] = second_half_indices
+            first_halves_indices[:, i] = first_half_indices[:, 0]
+            second_halves_indices[:, i] = second_half_indices[:, 0]
 
         bootstrapped_features = np.zeros((self.num_of_features, num_subsamples))
         # TODO: the next code section is copied from `calculate_for_sample`. The difference is that here we use
