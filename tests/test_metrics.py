@@ -206,27 +206,6 @@ class TestReciprocity(unittest.TestCase):
 
 
 class TestDegreeMetrics(unittest.TestCase):
-    def test_get_effective_feature_count(self):
-        receiver = InDegree()
-        n = 18
-        receiver._n_nodes = n
-        self.assertEqual(receiver._get_effective_feature_count(), n)
-
-        receiver = InDegree(indices_to_ignore=[0])
-        n = 18
-        receiver._n_nodes = n
-        self.assertEqual(receiver._get_effective_feature_count(), n - 1)
-
-        sender = OutDegree()
-        n = 18
-        sender._n_nodes = n
-        self.assertEqual(sender._get_effective_feature_count(), n)
-
-        sender = OutDegree(indices_to_ignore=[0])
-        n = 18
-        sender._n_nodes = n
-        self.assertEqual(sender._get_effective_feature_count(), n - 1)
-
     def test_calculate(self):
         W = np.array([
             [0, 1, 0, 1],
@@ -520,6 +499,27 @@ class TestNodeAttrSums(unittest.TestCase):
 
 
 class TestMetricsCollection(unittest.TestCase):
+
+    def test_get_effective_feature_count(self):
+        n = 18
+        receiver = InDegree()
+        
+        collection = MetricsCollection([receiver], is_directed=True, n_nodes=n, do_copy_metrics=False)
+        self.assertEqual(receiver._get_effective_feature_count(), n)
+
+        receiver = InDegree(indices_from_user=[0])
+        collection = MetricsCollection([receiver], is_directed=True, n_nodes=n, do_copy_metrics=False)
+        self.assertEqual(receiver._get_effective_feature_count(), n-1)
+
+        sender = OutDegree()
+        
+        collection = MetricsCollection([sender], is_directed=True, n_nodes=n, do_copy_metrics=False)
+        self.assertEqual(sender._get_effective_feature_count(), n)
+
+        sender = OutDegree(indices_from_user=[0])
+        collection = MetricsCollection([sender], is_directed=True, n_nodes=n, do_copy_metrics=False)
+        self.assertEqual(sender._get_effective_feature_count(), n-1)
+
     def test_metrics_setup(self):
         metrics = [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()]
         collection = MetricsCollection(metrics, is_directed=True, n_nodes=3)
@@ -677,11 +677,11 @@ class TestMetricsCollection(unittest.TestCase):
             # Check if the correct metrics were trimmed
             for metric in scenario_data["metrics"]:
                 if metric in scenario_data["expected_trimmed_metrics"].keys():
-                    self.assertEqual(set(metric._indices_to_ignore),
+                    self.assertEqual(set(np.where(metric._indices_to_ignore)[0]),
                                      set(scenario_data["expected_trimmed_metrics"][metric]))
                 elif hasattr(metric,
                              "_indices_to_ignore"):  # Only metrics with a base_idx can be trimmed. The others aren't tested
-                    self.assertEqual(metric._indices_to_ignore, [])
+                    self.assertFalse(np.any(metric._indices_to_ignore))
                 elif metric in scenario_data["expected_eliminated_metrics"]:
                     self.assertTrue(metric not in [m for m in collection.metrics])
                     self.assertEqual(collection.num_of_metrics, len(collection.metrics))
@@ -790,9 +790,10 @@ class TestMetricsCollection(unittest.TestCase):
         collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
 
         # The collinearity fixer is supposed to remove one attribute from the NumberOfEdgesTypesDirected metric
-        self.assertEqual(len(collection.metrics[1]._indices_to_ignore), 1)
+        # self.assertEqual(len(collection.metrics[1]._indices_to_ignore), 1)
+        self.assertEqual(np.sum(collection.metrics[1]._indices_to_ignore), 1)
 
-        idx_to_ignore = collection.metrics[1]._indices_to_ignore[0]
+        idx_to_ignore = np.where(collection.metrics[1]._indices_to_ignore)[0][0]
 
         res = collection.calculate_change_scores_all_edges(W1)
 
@@ -832,9 +833,9 @@ class TestMetricsCollection(unittest.TestCase):
         collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
 
         # The collinearity fixer is supposed to remove one attribute from the NumberOfEdgesTypesDirected metric
-        self.assertEqual(len(collection.metrics[1]._indices_to_ignore), 1)
+        self.assertEqual(np.sum(collection.metrics[1]._indices_to_ignore), 1)
 
-        idx_to_ignore = collection.metrics[1]._indices_to_ignore[0]
+        idx_to_ignore = np.where(collection.metrics[1]._indices_to_ignore)[0][0]
 
         Xs_full, ys_full = collection.prepare_mple_data(W1)
 

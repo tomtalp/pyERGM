@@ -494,7 +494,8 @@ class ERGM():
             features = features - observed_features[:, None]
 
         trace_per_features = {}
-        for i, feature in enumerate(self._metrics_collection.metrics):
+        parameter_names = self._metrics_collection.get_parameter_names()
+        for i, feature in enumerate(parameter_names):
             trace = features[i, :]
             trace_per_features[str(feature)] = trace
 
@@ -572,33 +573,32 @@ class BruteForceERGM(ERGM):
                          metrics_collection,
                          is_directed,
                          initial_thetas)
-        self._all_weights = self._calc_all_weights()
-        self._normalization_factor = self._all_weights.sum()
+        
+        if is_directed:
+            num_connections = (n_nodes ** 2 - n_nodes)
+        else:
+            num_connections = (n_nodes ** 2 - n_nodes) // 2
+            
+        self._num_nets = 2 ** num_connections
 
+        self._num_features = self._metrics_collection.num_of_features
+
+        
+        all_networks = np.zeros((self._n_nodes, self._n_nodes, self._num_nets))
+        for i in range(self._num_nets):
+            all_networks[:, :, i] = construct_adj_mat_from_int(i, self._n_nodes, is_directed=is_directed)
+        
+        self.all_features_by_all_nets = self._metrics_collection.calculate_sample_statistics(all_networks)
+
+        self._all_weights = np.exp(np.sum(self._thetas[:, None] * self.all_features_by_all_nets, axis=0))
+        self._normalization_factor = self._all_weights.sum()
+        
     def _validate_net_size(self):
         return (
                 (self._is_directed and self._n_nodes <= BruteForceERGM.MAX_NODES_BRUTE_FORCE_DIRECTED)
                 or
                 (not self._is_directed and self._n_nodes <= BruteForceERGM.MAX_NODES_BRUTE_FORCE_NOT_DIRECTED)
         )
-
-    def _calc_all_weights(self):
-        if not self._validate_net_size():
-            directed_str = 'directed' if self._is_directed else 'not directed'
-            size_limit = BruteForceERGM.MAX_NODES_BRUTE_FORCE_DIRECTED if self._is_directed else (
-                BruteForceERGM.MAX_NODES_BRUTE_FORCE_NOT_DIRECTED)
-            raise ValueError(
-                f"The number of nodes {self._n_nodes} is larger than the maximum allowed for brute force of "
-                f"{directed_str} graphs calculations {size_limit}")
-        num_pos_connects = self._n_nodes * (self._n_nodes - 1)
-        if not self._is_directed:
-            num_pos_connects //= 2
-        space_size = 2 ** num_pos_connects
-        all_weights = np.zeros(space_size)
-        for i in range(space_size):
-            cur_adj_mat = construct_adj_mat_from_int(i, self._n_nodes, self._is_directed)
-            all_weights[i] = super().calculate_weight(cur_adj_mat)
-        return all_weights
 
     def calculate_weight(self, W: np.ndarray):
         adj_mat_idx = construct_int_from_adj_mat(W, self._is_directed)
@@ -623,13 +623,8 @@ class BruteForceERGM(ERGM):
                                    is_directed=self._is_directed)
             observed_features = model._metrics_collection.calculate_statistics(observed_network)
             all_probs = model._all_weights / model._normalization_factor
-            num_features = model._metrics_collection.num_of_metrics
-            num_nets = all_probs.size
-            all_features_by_all_nets = np.zeros((num_features, num_nets))
-            for i in range(num_nets):
-                all_features_by_all_nets[:, i] = model._metrics_collection.calculate_statistics(
-                    construct_adj_mat_from_int(i, self._n_nodes, self._is_directed))
-            expected_features = all_features_by_all_nets @ all_probs
+                        
+            expected_features = self.all_features_by_all_nets @ all_probs
             return expected_features - observed_features
 
         def after_iteration_callback(intermediate_result: OptimizeResult):
@@ -639,9 +634,10 @@ class BruteForceERGM(ERGM):
                   f'training: {cur_time - self.optimization_start_time} '
                   f'log likelihood: {-intermediate_result.fun}')
 
+
         self.optimization_iter = 0
         print("optimization started")
         self.optimization_start_time = time.time()
         res = minimize(nll, self._thetas, jac=nll_grad, callback=after_iteration_callback)
         self._thetas = res.x
-        # print(res)
+        return res
