@@ -573,7 +573,14 @@ class BruteForceERGM(ERGM):
                          metrics_collection,
                          is_directed,
                          initial_thetas)
-        self._num_nets = 2**(n_nodes ** 2 - n_nodes)
+        
+        if is_directed:
+            num_connections = (n_nodes ** 2 - n_nodes)
+        else:
+            num_connections = (n_nodes ** 2 - n_nodes) // 2
+            
+        self._num_nets = 2 ** num_connections
+
         self._num_features = self._metrics_collection.num_of_features
 
         
@@ -592,28 +599,6 @@ class BruteForceERGM(ERGM):
                 or
                 (not self._is_directed and self._n_nodes <= BruteForceERGM.MAX_NODES_BRUTE_FORCE_NOT_DIRECTED)
         )
-
-    def _calc_all_weights(self):
-        if not self._validate_net_size():
-            directed_str = 'directed' if self._is_directed else 'not directed'
-            size_limit = BruteForceERGM.MAX_NODES_BRUTE_FORCE_DIRECTED if self._is_directed else (
-                BruteForceERGM.MAX_NODES_BRUTE_FORCE_NOT_DIRECTED)
-            raise ValueError(
-                f"The number of nodes {self._n_nodes} is larger than the maximum allowed for brute force of "
-                f"{directed_str} graphs calculations {size_limit}")
-        num_pos_connects = self._n_nodes * (self._n_nodes - 1)
-        if not self._is_directed:
-            num_pos_connects //= 2
-        space_size = 2 ** num_pos_connects
-        all_weights = np.zeros(space_size)
-
-        # for i in range(space_size):
-        #     cur_adj_mat = construct_adj_mat_from_int(i, self._n_nodes, self._is_directed)
-        #     all_weights[i] = super().calculate_weight(cur_adj_mat)
-
-        all_weights 
-
-        return all_weights
 
     def calculate_weight(self, W: np.ndarray):
         adj_mat_idx = construct_int_from_adj_mat(W, self._is_directed)
