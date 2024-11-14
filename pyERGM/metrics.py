@@ -153,6 +153,32 @@ class Metric(ABC):
 
         return ignored_features
 
+    # TODO: we don't support torch.sparse_tensors in the type hints, and don't really use them, consider get rid of all
+    #  of them.
+    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray | Collection[nx.Graph],
+                                        second_halves_to_use: np.ndarray | Collection[nx.Graph],
+                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
+        """
+        Calculate the features over multiple samples of subnetworks of an observed network (bootstrapping the features).
+        Parameters
+        ----------
+        first_halves_to_use
+            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
+            nodes in the large network.
+        second_halves_to_use
+            The subnetworks formed by the complementary set of nodes of the large network for each sample.
+        first_halves_indices
+            The indices of the nodes in the first half of the large network for each sample, according to the ordering
+            of the nodes in the large network.
+        second_halves_indices
+            The indices of the nodes in the second half of the large network for each sample, according to the ordering
+
+        Returns
+        -------
+
+        """
+        ...
+
 
 class NumberOfEdgesUndirected(Metric):
     def __str__(self):
@@ -174,6 +200,21 @@ class NumberOfEdgesUndirected(Metric):
         Sum each matrix over all matrices in sample
         """
         return networks_sample.sum(axis=(0, 1)) // 2
+
+    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
+                                        second_halves_to_use: np.ndarray,
+                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
+        """
+        Calculates the bootstrapped number of edges, by counting edges in the sampled subnetworks, and normalizing by
+        network size (i.e., calculating the fraction of existing edges out of all possible ones in sampled subnetworks,
+        and multiplying by the number of possible edges in the full observed network).
+        """
+        num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
+        num_nodes_in_first_half = first_halves_indices.shape[0]
+        num_possible_edges_in_observed = num_nodes_in_observed * (num_nodes_in_observed - 1) / 2
+        num_possible_edges_in_first_half = num_nodes_in_first_half * (num_nodes_in_first_half - 1) / 2
+        return self.calculate_for_sample(
+            first_halves_to_use) * num_possible_edges_in_observed / num_possible_edges_in_first_half
 
 
 class NumberOfEdgesDirected(Metric):
@@ -215,6 +256,21 @@ class NumberOfEdgesDirected(Metric):
     @njit
     def calculate_mple_regressors(observed_network: np.ndarray, edges_indices_lims: tuple[int]):
         return np.ones((edges_indices_lims[1] - edges_indices_lims[0], 1))
+
+    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
+                                        second_halves_to_use: np.ndarray,
+                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
+        """
+        Calculates the bootstrapped number of edges, by counting edges in the sampled subnetworks, and normalizing by
+        network size (i.e., calculating the fraction of existing edges out of all possible ones in sampled subnetworks,
+        and multiplying by the number of possible edges in the full observed network).
+        """
+        num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
+        num_nodes_in_first_half = first_halves_indices.shape[0]
+        num_possible_edges_in_observed = num_nodes_in_observed * (num_nodes_in_observed - 1)
+        num_possible_edges_in_first_half = num_nodes_in_first_half * (num_nodes_in_first_half - 1)
+        return self.calculate_for_sample(
+            first_halves_to_use) * num_possible_edges_in_observed / num_possible_edges_in_first_half
 
 
 # TODO: change the name of this one to undirected and implement also a directed version?
@@ -473,8 +529,8 @@ class ExWeightNumEdges(Metric):
 
     def calculate(self, input: np.ndarray):
         # TODO - Since most of our focus is on the `calculate_for_sample` functions,
-        # we can convert all individual calculate(x) functions to calculate_for_sample([x])
-        # and reuse code.
+        #  we can convert all individual calculate(x) functions to calculate_for_sample([x])
+        #  and reuse code.
         res = np.einsum('ij,kij->k', input, self.edge_weights)
         if not self._is_directed:
             res = res / 2
@@ -1178,6 +1234,14 @@ class MetricsCollection:
         first_halves_indices = np.zeros((first_half_size, num_subsamples))
         second_halves_indices = np.zeros((second_half_size, num_subsamples))
         for i in range(num_subsamples):
+            # TODO: currently we simply split randomly into 2 halves, we want to support other methods for sampling half
+            #  of the neurons, and specifically sampling half of the neurons of each if there is a metric with types
+            #  involved.
+            #  NOTE! This will probably imposes to have another field in `Metric` indicating what is the preferred way
+            #  for bootstrapping sampling, and `MetricsCollection` will have to decide somehow what to do based on the
+            #  values of all metrics.
+            #  NOTE! If there are multiple type metrics, we will probably need to sample according to sub-types defined
+            #  as the Cartesian product of all types.
             first_half_indices = np.random.choice(observed_net_size, size=first_half_size, replace=False).reshape(
                 (first_half_size, 1))
             second_half_indices = np.array(
