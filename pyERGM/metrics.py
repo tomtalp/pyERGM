@@ -727,6 +727,37 @@ class NodeAttrSumIn(ExWeightNumEdges):
         return "node_attribute_in"
 
 
+class SumDistancesConnectedNeurons(Metric):
+    """
+    This function calculates the sum of euclidean distances between all pairs of connected neurons.
+    rows = samples, columns = axes
+    """
+
+    # for now only works for directed graphs
+    def __init__(self, positions: pd.DataFrame | pd.Series | np.ndarray, is_directed: bool):
+        super().__init__(requires_graph=False)
+        self._is_directed = is_directed
+        self._is_dyadic_independent = True
+
+        # check inputs
+        if isinstance(positions, (pd.DataFrame, pd.Series)):
+            self._positions = positions.to_numpy(copy=True)
+        elif isinstance(positions, np.ndarray):
+            self._positions = positions.copy()
+        else:
+            raise ValueError(f"Unsupported type of positions: {type(positions)}. Supported types are pd.DataFrame, "
+                             f"pd.Series and np.ndarray.")
+        if len(self._positions.shape) == 1:
+            self._positions = self._positions.reshape(-1, 1)
+
+        # calculate distances
+        self._distances = distance.squareform(distance.pdist(self._positions, metric='euclidean'))
+
+    def calculate(self, input_graph: np.ndarray):
+        sum_distances = np.sum(self._distances * input_graph)
+        return sum_distances
+
+
 class MetricsCollection:
 
     def __init__(self,
@@ -1174,25 +1205,5 @@ class MetricsCollection:
         return parameter_names
 
 
-class SumDistancesConnectedNeurons(Metric):
-    """
-    This function calculates the sum of euclidean distances between all pairs of connected neurons.
-    rows = samples, columns = axes
-    """
 
-    def __init__(self, positions):
-        super().__init__(requires_graph=False)
-        self._is_directed = True
-        self._is_dyadic_independent = True
-        self._positions = positions
-
-    def calculate(self, input_graph: np.ndarray):
-        if isinstance(self._positions, (pd.DataFrame, pd.Series)):
-            self._positions = self._positions.values
-        if len(self._positions.shape) == 1:
-            self._positions = self._positions.reshape(-1, 1)
-        dist_matrix = distance.pdist(self._positions, metric='euclidean')
-        dist_square = distance.squareform(dist_matrix)
-        distances = dist_square[np.where(input_graph)]
-        return sum(distances)
 
