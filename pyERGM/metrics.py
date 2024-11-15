@@ -555,6 +555,23 @@ class TotalReciprocity(Metric):
             raise ValueError(f"Unsupported type of sample: {type(networks_sample)}! Supported types are np.ndarray and "
                              f"torch.Tensor with is_sparse=True")
 
+    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
+                                        second_halves_to_use: np.ndarray,
+                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
+        """
+        Calculates the bootstrapped number of reciprocal dyads, by counting such pairs in the sampled subnetworks, and
+        normalizing by network size (i.e., calculating the fraction of existing reciprocal dyads out of all possible
+        ones in sampled subnetworks, and multiplying by the number of possible reciprocal dyads in the full observed
+        network).
+        """
+        # TODO: I think it's identical to the function of NumberOfEdgesUndirected, consider replicating code.
+        num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
+        num_nodes_in_first_half = first_halves_indices.shape[0]
+        num_possible_rec_dyads_observed = num_nodes_in_observed * (num_nodes_in_observed - 1) / 2
+        num_possible_rec_dyads_first_half = num_nodes_in_first_half * (num_nodes_in_first_half - 1) / 2
+        return self.calculate_for_sample(
+            first_halves_to_use) * num_possible_rec_dyads_observed / num_possible_rec_dyads_first_half
+
 
 class ExWeightNumEdges(Metric):
     """
