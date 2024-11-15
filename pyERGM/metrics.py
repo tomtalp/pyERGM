@@ -176,6 +176,9 @@ class Metric(ABC):
 
     # TODO: we don't support torch.sparse_tensors in the type hints, and don't really use them, consider get rid of all
     #  of them.
+    # TODO: we probably will want to validate that all metrics in `MetricsCollection` have this attribute in case the
+    #  convergence condition of `ERGM.fit()` will use obsreved network bootstrapping, so it might not be a good idea to
+    #  have this empty method here.
     def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray | Collection[nx.Graph],
                                         second_halves_to_use: np.ndarray | Collection[nx.Graph],
                                         first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
@@ -334,8 +337,8 @@ class BaseDegreeVector(Metric):
     which indices the calculation ignores.
     """
 
-    def __init__(self, requires_graph: bool, is_directed: bool, indices_from_user=None):
-        super().__init__(requires_graph=requires_graph)
+    def __init__(self, is_directed: bool, indices_from_user=None):
+        super().__init__(requires_graph=False)
 
         self._indices_from_user = indices_from_user.copy() if indices_from_user is not None else None
 
@@ -343,6 +346,36 @@ class BaseDegreeVector(Metric):
 
     def _get_total_feature_count(self):
         return self._n_nodes
+
+    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
+                                        second_halves_to_use: np.ndarray,
+                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
+        """
+        Calculates the bootstrapped degree, by counting the connections of each node in the sampled subnetworks, and
+        normalizing by network size (i.e., calculating the fraction of existing edges out of all possible ones for each
+        node in sampled subnetworks, and multiplying by the number of possible edges of a single node in the full
+        observed network).
+        Each node appears in one of the sub-samples, so both are used, and the indices are used to order the calculated
+        values in the entire features vector.
+        """
+        num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
+        num_nodes_in_first_half = first_halves_indices.shape[0]
+        num_nodes_in_second_half = second_halves_indices.shape[0]
+
+        # NOTE! we want the estimated covariance matrix from the bootstrap to match the dimension of samples from the
+        # model during optimization, so we must first calculate the degrees for all the nodes (thus the initialization
+        # of a new instance, which makes sure that no indices are ignored), and then ignore the indices that will be
+        # removed by the metric.
+        fresh_instance = self.__class__()  # No child class has a `is_directed` input to the constructor.
+        degrees_first_halves = fresh_instance.calculate_for_sample(first_halves_to_use) * (
+                num_nodes_in_observed - 1) / (num_nodes_in_first_half - 1)
+        degrees_second_halves = fresh_instance.calculate_for_sample(second_halves_to_use) * (
+                num_nodes_in_observed - 1) / (num_nodes_in_second_half - 1)
+        num_sub_samples = first_halves_to_use.shape[2]
+        bootstrapped_degrees = np.zeros((self._n_nodes, num_sub_samples))
+        bootstrapped_degrees[first_halves_indices, np.arange(num_sub_samples)] = degrees_first_halves
+        bootstrapped_degrees[second_halves_indices, np.arange(num_sub_samples)] = degrees_second_halves
+        return self._handle_indices_to_ignore(bootstrapped_degrees)
 
 
 class InDegree(BaseDegreeVector):
@@ -354,7 +387,7 @@ class InDegree(BaseDegreeVector):
         return "indegree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(requires_graph=False, is_directed=True, indices_from_user=indices_from_user)
+        super().__init__(is_directed=True, indices_from_user=indices_from_user)
         self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
@@ -381,7 +414,7 @@ class InDegree(BaseDegreeVector):
             values = self._handle_indices_to_ignore(summed_tensor.values())
             return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
         else:
-            return summed_tensor[~self._indices_to_ignore]
+            return self._handle_indices_to_ignore(summed_tensor)
 
 
 class OutDegree(BaseDegreeVector):
@@ -393,7 +426,7 @@ class OutDegree(BaseDegreeVector):
         return "outdegree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(requires_graph=False, is_directed=True, indices_from_user=indices_from_user)
+        super().__init__(is_directed=True, indices_from_user=indices_from_user)
         self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
@@ -420,7 +453,7 @@ class OutDegree(BaseDegreeVector):
             values = self._handle_indices_to_ignore(summed_tensor.values())
             return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
         else:
-            return summed_tensor[~self._indices_to_ignore]
+            return self._handle_indices_to_ignore(summed_tensor)
 
 
 class UndirectedDegree(BaseDegreeVector):
@@ -432,7 +465,7 @@ class UndirectedDegree(BaseDegreeVector):
         return "undirected_degree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(requires_graph=False, is_directed=False, indices_from_user=indices_from_user)
+        super().__init__(is_directed=False, indices_from_user=indices_from_user)
         self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
@@ -1244,8 +1277,8 @@ class MetricsCollection:
         first_half_size = observed_net_size - second_half_size
         first_halves = np.zeros((first_half_size, first_half_size, num_subsamples))
         second_halves = np.zeros((second_half_size, second_half_size, num_subsamples))
-        first_halves_indices = np.zeros((first_half_size, num_subsamples))
-        second_halves_indices = np.zeros((second_half_size, num_subsamples))
+        first_halves_indices = np.zeros((first_half_size, num_subsamples), dtype=int)
+        second_halves_indices = np.zeros((second_half_size, num_subsamples), dtype=int)
         for i in range(num_subsamples):
             # TODO: currently we simply split randomly into 2 halves, we want to support other methods for sampling half
             #  of the neurons, and specifically sampling half of the neurons of each if there is a metric with types

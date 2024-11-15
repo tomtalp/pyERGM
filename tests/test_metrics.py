@@ -902,7 +902,17 @@ class TestMetricsCollection(unittest.TestCase):
         metrics = [NumberOfEdgesDirected()]
         metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
         bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
-
         expected_bootstrapped_features = np.array([6]).reshape(1,1)  # np.sum(W[[0,2],[0,2].T]) / 2 * 12
+        self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
 
+        metrics = [InDegree()]
+        metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
+        bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
+        expected_bootstrapped_features = np.array([3, 3, 0, 3]).reshape(4,1) # e.g., the first is given by np.sum(W[[0,2],[0,2].T], axis=0) / (2-1) * (4-1)
+        self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
+
+        metrics = [NumberOfEdgesDirected(), OutDegree()]
+        metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
+        bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
+        expected_bootstrapped_features = np.array([6, 3, 3, 3]).reshape(4,1) # Ignoring the out-degree of the first node
         self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
