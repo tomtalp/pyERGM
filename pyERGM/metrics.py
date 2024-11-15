@@ -367,8 +367,13 @@ class BaseDegreeVector(Metric):
         # of a new instance, which makes sure that no indices are ignored), and then ignore the indices that will be
         # removed by the metric.
         fresh_instance = self.__class__()  # No child class has a `is_directed` input to the constructor.
+        # Needed if it's `UndirectedDegree`, and the default `calculate_for_sample` is called (otherwise
+        # `UndirectedDegree._get_effective_feature_count()` will return `None`, and the method won't know what are the
+        # dimensions of the features X samples matrix.
+        fresh_instance._n_nodes = num_nodes_in_first_half
         degrees_first_halves = fresh_instance.calculate_for_sample(first_halves_to_use) * (
                 num_nodes_in_observed - 1) / (num_nodes_in_first_half - 1)
+        fresh_instance._n_nodes = num_nodes_in_second_half
         degrees_second_halves = fresh_instance.calculate_for_sample(second_halves_to_use) * (
                 num_nodes_in_observed - 1) / (num_nodes_in_second_half - 1)
         num_sub_samples = first_halves_to_use.shape[2]

@@ -896,23 +896,39 @@ class TestMetricsCollection(unittest.TestCase):
             [0, 1, 1, 0]
         ])
 
+        W_symmetric = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [0, 0, 0, 1],
+            [0, 1, 1, 0]
+        ])
+
         mock_split_network_for_bootstrapping.return_value = (
-        np.array([0, 2]).reshape((2, 1)), np.array([1, 3]).reshape((2, 1)))
+            np.array([0, 2]).reshape((2, 1)), np.array([1, 3]).reshape((2, 1)))
 
         metrics = [NumberOfEdgesDirected()]
         metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
         bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
-        expected_bootstrapped_features = np.array([6]).reshape(1,1)  # np.sum(W[[0,2],[0,2].T]) / 2 * 12
+        expected_bootstrapped_features = np.array([6]).reshape(1, 1)  # np.sum(W[[0,2],[0,2].T]) / 2 * 12
+        self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
+
+        metrics = [UndirectedDegree()]
+        metrics_collection = MetricsCollection(metrics, is_directed=False, n_nodes=W_symmetric.shape[0])
+        bootstrapped_features = metrics_collection.bootstrap_observed_features(W_symmetric, 1)
+        expected_bootstrapped_features = np.array([0, 3, 0, 3]).reshape(4,
+                                                                        1)  # nodes 0,2 are not connected, and nodes 1,3 are.
         self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
 
         metrics = [InDegree()]
         metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
         bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
-        expected_bootstrapped_features = np.array([3, 3, 0, 3]).reshape(4,1) # e.g., the first is given by np.sum(W[[0,2],[0,2].T], axis=0) / (2-1) * (4-1)
+        expected_bootstrapped_features = np.array([3, 3, 0, 3]).reshape(4,
+                                                                        1)  # e.g., the first is given by np.sum(W[[0,2],[0,2].T], axis=0) / (2-1) * (4-1)
         self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
 
         metrics = [NumberOfEdgesDirected(), OutDegree()]
         metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
         bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
-        expected_bootstrapped_features = np.array([6, 3, 3, 3]).reshape(4,1) # Ignoring the out-degree of the first node
+        expected_bootstrapped_features = np.array([6, 3, 3, 3]).reshape(4,
+                                                                        1)  # Ignoring the out-degree of the first node
         self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
