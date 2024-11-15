@@ -217,7 +217,8 @@ class ERGM():
             mple_lr=1,
             mple_stopping_thr=1e-6,
             mple_max_iter=1000,
-            edge_proposal_method='uniform'
+            edge_proposal_method='uniform',
+            **kwargs
             ):
         """
         Fit an ERGM model to a given network with one of the two fitting methods - MPLE or MCMLE.
@@ -345,9 +346,24 @@ class ERGM():
         if optimization_method not in ["newton_raphson", "gradient_descent"]:
             raise ValueError(f"Optimization method {optimization_method} not supported.")
 
-            # As in the constructor, the sample size must be even.
+        # As in the constructor, the sample size must be even.
         if max_nets_for_sample % 2 != 0:
             max_nets_for_sample += 1
+
+        if convergence_criterion == "observed_bootstrap":
+            for metric in self._metrics_collection.metrics:
+                if not hasattr(metric, "calculate_bootstrapped_features"):
+                    raise ValueError(
+                        f"metric {metric.name} does not have a calculate_bootstrapped_features method, the "
+                        f"model doesn't support observed_bootstrap as a convergence criterion.")
+            num_subsamples_data = kwargs.get("num_subsamples_data", 1000)
+            data_splitting_method = kwargs.get("data_splitting_method", "uniform")
+            bootstrapped_features = self._metrics_collection.bootstrap_observed_features(observed_network,
+                                                                                         num_subsamples=num_subsamples_data,
+                                                                                         splitting_method=data_splitting_method)
+            observed_covariance = covariance_matrix_estimation(bootstrapped_features,
+                                                               bootstrapped_features.mean(axis=1), method='naive')
+            inv_observed_covariance = np.linalg.inv(observed_covariance)
 
         print(f"Initial thetas - {self._thetas}")
         print("optimization started")
@@ -452,6 +468,31 @@ class ERGM():
             elif convergence_criterion == "zero_grad_norm":
                 if np.linalg.norm(sliding_window_grads) <= l2_grad_thresh:
                     print(f"Reached threshold of {l2_grad_thresh} after {i} steps. DONE!")
+                    grads = grads[:i]
+                    break
+            elif convergence_criterion == "observed_bootstrap":
+                # TODO: maybe we don't want to test convergence each iteration, but only after some heuristic criteria
+                #  have been met (e.g. small gradient, once in a while also after starting the test etc.).
+                num_model_sub_samples = kwargs.get("num_model_sub_samples", 100)
+                model_subsample_size = kwargs.get("model_subsample_size", 1000)
+                mahalanobis_dists = np.zeros(num_model_sub_samples)
+                sub_sample_indices = np.random.choice(np.arange(mcmc_sample_size),
+                                                      size=num_model_sub_samples * model_subsample_size).reshape(
+                    (num_model_sub_samples, model_subsample_size))
+                for cur_subsam_idx in range(num_model_sub_samples):
+                    cur_sub_sample = networks_for_sample[:, :, sub_sample_indices[cur_subsam_idx]]
+                    cur_subsample_features_mean = np.mean(
+                        self._metrics_collection.calculate_sample_statistics(cur_sub_sample))
+                    mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, cur_subsample_features_mean,
+                                                                    inv_observed_covariance)
+                bootstrap_convergence_confidence = kwargs.get("bootstrap_convergence_confidence", 0.95)
+                bootstrap_convergence_num_stds_away_thr = kwargs.get("bootstrap_convergence_num_stds_away_thr", 1)
+                quantiles = np.quantile(mahalanobis_dists, [(1 - bootstrap_convergence_confidence) / 2,
+                                                            1 - (1 - bootstrap_convergence_confidence) / 2])
+                if quantiles[0] <= bootstrap_convergence_num_stds_away_thr <= quantiles[1]:
+                    print(f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
+                          f"test! The model is likely to be up to {bootstrap_convergence_num_stds_away_thr} stds from "
+                          f"the data, according to the estimated data variability DONE! ")
                     grads = grads[:i]
                     break
             else:
@@ -573,26 +614,25 @@ class BruteForceERGM(ERGM):
                          metrics_collection,
                          is_directed,
                          initial_thetas)
-        
+
         if is_directed:
             num_connections = (n_nodes ** 2 - n_nodes)
         else:
             num_connections = (n_nodes ** 2 - n_nodes) // 2
-            
+
         self._num_nets = 2 ** num_connections
 
         self._num_features = self._metrics_collection.num_of_features
 
-        
         all_networks = np.zeros((self._n_nodes, self._n_nodes, self._num_nets))
         for i in range(self._num_nets):
             all_networks[:, :, i] = construct_adj_mat_from_int(i, self._n_nodes, is_directed=is_directed)
-        
+
         self.all_features_by_all_nets = self._metrics_collection.calculate_sample_statistics(all_networks)
 
         self._all_weights = np.exp(np.sum(self._thetas[:, None] * self.all_features_by_all_nets, axis=0))
         self._normalization_factor = self._all_weights.sum()
-        
+
     def _validate_net_size(self):
         return (
                 (self._is_directed and self._n_nodes <= BruteForceERGM.MAX_NODES_BRUTE_FORCE_DIRECTED)
@@ -623,7 +663,7 @@ class BruteForceERGM(ERGM):
                                    is_directed=self._is_directed)
             observed_features = model._metrics_collection.calculate_statistics(observed_network)
             all_probs = model._all_weights / model._normalization_factor
-                        
+
             expected_features = self.all_features_by_all_nets @ all_probs
             return expected_features - observed_features
 
@@ -633,7 +673,6 @@ class BruteForceERGM(ERGM):
             print(f'iteration: {self.optimization_iter}, time from start '
                   f'training: {cur_time - self.optimization_start_time} '
                   f'log likelihood: {-intermediate_result.fun}')
-
 
         self.optimization_iter = 0
         print("optimization started")

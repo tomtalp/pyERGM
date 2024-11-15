@@ -174,35 +174,6 @@ class Metric(ABC):
 
         return ignored_features
 
-    # TODO: we don't support torch.sparse_tensors in the type hints, and don't really use them, consider get rid of all
-    #  of them.
-    # TODO: we probably will want to validate that all metrics in `MetricsCollection` have this attribute in case the
-    #  convergence condition of `ERGM.fit()` will use obsreved network bootstrapping, so it might not be a good idea to
-    #  have this empty method here.
-    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray | Collection[nx.Graph],
-                                        second_halves_to_use: np.ndarray | Collection[nx.Graph],
-                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
-        """
-        Calculate the features over multiple samples of subnetworks of an observed network (bootstrapping the features).
-        Parameters
-        ----------
-        first_halves_to_use
-            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
-            nodes in the large network.
-        second_halves_to_use
-            The subnetworks formed by the complementary set of nodes of the large network for each sample.
-        first_halves_indices
-            The indices of the nodes in the first half of the large network for each sample, according to the ordering
-            of the nodes in the large network.
-        second_halves_indices
-            The indices of the nodes in the second half of the large network for each sample, according to the ordering
-
-        Returns
-        -------
-
-        """
-        ...
-
 
 class NumberOfEdgesUndirected(Metric):
     def __str__(self):
@@ -232,6 +203,22 @@ class NumberOfEdgesUndirected(Metric):
         Calculates the bootstrapped number of edges, by counting edges in the sampled subnetworks, and normalizing by
         network size (i.e., calculating the fraction of existing edges out of all possible ones in sampled subnetworks,
         and multiplying by the number of possible edges in the full observed network).
+        Parameters
+        ----------
+        first_halves_to_use
+            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
+            nodes in the large network.
+        second_halves_to_use
+            The subnetworks formed by the complementary set of nodes of the large network for each sample.
+        first_halves_indices
+            The indices of the nodes in the first half of the large network for each sample, according to the ordering
+            of the nodes in the large network.
+        second_halves_indices
+            The indices of the nodes in the second half of the large network for each sample, according to the ordering
+
+        Returns
+        -------
+        Properly normalized statistics of subnetworks of an observed network.
         """
         num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
         num_nodes_in_first_half = first_halves_indices.shape[0]
@@ -288,6 +275,22 @@ class NumberOfEdgesDirected(Metric):
         Calculates the bootstrapped number of edges, by counting edges in the sampled subnetworks, and normalizing by
         network size (i.e., calculating the fraction of existing edges out of all possible ones in sampled subnetworks,
         and multiplying by the number of possible edges in the full observed network).
+        Parameters
+        ----------
+        first_halves_to_use
+            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
+            nodes in the large network.
+        second_halves_to_use
+            The subnetworks formed by the complementary set of nodes of the large network for each sample.
+        first_halves_indices
+            The indices of the nodes in the first half of the large network for each sample, according to the ordering
+            of the nodes in the large network.
+        second_halves_indices
+            The indices of the nodes in the second half of the large network for each sample, according to the ordering
+
+        Returns
+        -------
+        Properly normalized statistics of subnetworks of an observed network.
         """
         num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
         num_nodes_in_first_half = first_halves_indices.shape[0]
@@ -357,6 +360,22 @@ class BaseDegreeVector(Metric):
         observed network).
         Each node appears in one of the sub-samples, so both are used, and the indices are used to order the calculated
         values in the entire features vector.
+        Parameters
+        ----------
+        first_halves_to_use
+            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
+            nodes in the large network.
+        second_halves_to_use
+            The subnetworks formed by the complementary set of nodes of the large network for each sample.
+        first_halves_indices
+            The indices of the nodes in the first half of the large network for each sample, according to the ordering
+            of the nodes in the large network.
+        second_halves_indices
+            The indices of the nodes in the second half of the large network for each sample, according to the ordering
+
+        Returns
+        -------
+        Properly normalized statistics of subnetworks of an observed network.
         """
         num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
         num_nodes_in_first_half = first_halves_indices.shape[0]
@@ -563,6 +582,22 @@ class TotalReciprocity(Metric):
         normalizing by network size (i.e., calculating the fraction of existing reciprocal dyads out of all possible
         ones in sampled subnetworks, and multiplying by the number of possible reciprocal dyads in the full observed
         network).
+        Parameters
+        ----------
+        first_halves_to_use
+            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
+            nodes in the large network.
+        second_halves_to_use
+            The subnetworks formed by the complementary set of nodes of the large network for each sample.
+        first_halves_indices
+            The indices of the nodes in the first half of the large network for each sample, according to the ordering
+            of the nodes in the large network.
+        second_halves_indices
+            The indices of the nodes in the second half of the large network for each sample, according to the ordering
+
+        Returns
+        -------
+        Properly normalized statistics of subnetworks of an observed network.
         """
         # TODO: I think it's identical to the function of NumberOfEdgesUndirected, consider replicating code.
         num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
