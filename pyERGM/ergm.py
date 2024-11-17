@@ -487,9 +487,8 @@ class ERGM():
                                                                     inv_observed_covariance)
                 bootstrap_convergence_confidence = kwargs.get("bootstrap_convergence_confidence", 0.95)
                 bootstrap_convergence_num_stds_away_thr = kwargs.get("bootstrap_convergence_num_stds_away_thr", 1)
-                quantiles = np.quantile(mahalanobis_dists, [(1 - bootstrap_convergence_confidence) / 2,
-                                                            1 - (1 - bootstrap_convergence_confidence) / 2])
-                if quantiles[0] <= bootstrap_convergence_num_stds_away_thr <= quantiles[1]:
+                quantiles = np.quantile(mahalanobis_dists, [1 - bootstrap_convergence_confidence])
+                if bootstrap_convergence_num_stds_away_thr <= quantiles[1]:
                     print(f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
                           f"test! The model is likely to be up to {bootstrap_convergence_num_stds_away_thr} stds from "
                           f"the data, according to the estimated data variability DONE! ")
