@@ -205,7 +205,7 @@ class ERGM():
             sample_pct_growth=0.02,
             optimization_method="newton_raphson",
             convergence_criterion="hotelling",
-            cov_matrix_estimation_method="batch",
+            cov_matrix_estimation_method="naive",
             cov_matrix_num_batches=25,
             hotelling_confidence=0.99,
             theta_init_method="mple",
@@ -482,13 +482,15 @@ class ERGM():
                 for cur_subsam_idx in range(num_model_sub_samples):
                     cur_sub_sample = networks_for_sample[:, :, sub_sample_indices[cur_subsam_idx]]
                     cur_subsample_features_mean = np.mean(
-                        self._metrics_collection.calculate_sample_statistics(cur_sub_sample))
+                        self._metrics_collection.calculate_sample_statistics(cur_sub_sample), axis=1)
                     mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, cur_subsample_features_mean,
                                                                     inv_observed_covariance)
                 bootstrap_convergence_confidence = kwargs.get("bootstrap_convergence_confidence", 0.95)
                 bootstrap_convergence_num_stds_away_thr = kwargs.get("bootstrap_convergence_num_stds_away_thr", 1)
-                quantiles = np.quantile(mahalanobis_dists, [1 - bootstrap_convergence_confidence])
-                if bootstrap_convergence_num_stds_away_thr <= quantiles[1]:
+                empirical_threshold = np.quantile(mahalanobis_dists, bootstrap_convergence_confidence)
+                print("Bootstrap convergence test - ", empirical_threshold)
+
+                if bootstrap_convergence_num_stds_away_thr > empirical_threshold:
                     print(f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
                           f"test! The model is likely to be up to {bootstrap_convergence_num_stds_away_thr} stds from "
                           f"the data, according to the estimated data variability DONE! ")
