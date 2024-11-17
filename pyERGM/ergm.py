@@ -471,24 +471,28 @@ class ERGM():
                     grads = grads[:i]
                     break
             elif convergence_criterion == "observed_bootstrap":
+                t1 = time.time()
                 # TODO: maybe we don't want to test convergence each iteration, but only after some heuristic criteria
                 #  have been met (e.g. small gradient, once in a while also after starting the test etc.).
                 num_model_sub_samples = kwargs.get("num_model_sub_samples", 100)
                 model_subsample_size = kwargs.get("model_subsample_size", 1000)
                 mahalanobis_dists = np.zeros(num_model_sub_samples)
-                sub_sample_indices = np.random.choice(np.arange(mcmc_sample_size),
-                                                      size=num_model_sub_samples * model_subsample_size).reshape(
-                    (num_model_sub_samples, model_subsample_size))
+                
+                sub_sample_indices = np.random.choice(np.arange(mcmc_sample_size), size=num_model_sub_samples * model_subsample_size)
+
+                sub_samples = networks_for_sample[:, :, sub_sample_indices]
+                sub_samples_features = self._metrics_collection.calculate_sample_statistics(sub_samples)
+                mean_per_subsample = sub_samples_features.reshape(num_of_features, num_model_sub_samples, model_subsample_size).mean(axis=2)
+
                 for cur_subsam_idx in range(num_model_sub_samples):
-                    cur_sub_sample = networks_for_sample[:, :, sub_sample_indices[cur_subsam_idx]]
-                    cur_subsample_features_mean = np.mean(
-                        self._metrics_collection.calculate_sample_statistics(cur_sub_sample), axis=1)
-                    mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, cur_subsample_features_mean,
-                                                                    inv_observed_covariance)
+                    sub_sample_mean = mean_per_subsample[:, cur_subsam_idx]
+                    mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, sub_sample_mean, inv_observed_covariance)
+
                 bootstrap_convergence_confidence = kwargs.get("bootstrap_convergence_confidence", 0.95)
                 bootstrap_convergence_num_stds_away_thr = kwargs.get("bootstrap_convergence_num_stds_away_thr", 1)
                 empirical_threshold = np.quantile(mahalanobis_dists, bootstrap_convergence_confidence)
-                print("Bootstrap convergence test - ", empirical_threshold)
+                t2 = time.time()
+                print(f"Bootstrap convergence test = {empirical_threshold},  took {t2 - t1} seconds")
 
                 if bootstrap_convergence_num_stds_away_thr > empirical_threshold:
                     print(f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
