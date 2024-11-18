@@ -1,6 +1,6 @@
 import shutil
 from abc import ABC, abstractmethod
-from typing import Collection
+from typing import Collection, Callable
 from copy import deepcopy
 
 import numpy as np
@@ -176,7 +176,7 @@ class Metric(ABC):
 
     def _calc_bootstrapped_scalar_feature(self, first_halves_to_use: np.ndarray,
                                           first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int],
-                                          max_feature_val_calculator: callable):
+                                          max_feature_val_calculator: Callable):
         num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
         num_nodes_in_first_half = first_halves_indices.shape[0]
         max_feature_in_observed = max_feature_val_calculator(num_nodes_in_observed)

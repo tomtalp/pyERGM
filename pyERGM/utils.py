@@ -1011,7 +1011,7 @@ def sample_from_independent_probabilities_matrix(probability_matrix, sample_size
 def split_network_for_bootstrapping(net_size: int, first_part_size: int, splitting_method: str = 'uniform') -> tuple[
     np.ndarray[int], np.ndarray[int]]:
     if splitting_method == 'uniform':
-        indices = np.array(list(range(net_size)))
+        indices = np.arange(net_size)
         np.random.shuffle(indices)
         first_part_indices = indices[:first_part_size].reshape((first_part_size, 1))
     else:
