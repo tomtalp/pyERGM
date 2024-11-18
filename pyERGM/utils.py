@@ -1005,3 +1005,19 @@ def sample_from_independent_probabilities_matrix(probability_matrix, sample_size
             sample[i, j, :] = np.random.binomial(1, probability_matrix[i, j], size=sample_size)
 
     return sample
+
+
+# TODO: njit?
+def split_network_for_bootstrapping(net_size: int, first_part_size: int, splitting_method: str = 'uniform') -> tuple[
+    np.ndarray[int], np.ndarray[int]]:
+    if splitting_method == 'uniform':
+        indices = np.arange(net_size)
+        np.random.shuffle(indices)
+        first_part_indices = indices[:first_part_size].reshape((first_part_size, 1))
+    else:
+        raise ValueError(f"splitting method {splitting_method} not supported")
+
+    second_part_indices = np.setdiff1d(np.arange(net_size).astype(int), first_part_indices).reshape(
+        (net_size - first_part_size, 1))
+
+    return first_part_indices, second_part_indices

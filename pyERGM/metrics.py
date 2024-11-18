@@ -1,6 +1,6 @@
 import shutil
 from abc import ABC, abstractmethod
-from typing import Collection
+from typing import Collection, Callable
 from copy import deepcopy
 
 import numpy as np
@@ -23,11 +23,11 @@ class Metric(ABC):
 
         if hasattr(self, "_indices_from_user") and self._indices_from_user is not None:
             self.update_indices_to_ignore(self._indices_from_user)
-    
+
     def _handle_indices_to_ignore(self, res, axis=0):
         if self._indices_to_ignore is None:
             return res
-        
+
         if axis > 1:
             raise ValueError("Axis should be 0 or 1")
         if axis == 1:
@@ -118,11 +118,11 @@ class Metric(ABC):
                     edge_idx += 1
                     if edge_idx == edges_indices_lims[1]:
                         return Xs
-        
+
         else:
-            Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count())) 
-            for i in range(self._n_nodes-1):
-                for j in range(i+1, self._n_nodes):
+            Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count()))
+            for i in range(self._n_nodes - 1):
+                for j in range(i + 1, self._n_nodes):
                     if edge_idx < edges_indices_lims[0]:
                         edge_idx += 1
                         continue
@@ -141,7 +141,6 @@ class Metric(ABC):
                     edge_idx += 1
                     if edge_idx == edges_indices_lims[1]:
                         return Xs
-
 
     def _get_metric_names(self):
         """
@@ -175,6 +174,16 @@ class Metric(ABC):
 
         return ignored_features
 
+    def _calc_bootstrapped_scalar_feature(self, first_halves_to_use: np.ndarray,
+                                          first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int],
+                                          max_feature_val_calculator: Callable):
+        num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
+        num_nodes_in_first_half = first_halves_indices.shape[0]
+        max_feature_in_observed = max_feature_val_calculator(num_nodes_in_observed)
+        max_feature_in_first_half = max_feature_val_calculator(num_nodes_in_first_half)
+        return self.calculate_for_sample(
+            first_halves_to_use) * max_feature_in_observed / max_feature_in_first_half
+
 
 class NumberOfEdgesUndirected(Metric):
     def __str__(self):
@@ -196,6 +205,33 @@ class NumberOfEdgesUndirected(Metric):
         Sum each matrix over all matrices in sample
         """
         return networks_sample.sum(axis=(0, 1)) // 2
+
+    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
+                                        second_halves_to_use: np.ndarray,
+                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
+        """
+        Calculates the bootstrapped number of edges, by counting edges in the sampled subnetworks, and normalizing by
+        network size (i.e., calculating the fraction of existing edges out of all possible ones in sampled subnetworks,
+        and multiplying by the number of possible edges in the full observed network).
+        Parameters
+        ----------
+        first_halves_to_use
+            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
+            nodes in the large network.
+        second_halves_to_use
+            The subnetworks formed by the complementary set of nodes of the large network for each sample.
+        first_halves_indices
+            The indices of the nodes in the first half of the large network for each sample, according to the ordering
+            of the nodes in the large network.
+        second_halves_indices
+            The indices of the nodes in the second half of the large network for each sample, according to the ordering
+
+        Returns
+        -------
+        Properly normalized statistics of subnetworks of an observed network.
+        """
+        return self._calc_bootstrapped_scalar_feature(first_halves_to_use, first_halves_indices, second_halves_indices,
+                                                      lambda n: n * (n - 1) / 2)
 
 
 class NumberOfEdgesDirected(Metric):
@@ -238,6 +274,33 @@ class NumberOfEdgesDirected(Metric):
     def calculate_mple_regressors(observed_network: np.ndarray, edges_indices_lims: tuple[int]):
         return np.ones((edges_indices_lims[1] - edges_indices_lims[0], 1))
 
+    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
+                                        second_halves_to_use: np.ndarray,
+                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
+        """
+        Calculates the bootstrapped number of edges, by counting edges in the sampled subnetworks, and normalizing by
+        network size (i.e., calculating the fraction of existing edges out of all possible ones in sampled subnetworks,
+        and multiplying by the number of possible edges in the full observed network).
+        Parameters
+        ----------
+        first_halves_to_use
+            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
+            nodes in the large network.
+        second_halves_to_use
+            The subnetworks formed by the complementary set of nodes of the large network for each sample.
+        first_halves_indices
+            The indices of the nodes in the first half of the large network for each sample, according to the ordering
+            of the nodes in the large network.
+        second_halves_indices
+            The indices of the nodes in the second half of the large network for each sample, according to the ordering
+
+        Returns
+        -------
+        Properly normalized statistics of subnetworks of an observed network.
+        """
+        return self._calc_bootstrapped_scalar_feature(first_halves_to_use, first_halves_indices, second_halves_indices,
+                                                      lambda n: n * (n - 1))
+
 
 # TODO: change the name of this one to undirected and implement also a directed version?
 class NumberOfTriangles(Metric):
@@ -279,15 +342,63 @@ class BaseDegreeVector(Metric):
     which indices the calculation ignores.
     """
 
-    def __init__(self, requires_graph: bool, is_directed: bool, indices_from_user=None):
-        super().__init__(requires_graph=requires_graph)
+    def __init__(self, is_directed: bool, indices_from_user=None):
+        super().__init__(requires_graph=False)
 
         self._indices_from_user = indices_from_user.copy() if indices_from_user is not None else None
 
         self._is_directed = is_directed
 
-    def _get_total_feature_count(self): 
+    def _get_total_feature_count(self):
         return self._n_nodes
+
+    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
+                                        second_halves_to_use: np.ndarray,
+                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
+        """
+        Calculates the bootstrapped degree, by counting the connections of each node in the sampled subnetworks, and
+        normalizing by network size (i.e., calculating the fraction of existing edges out of all possible ones for each
+        node in sampled subnetworks, and multiplying by the number of possible edges of a single node in the full
+        observed network).
+        Each node appears in one of the sub-samples, so both are used, and the indices are used to order the calculated
+        values in the entire features vector.
+        Parameters
+        ----------
+        first_halves_to_use
+            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
+            nodes in the large network.
+        second_halves_to_use
+            The subnetworks formed by the complementary set of nodes of the large network for each sample.
+        first_halves_indices
+            The indices of the nodes in the first half of the large network for each sample, according to the ordering
+            of the nodes in the large network.
+        second_halves_indices
+            The indices of the nodes in the second half of the large network for each sample, according to the ordering
+
+        Returns
+        -------
+        Properly normalized statistics of subnetworks of an observed network.
+        """
+        num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
+        num_nodes_in_first_half = first_halves_indices.shape[0]
+        num_nodes_in_second_half = second_halves_indices.shape[0]
+
+        # NOTE! we want the estimated covariance matrix from the bootstrap to match the dimension of samples from the
+        # model during optimization, so we must first calculate the degrees for all the nodes (thus the initialization
+        # of a new instance, which makes sure that no indices are ignored), and then ignore the indices that will be
+        # removed by the metric.
+        fresh_instance = self.__class__()  # No child class has a `is_directed` input to the constructor.
+        degrees_first_halves = fresh_instance.calculate_for_sample(first_halves_to_use) * (
+                num_nodes_in_observed - 1) / (num_nodes_in_first_half - 1)
+        fresh_instance._n_nodes = num_nodes_in_second_half
+        degrees_second_halves = fresh_instance.calculate_for_sample(second_halves_to_use) * (
+                num_nodes_in_observed - 1) / (num_nodes_in_second_half - 1)
+        num_sub_samples = first_halves_to_use.shape[2]
+        bootstrapped_degrees = np.zeros((self._n_nodes, num_sub_samples))
+        bootstrapped_degrees[first_halves_indices, np.arange(num_sub_samples)] = degrees_first_halves
+        bootstrapped_degrees[second_halves_indices, np.arange(num_sub_samples)] = degrees_second_halves
+        return self._handle_indices_to_ignore(bootstrapped_degrees)
+
 
 class InDegree(BaseDegreeVector):
     """
@@ -298,7 +409,7 @@ class InDegree(BaseDegreeVector):
         return "indegree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(requires_graph=False, is_directed=True, indices_from_user=indices_from_user)
+        super().__init__(is_directed=True, indices_from_user=indices_from_user)
         self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
@@ -325,7 +436,7 @@ class InDegree(BaseDegreeVector):
             values = self._handle_indices_to_ignore(summed_tensor.values())
             return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
         else:
-            return summed_tensor[~self._indices_to_ignore]
+            return self._handle_indices_to_ignore(summed_tensor)
 
 
 class OutDegree(BaseDegreeVector):
@@ -337,7 +448,7 @@ class OutDegree(BaseDegreeVector):
         return "outdegree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(requires_graph=False, is_directed=True, indices_from_user=indices_from_user)
+        super().__init__(is_directed=True, indices_from_user=indices_from_user)
         self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
@@ -364,7 +475,7 @@ class OutDegree(BaseDegreeVector):
             values = self._handle_indices_to_ignore(summed_tensor.values())
             return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
         else:
-            return summed_tensor[~self._indices_to_ignore]
+            return self._handle_indices_to_ignore(summed_tensor)
 
 
 class UndirectedDegree(BaseDegreeVector):
@@ -376,11 +487,14 @@ class UndirectedDegree(BaseDegreeVector):
         return "undirected_degree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(requires_graph=False, is_directed=False, indices_from_user=indices_from_user)
+        super().__init__(is_directed=False, indices_from_user=indices_from_user)
         self._is_dyadic_independent = True
 
     def calculate(self, W: np.ndarray):
         return self._handle_indices_to_ignore(W.sum(axis=0))
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return self._handle_indices_to_ignore(networks_sample.sum(axis=0))
 
 
 class Reciprocity(Metric):
@@ -461,6 +575,34 @@ class TotalReciprocity(Metric):
             raise ValueError(f"Unsupported type of sample: {type(networks_sample)}! Supported types are np.ndarray and "
                              f"torch.Tensor with is_sparse=True")
 
+    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
+                                        second_halves_to_use: np.ndarray,
+                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
+        """
+        Calculates the bootstrapped number of reciprocal dyads, by counting such pairs in the sampled subnetworks, and
+        normalizing by network size (i.e., calculating the fraction of existing reciprocal dyads out of all possible
+        ones in sampled subnetworks, and multiplying by the number of possible reciprocal dyads in the full observed
+        network).
+        Parameters
+        ----------
+        first_halves_to_use
+            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
+            nodes in the large network.
+        second_halves_to_use
+            The subnetworks formed by the complementary set of nodes of the large network for each sample.
+        first_halves_indices
+            The indices of the nodes in the first half of the large network for each sample, according to the ordering
+            of the nodes in the large network.
+        second_halves_indices
+            The indices of the nodes in the second half of the large network for each sample, according to the ordering
+
+        Returns
+        -------
+        Properly normalized statistics of subnetworks of an observed network.
+        """
+        return self._calc_bootstrapped_scalar_feature(first_halves_to_use, first_halves_indices, second_halves_indices,
+                                                      lambda n: n * (n - 1) / 2)
+
 
 class ExWeightNumEdges(Metric):
     """
@@ -491,8 +633,8 @@ class ExWeightNumEdges(Metric):
 
     def calculate(self, input: np.ndarray):
         # TODO - Since most of our focus is on the `calculate_for_sample` functions,
-        # we can convert all individual calculate(x) functions to calculate_for_sample([x])
-        # and reuse code.
+        #  we can convert all individual calculate(x) functions to calculate_for_sample([x])
+        #  and reuse code.
         res = np.einsum('ij,kij->k', input, self.edge_weights)
         if not self._is_directed:
             res = res / 2
@@ -541,7 +683,7 @@ class NumberOfEdgesTypesDirected(Metric):
 
     def __init__(self, exogenous_attr: Collection, indices_from_user=None):
         self.exogenous_attr = exogenous_attr
-        
+
         self.unique_types = sorted(list(set(self.exogenous_attr)))
 
         super().__init__()
@@ -558,7 +700,6 @@ class NumberOfEdgesTypesDirected(Metric):
 
         self.sorted_type_pairs = get_sorted_type_pairs(self.unique_types)
         self._calc_edge_type_idx_assignment()
-
 
     def _calc_edge_type_idx_assignment(self):
         """
@@ -618,7 +759,6 @@ class NumberOfEdgesTypesDirected(Metric):
         change_score[idx_in_features_vec] = sign
 
         return self._handle_indices_to_ignore(change_score)
-    
 
     def calculate_change_score_full_network(self, current_network: np.ndarray):
         """
@@ -1159,7 +1299,7 @@ class MetricsCollection:
 
         if self.is_directed:
             ys = observed_network[~np.eye(n_nodes, dtype=bool)].flatten()[
-                   edges_indices_lims[0]:edges_indices_lims[1], None]
+                 edges_indices_lims[0]:edges_indices_lims[1], None]
         else:
             ys = observed_network[np.triu_indices(n_nodes, 1)][edges_indices_lims[0]:edges_indices_lims[1], None]
         return Xs, ys
@@ -1182,3 +1322,70 @@ class MetricsCollection:
             parameter_names += metric._get_ignored_features()
 
         return parameter_names
+
+    def bootstrap_observed_features(self, observed_network: np.ndarray, num_subsamples: int = 1000,
+                                    splitting_method: str = 'uniform'):
+        observed_net_size = observed_network.shape[0]
+        second_half_size = observed_net_size // 2
+        first_half_size = observed_net_size - second_half_size
+        first_halves = np.zeros((first_half_size, first_half_size, num_subsamples))
+        second_halves = np.zeros((second_half_size, second_half_size, num_subsamples))
+        first_halves_indices = np.zeros((first_half_size, num_subsamples), dtype=int)
+        second_halves_indices = np.zeros((second_half_size, num_subsamples), dtype=int)
+        for i in range(num_subsamples):
+            # TODO: currently we simply split randomly into 2 halves, we want to support other methods for sampling half
+            #  of the neurons, and specifically sampling half of the neurons of each if there is a metric with types
+            #  involved.
+            #  NOTE! This will probably imposes to have another field in `Metric` indicating what is the preferred way
+            #  for bootstrapping sampling, and `MetricsCollection` will have to decide somehow what to do based on the
+            #  values of all metrics.
+            #  NOTE! If there are multiple type metrics, we will probably need to sample according to sub-types defined
+            #  as the Cartesian product of all types.
+            first_half_indices, second_half_indices = split_network_for_bootstrapping(observed_net_size,
+                                                                                      first_half_size,
+                                                                                      splitting_method=splitting_method)
+            first_halves[:, :, i] = observed_network[first_half_indices, first_half_indices.T]
+            second_halves[:, :, i] = observed_network[second_half_indices, second_half_indices.T]
+            first_halves_indices[:, i] = first_half_indices[:, 0]
+            second_halves_indices[:, i] = second_half_indices[:, 0]
+
+        bootstrapped_features = np.zeros((self.num_of_features, num_subsamples))
+        # TODO: the next code section is copied from `calculate_for_sample`. The difference is that here we use
+        #  `first_halves` and `second_halves` instead of `networks_sample` and a different callable for each metric.
+        #  Maybe is can be handled in a single method that gets a callable for metrics and **kwargs or something like
+        #  that.
+        if self.requires_graph:
+            first_halves_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in first_halves]
+            second_halves_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in second_halves]
+
+        if self.use_sparse_matrix:
+            first_halves_as_sparse_tensor = np_tensor_to_sparse_tensor(first_halves)
+            second_halves_as_sparse_tensor = np_tensor_to_sparse_tensor(second_halves)
+
+        feature_idx = 0
+        for metric in self.metrics:
+            n_features_from_metric = metric._get_effective_feature_count()
+
+            if metric.requires_graph:
+                first_halves_to_use = first_halves_as_graphs
+                second_halves_to_use = second_halves_as_graphs
+            elif self.use_sparse_matrix:
+                first_halves_to_use = first_halves_as_sparse_tensor
+                second_halves_to_use = second_halves_as_sparse_tensor
+            else:
+                first_halves_to_use = first_halves
+                second_halves_to_use = second_halves
+
+            cur_metric_bootstrapped_features = metric.calculate_bootstrapped_features(
+                first_halves_to_use, second_halves_to_use,
+                first_halves_indices, second_halves_indices)
+
+            if isinstance(cur_metric_bootstrapped_features, torch.Tensor):
+                if cur_metric_bootstrapped_features.is_sparse:
+                    cur_metric_bootstrapped_features = cur_metric_bootstrapped_features.to_dense()
+                cur_metric_bootstrapped_features = cur_metric_bootstrapped_features.numpy()
+
+            bootstrapped_features[feature_idx:feature_idx + n_features_from_metric] = cur_metric_bootstrapped_features
+            feature_idx += n_features_from_metric
+
+        return bootstrapped_features

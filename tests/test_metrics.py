@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 
@@ -503,22 +504,22 @@ class TestMetricsCollection(unittest.TestCase):
     def test_get_effective_feature_count(self):
         n = 18
         receiver = InDegree()
-        
+
         collection = MetricsCollection([receiver], is_directed=True, n_nodes=n, do_copy_metrics=False)
         self.assertEqual(receiver._get_effective_feature_count(), n)
 
         receiver = InDegree(indices_from_user=[0])
         collection = MetricsCollection([receiver], is_directed=True, n_nodes=n, do_copy_metrics=False)
-        self.assertEqual(receiver._get_effective_feature_count(), n-1)
+        self.assertEqual(receiver._get_effective_feature_count(), n - 1)
 
         sender = OutDegree()
-        
+
         collection = MetricsCollection([sender], is_directed=True, n_nodes=n, do_copy_metrics=False)
         self.assertEqual(sender._get_effective_feature_count(), n)
 
         sender = OutDegree(indices_from_user=[0])
         collection = MetricsCollection([sender], is_directed=True, n_nodes=n, do_copy_metrics=False)
-        self.assertEqual(sender._get_effective_feature_count(), n-1)
+        self.assertEqual(sender._get_effective_feature_count(), n - 1)
 
     def test_metrics_setup(self):
         metrics = [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()]
@@ -885,3 +886,69 @@ class TestMetricsCollection(unittest.TestCase):
         ignored_features = collection.get_ignored_features()
         expected_ignored_features = ("indegree_1", "outdegree_1")
         self.assertTrue(ignored_features == expected_ignored_features)
+
+    @patch('pyERGM.metrics.split_network_for_bootstrapping')
+    def test_bootstrapped_features(self, mock_split_network_for_bootstrapping):
+        W = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [1, 0, 0, 1],
+            [0, 1, 1, 0]
+        ])
+
+        W_symmetric = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [0, 0, 0, 1],
+            [0, 1, 1, 0]
+        ])
+
+        mock_split_network_for_bootstrapping.return_value = (
+            np.array([0, 2]).reshape((2, 1)), np.array([1, 3]).reshape((2, 1)))
+
+        metrics = [NumberOfEdgesDirected()]
+        metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
+        bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
+        expected_bootstrapped_features = np.array([6]).reshape(1, 1)  # np.sum(W[[0,2],[0,2].T]) / 2 * 12
+        self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
+
+        metrics = [NumberOfEdgesUndirected()]
+        metrics_collection = MetricsCollection(metrics, is_directed=False, n_nodes=W_symmetric.shape[0])
+        bootstrapped_features = metrics_collection.bootstrap_observed_features(W_symmetric, 1)
+        expected_bootstrapped_features = np.array([0]).reshape(1, 1)  # nodes 0 and 2 are not connected
+        self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
+
+        metrics = [TotalReciprocity()]
+        metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
+        bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
+        expected_bootstrapped_features = np.array([0]).reshape(1, 1)
+        self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
+
+        metrics = [UndirectedDegree()]
+        metrics_collection = MetricsCollection(metrics, is_directed=False, n_nodes=W_symmetric.shape[0])
+        bootstrapped_features = metrics_collection.bootstrap_observed_features(W_symmetric, 1)
+        expected_bootstrapped_features = np.array([0, 3, 0, 3]).reshape(4,
+                                                                        1)  # nodes 0,2 are not connected, and nodes 1,3 are.
+        self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
+
+        metrics = [InDegree()]
+        metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
+        bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
+        expected_bootstrapped_features = np.array([3, 3, 0, 3]).reshape(4,
+                                                                        1)  # e.g., the first is given by np.sum(W[[0,2],[0,2].T], axis=0) / (2-1) * (4-1)
+        self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
+
+        metrics = [NumberOfEdgesDirected(), OutDegree()]
+        metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
+        bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
+        expected_bootstrapped_features = np.array([6, 3, 3, 3]).reshape(4,
+                                                                        1)  # Ignoring the out-degree of the first node
+        self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
+
+        mock_split_network_for_bootstrapping.return_value = (
+            np.array([2, 3]).reshape((2, 1)), np.array([0, 1]).reshape((2, 1)))
+        metrics = [TotalReciprocity()]
+        metrics_collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
+        bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
+        expected_bootstrapped_features = np.array([6]).reshape(1, 1)
+        self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
