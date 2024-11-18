@@ -174,6 +174,16 @@ class Metric(ABC):
 
         return ignored_features
 
+    def _calc_bootstrapped_scalar_feature(self, first_halves_to_use: np.ndarray,
+                                          first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int],
+                                          max_feature_val_calculator: callable):
+        num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
+        num_nodes_in_first_half = first_halves_indices.shape[0]
+        max_feature_in_observed = max_feature_val_calculator(num_nodes_in_observed)
+        max_feature_in_first_half = max_feature_val_calculator(num_nodes_in_first_half)
+        return self.calculate_for_sample(
+            first_halves_to_use) * max_feature_in_observed / max_feature_in_first_half
+
 
 class NumberOfEdgesUndirected(Metric):
     def __str__(self):
@@ -220,12 +230,8 @@ class NumberOfEdgesUndirected(Metric):
         -------
         Properly normalized statistics of subnetworks of an observed network.
         """
-        num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
-        num_nodes_in_first_half = first_halves_indices.shape[0]
-        num_possible_edges_in_observed = num_nodes_in_observed * (num_nodes_in_observed - 1) / 2
-        num_possible_edges_in_first_half = num_nodes_in_first_half * (num_nodes_in_first_half - 1) / 2
-        return self.calculate_for_sample(
-            first_halves_to_use) * num_possible_edges_in_observed / num_possible_edges_in_first_half
+        return self._calc_bootstrapped_scalar_feature(first_halves_to_use, first_halves_indices, second_halves_indices,
+                                                      lambda n: n * (n - 1) / 2)
 
 
 class NumberOfEdgesDirected(Metric):
@@ -292,12 +298,8 @@ class NumberOfEdgesDirected(Metric):
         -------
         Properly normalized statistics of subnetworks of an observed network.
         """
-        num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
-        num_nodes_in_first_half = first_halves_indices.shape[0]
-        num_possible_edges_in_observed = num_nodes_in_observed * (num_nodes_in_observed - 1)
-        num_possible_edges_in_first_half = num_nodes_in_first_half * (num_nodes_in_first_half - 1)
-        return self.calculate_for_sample(
-            first_halves_to_use) * num_possible_edges_in_observed / num_possible_edges_in_first_half
+        return self._calc_bootstrapped_scalar_feature(first_halves_to_use, first_halves_indices, second_halves_indices,
+                                                      lambda n: n * (n - 1))
 
 
 # TODO: change the name of this one to undirected and implement also a directed version?
@@ -598,13 +600,8 @@ class TotalReciprocity(Metric):
         -------
         Properly normalized statistics of subnetworks of an observed network.
         """
-        # TODO: I think it's identical to the function of NumberOfEdgesUndirected, consider replicating code.
-        num_nodes_in_observed = first_halves_indices.shape[0] + second_halves_indices.shape[0]
-        num_nodes_in_first_half = first_halves_indices.shape[0]
-        num_possible_rec_dyads_observed = num_nodes_in_observed * (num_nodes_in_observed - 1) / 2
-        num_possible_rec_dyads_first_half = num_nodes_in_first_half * (num_nodes_in_first_half - 1) / 2
-        return self.calculate_for_sample(
-            first_halves_to_use) * num_possible_rec_dyads_observed / num_possible_rec_dyads_first_half
+        return self._calc_bootstrapped_scalar_feature(first_halves_to_use, first_halves_indices, second_halves_indices,
+                                                      lambda n: n * (n - 1) / 2)
 
 
 class ExWeightNumEdges(Metric):
