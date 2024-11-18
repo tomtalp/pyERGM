@@ -386,10 +386,6 @@ class BaseDegreeVector(Metric):
         # of a new instance, which makes sure that no indices are ignored), and then ignore the indices that will be
         # removed by the metric.
         fresh_instance = self.__class__()  # No child class has a `is_directed` input to the constructor.
-        # Needed if it's `UndirectedDegree`, and the default `calculate_for_sample` is called (otherwise
-        # `UndirectedDegree._get_effective_feature_count()` will return `None`, and the method won't know what are the
-        # dimensions of the features X samples matrix.
-        fresh_instance._n_nodes = num_nodes_in_first_half
         degrees_first_halves = fresh_instance.calculate_for_sample(first_halves_to_use) * (
                 num_nodes_in_observed - 1) / (num_nodes_in_first_half - 1)
         fresh_instance._n_nodes = num_nodes_in_second_half
@@ -494,6 +490,9 @@ class UndirectedDegree(BaseDegreeVector):
 
     def calculate(self, W: np.ndarray):
         return self._handle_indices_to_ignore(W.sum(axis=0))
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return self._handle_indices_to_ignore(networks_sample.sum(axis=0))
 
 
 class Reciprocity(Metric):
