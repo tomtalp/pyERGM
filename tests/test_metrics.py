@@ -894,21 +894,30 @@ class TestSumDistancesConnectedNeurons(unittest.TestCase):
                       [1, 0, 0]])
 
         # Dataframe with multiple columns
-        metric_1 = SumDistancesConnectedNeurons(positions)
+        metric_1 = SumDistancesConnectedNeurons(positions, is_directed=True)
         expected_res_1 = 3 + 3 + 5 + 4
         self.assertTrue(metric_1.calculate(W) == expected_res_1)
 
         # 2D numpy array
-        metric_2 = SumDistancesConnectedNeurons(positions.to_numpy())
+        metric_2 = SumDistancesConnectedNeurons(positions.to_numpy(), is_directed=True)
         expected_res_2 = 3 + 3 + 5 + 4
         self.assertTrue(metric_2.calculate(W) == expected_res_2)
 
         # Series
-        metric_3 = SumDistancesConnectedNeurons(positions.x_pos)
+        metric_3 = SumDistancesConnectedNeurons(positions.x_pos, is_directed=True)
         expected_res_3 = 4 + 4
         self.assertTrue(metric_3.calculate(W) == expected_res_3)
 
         # 1D numpy array
-        metric_4 = SumDistancesConnectedNeurons(positions.z_pos.to_numpy())
+        metric_4 = SumDistancesConnectedNeurons(positions.z_pos.to_numpy(), is_directed=True)
         expected_res_4 = 0
         self.assertTrue(metric_4.calculate(W) == expected_res_4)
+
+        # undirected_graph
+        W_undirected = np.array([[0, 1, 1],
+                                 [1, 0, 0],
+                                 [1, 0, 0]])
+
+        metric_5 = SumDistancesConnectedNeurons(positions, is_directed=False)
+        expected_res_5 = 3 + 4
+        self.assertTrue(metric_5.calculate(W_undirected) == expected_res_5)

@@ -727,35 +727,40 @@ class NodeAttrSumIn(ExWeightNumEdges):
         return "node_attribute_in"
 
 
-class SumDistancesConnectedNeurons(Metric):
+class SumDistancesConnectedNeurons(ExWeightNumEdges):
     """
     This function calculates the sum of euclidean distances between all pairs of connected neurons.
     rows = samples, columns = axes
     """
 
-    # for now only works for directed graphs
-    def __init__(self, positions: pd.DataFrame | pd.Series | np.ndarray, is_directed: bool):
-        super().__init__(requires_graph=False)
-        self._is_directed = is_directed
-        self._is_dyadic_independent = True
-
+    def __init__(self, exogenous_attr: Collection, is_directed: bool):
+        # I am not sure what is the meaning of defining exogenous_attr as collection, I just saw it was done
+        # in other functions inheriting from ExWeightNumEdges. is there a way to specify that the wanted dtypes are:
+        # pd.DataFrame | pd.Series | np.ndarray?
+#
         # check inputs
-        if isinstance(positions, (pd.DataFrame, pd.Series)):
-            self._positions = positions.to_numpy(copy=True)
-        elif isinstance(positions, np.ndarray):
-            self._positions = positions.copy()
-        else:
-            raise ValueError(f"Unsupported type of positions: {type(positions)}. Supported types are pd.DataFrame, "
+        if isinstance(exogenous_attr, (pd.DataFrame, pd.Series)):
+            exogenous_attr = exogenous_attr.to_numpy(copy=True)
+        elif not isinstance(exogenous_attr, np.ndarray):
+            raise ValueError(f"Unsupported type of positions: {type(exogenous_attr)}. Supported types are pd.DataFrame, "
                              f"pd.Series and np.ndarray.")
-        if len(self._positions.shape) == 1:
-            self._positions = self._positions.reshape(-1, 1)
+        if len(exogenous_attr.shape) == 1:
+            exogenous_attr = exogenous_attr.reshape(-1, 1)
 
-        # calculate distances
-        self._distances = distance.squareform(distance.pdist(self._positions, metric='euclidean'))
+        super().__init__(exogenous_attr)
+        self._is_directed = is_directed
 
-    def calculate(self, input_graph: np.ndarray):
-        sum_distances = np.sum(self._distances * input_graph)
-        return sum_distances
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.reshape(distance.squareform(distance.pdist(self.exogenous_attr, metric='euclidean')), (self._get_num_weight_mats(), num_nodes, num_nodes))
+
+    def _get_num_weight_mats(self):
+        return 1
+    # wasn't sure what this is for. I understood the extra dimension is required for the einsum in calculate,
+    # but I lack intuition here.
+
+    def __str__(self):
+        return "sum_distances_connected_neurons"
 
 
 class MetricsCollection:
