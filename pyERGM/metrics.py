@@ -502,6 +502,14 @@ class ExWeightNumEdges(Metric):
 
         return res
 
+    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int]):
+        # edge_weights shape is (num_weight_mats, n_nodes, n_nodes)
+        num_nodes = len(self.exogenous_attr)
+        num_weight_mats = self.edge_weights.shape[0]
+        # remove diagonal and reshape to the desired format
+        Xs = self.edge_weights[:, np.eye(num_nodes) == 0].reshape(num_nodes**2 - num_nodes, num_weight_mats)
+        return Xs[edges_indices_lims[0]:edges_indices_lims[1], :]
+
 
 class NumberOfEdgesTypesDirected(Metric):
     """
@@ -729,21 +737,16 @@ class NodeAttrSumIn(ExWeightNumEdges):
 
 class SumDistancesConnectedNeurons(ExWeightNumEdges):
     """
-    This function calculates the sum of euclidean distances between all pairs of connected neurons.
+    This class calculates the sum of euclidean distances between all pairs of connected neurons.
     rows = samples, columns = axes
     """
-
-    def __init__(self, exogenous_attr: Collection, is_directed: bool):
-        # I am not sure what is the meaning of defining exogenous_attr as collection, I just saw it was done
-        # in other functions inheriting from ExWeightNumEdges. is there a way to specify that the wanted dtypes are:
-        # pd.DataFrame | pd.Series | np.ndarray?
-#
-        # check inputs
-        if isinstance(exogenous_attr, (pd.DataFrame, pd.Series)):
-            exogenous_attr = exogenous_attr.to_numpy(copy=True)
+    def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool):
+        # todo: decorator that checks inputs and returns np.ndarray if the inputs were valid, and an error otherwise
+        if isinstance(exogenous_attr, (pd.DataFrame, pd.Series, list, tuple)):
+            exogenous_attr = np.array(exogenous_attr)
         elif not isinstance(exogenous_attr, np.ndarray):
             raise ValueError(f"Unsupported type of positions: {type(exogenous_attr)}. Supported types are pd.DataFrame, "
-                             f"pd.Series and np.ndarray.")
+                             f"pd.Series, list, tuple and np.ndarray.")
         if len(exogenous_attr.shape) == 1:
             exogenous_attr = exogenous_attr.reshape(-1, 1)
 
@@ -756,8 +759,6 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
 
     def _get_num_weight_mats(self):
         return 1
-    # wasn't sure what this is for. I understood the extra dimension is required for the einsum in calculate,
-    # but I lack intuition here.
 
     def __str__(self):
         return "sum_distances_connected_neurons"
