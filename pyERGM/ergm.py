@@ -685,3 +685,94 @@ class BruteForceERGM(ERGM):
         res = minimize(nll, self._thetas, jac=nll_grad, callback=after_iteration_callback)
         self._thetas = res.x
         return res
+
+
+class ConvergenceTester():
+    def __init__(self):
+        pass
+    
+    def hotelling(self, observed_features, mean_features, inverted_sample_cov_matrix, sample_size, confidence=0.99):
+        """
+        Run the Hotelling's T-squared test for convergence.
+
+        The T-Squarted statistic is calculated as - 
+            t^2 = n * dist^2
+        where dist is the Mahalanobis distance between the observed and the mean features, used the given
+        covariance matrix.
+
+        The T^2 statistic can be transformed into an F statistic - 
+            F = (n-p / p(n-1)) * t^2
+        where p is the number of features and n is the sample size.
+        Finally the F statistic is compared to the critical value of the F distribution with p and n-p degrees of freedom.
+
+        Parameters
+        ----------
+        observed_features : np.ndarray
+            The observed features of the network.
+        
+        mean_features : np.ndarray
+            The mean features of the networks sampled from the model.
+        
+        inverted_sample_cov_matrix : np.ndarray
+            The inverted covariance matrix of the features that were calculated from the model sample.
+        
+        sample_size : int  
+            The number of networks sampled from the model.
+        
+        confidence : float
+            The confidence level for the test. *Defaults to 0.99*.
+        """
+        dist = mahalanobis(observed_features, mean_features, inverted_sample_cov_matrix)
+        hotelling_t_statistic = sample_size * dist * dist
+
+        num_of_features = observed_features.shape[0]
+
+        hotelling_as_f_statistic = ((sample_size - num_of_features) / (
+                        num_of_features * (sample_size - 1))) * hotelling_t_statistic
+    
+        hotelling_critical_value = f.ppf(1 - confidence, num_of_features, sample_size - num_of_features)
+
+        return {
+            "success": hotelling_as_f_statistic <= hotelling_critical_value,
+            "statistic": hotelling_as_f_statistic,
+            "threshold": hotelling_critical_value
+        }
+        
+    def bootstrapped_mahalanobis_from_observed(sampled_networks, 
+                                    metrics_collection, 
+                                    observed_features, 
+                                    inverted_observed_cov_matrix, 
+                                    num_subsamples=100,
+                                    subsample_size=1000,
+                                    confidence=0.95,
+                                    stds_away_thr=1):
+        """
+        Repeatedly subsample from a sample of networks, and calculate the distance between the subsample mean
+        and the observed features. The distance is calculated using the Mahalanobis distance, with the covariance matrix
+        being an estimation of the observed covariance matrix.
+        """
+
+        sample_size = sampled_networks.shape[2]
+        num_of_features = observed_features.shape[0]
+
+        mahalanobis_dists = np.zeros(num_subsamples)
+
+        sub_sample_indices = np.random.choice(np.arange(sample_size), size=num_subsamples * subsample_size)
+        sub_samples = sampled_networks[:, :, sub_sample_indices]
+        sub_samples_features = metrics_collection.calculate_sample_statistics(sub_samples)
+        mean_per_subsample = sub_samples_features.reshape(num_of_features, num_subsamples, subsample_size).mean(axis=2)
+
+        for cur_subsam_idx in range(num_subsamples):
+            cur_subsample_mean = mean_per_subsample[:, cur_subsam_idx]
+            mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, cur_subsample_mean, inverted_observed_cov_matrix)
+        
+        empirical_threshold = np.quantile(mahalanobis_dists, confidence)
+
+        return {
+            "success": empirical_threshold < stds_away_thr,
+            "statistic": empirical_threshold,
+        }
+
+
+
+
