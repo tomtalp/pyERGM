@@ -372,7 +372,6 @@ class ERGM():
         num_of_features = self._metrics_collection.num_of_features
 
         grads = np.zeros((opt_steps, num_of_features))
-        hotelling_statistics = []
 
         if convergence_criterion == "hotelling":
             hotelling_critical_value = f.ppf(1 - hotelling_confidence, num_of_features,
@@ -440,28 +439,13 @@ class ERGM():
                     sliding_grad_window_k = np.min(
                         [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
+            convergence_tester = ConvergenceTester()
+
             if convergence_criterion == "hotelling":
-                dist = mahalanobis(observed_features, mean_features, inv_estimated_cov_matrix)
+                convergence_result = convergence_tester.hotelling(observed_features, mean_features, inv_estimated_cov_matrix, mcmc_sample_size, hotelling_confidence)
 
-                hotelling_t_statistic = mcmc_sample_size * dist * dist
-
-                # (n-p / p(n-1))* t^2 ~ F_p, n-p  (#TODO - give reference for this)
-                hotelling_as_f_statistic = ((mcmc_sample_size - num_of_features) / (
-                        num_of_features * (mcmc_sample_size - 1))) * hotelling_t_statistic
-
-                hotelling_statistics.append({
-                    "dist": dist,
-                    # "hotelling_t": hotelling_t_statistic,
-                    "hotelling_F": hotelling_as_f_statistic,
-                    "critical_val": hotelling_critical_value,
-                    "inv_cov_norm": np.linalg.norm(inv_estimated_cov_matrix),
-                    # "inv_hessian_norm": np.linalg.norm(inv_hessian)
-                })
-
-                if hotelling_as_f_statistic <= hotelling_critical_value:
+                if convergence_result["success"]:
                     print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
-                    print(
-                        f"hotelling - {hotelling_as_f_statistic}, hotelling_critical_value={hotelling_critical_value}")
                     grads = grads[:i]
                     break
 
@@ -469,34 +453,45 @@ class ERGM():
                 if np.linalg.norm(sliding_window_grads) <= l2_grad_thresh:
                     print(f"Reached threshold of {l2_grad_thresh} after {i} steps. DONE!")
                     grads = grads[:i]
+
+                    # TODO - implement `convergence_results` for this kind of convergence
                     break
-            elif convergence_criterion == "observed_bootstrap":
-                t1 = time.time()
-                # TODO: maybe we don't want to test convergence each iteration, but only after some heuristic criteria
-                #  have been met (e.g. small gradient, once in a while also after starting the test etc.).
-                num_model_sub_samples = kwargs.get("num_model_sub_samples", 100)
-                model_subsample_size = kwargs.get("model_subsample_size", 1000)
-                mahalanobis_dists = np.zeros(num_model_sub_samples)
                 
-                sub_sample_indices = np.random.choice(np.arange(mcmc_sample_size), size=num_model_sub_samples * model_subsample_size)
+            elif convergence_criterion == "observed_bootstrap":
+                confidence = kwargs.get("bootstrap_convergence_confidence", 0.95)
+                stds_away_thr = kwargs.get("bootstrap_convergence_stds_away_thr", 1)
 
-                sub_samples = networks_for_sample[:, :, sub_sample_indices]
-                sub_samples_features = self._metrics_collection.calculate_sample_statistics(sub_samples)
-                mean_per_subsample = sub_samples_features.reshape(num_of_features, num_model_sub_samples, model_subsample_size).mean(axis=2)
+                convergence_results = convergence_tester.bootstrapped_mahalanobis_from_observed(
+                    observed_features,
+                    networks_for_sample,
+                    self._metrics_collection,
+                    inv_observed_covariance,
+                    num_subsamples=kwargs.get("num_model_sub_samples", 100),
+                    subsample_size=kwargs.get("model_subsample_size", 1000),
+                    confidence=confidence,
+                    stds_away_thr=stds_away_thr,
+                )
 
-                for cur_subsam_idx in range(num_model_sub_samples):
-                    sub_sample_mean = mean_per_subsample[:, cur_subsam_idx]
-                    mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, sub_sample_mean, inv_observed_covariance)
+                if convergence_results["success"]:
+                    print(f"Reached a confidence of {confidence} with the bootstrap convergence "
+                          f"test! The model is likely to be up to {stds_away_thr} stds from "
+                          f"the data, according to the estimated data variability DONE! ")
+                    grads = grads[:i]
+                    break
+            elif convergence_criterion == "model_bootstrap":            
+                convergence_results = convergence_tester.bootstrapped_mahalanobis_from_model(
+                    observed_features,
+                    networks_for_sample,
+                    self._metrics_collection,
+                    num_subsamples=kwargs.get("num_model_sub_samples", 100),
+                    subsample_size=kwargs.get("model_subsample_size", 1000),
+                    confidence=kwargs.get("bootstrap_convergence_confidence", 0.95),
+                    stds_away_thr=kwargs.get("bootstrap_convergence_stds_away_thr", 1),
+                )     
 
-                bootstrap_convergence_confidence = kwargs.get("bootstrap_convergence_confidence", 0.95)
-                bootstrap_convergence_num_stds_away_thr = kwargs.get("bootstrap_convergence_num_stds_away_thr", 1)
-                empirical_threshold = np.quantile(mahalanobis_dists, bootstrap_convergence_confidence)
-                t2 = time.time()
-                print(f"Bootstrap convergence test = {empirical_threshold},  took {t2 - t1} seconds")
-
-                if bootstrap_convergence_num_stds_away_thr > empirical_threshold:
-                    print(f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
-                          f"test! The model is likely to be up to {bootstrap_convergence_num_stds_away_thr} stds from "
+                if convergence_results["success"]:
+                    print(f"Reached a confidence of {kwargs.get('bootstrap_convergence_confidence', 0.95)} with the bootstrap convergence "
+                          f"test! The model is likely to be up to {kwargs.get('bootstrap_convergence_stds_away_thr', 1)} stds from "
                           f"the data, according to the estimated data variability DONE! ")
                     grads = grads[:i]
                     break
@@ -505,7 +500,7 @@ class ERGM():
 
         self._last_mcmc_chain_features = features_of_net_samples
 
-        return grads, hotelling_statistics
+        return grads, convergence_results
 
     def get_mcmc_diagnostics(self, sampled_networks=None, observed_network=None):
         """
@@ -738,9 +733,10 @@ class ConvergenceTester():
             "threshold": hotelling_critical_value
         }
         
-    def bootstrapped_mahalanobis_from_observed(sampled_networks, 
-                                    metrics_collection, 
+    def bootstrapped_mahalanobis_from_observed(self,
                                     observed_features, 
+                                    sampled_networks,
+                                    metrics_collection, 
                                     inverted_observed_cov_matrix, 
                                     num_subsamples=100,
                                     subsample_size=1000,
@@ -749,7 +745,8 @@ class ConvergenceTester():
         """
         Repeatedly subsample from a sample of networks, and calculate the distance between the subsample mean
         and the observed features. The distance is calculated using the Mahalanobis distance, with the covariance matrix
-        being an estimation of the observed covariance matrix.
+        being an estimation of the observed covariance. The observed covariance can either be the real covariance of the data,
+        or an estimation of the covariance matrix (using methods like `Network splitting augmentation` or `Noise augmentation`).
         """
 
         sample_size = sampled_networks.shape[2]
@@ -771,8 +768,39 @@ class ConvergenceTester():
         return {
             "success": empirical_threshold < stds_away_thr,
             "statistic": empirical_threshold,
+            "threshold": stds_away_thr
         }
 
+    def bootstrapped_mahalanobis_from_model(self,
+                                    observed_features, 
+                                    sampled_networks,
+                                    metrics_collection, 
+                                    num_subsamples=100,
+                                    subsample_size=1000,
+                                    confidence=0.95,
+                                    stds_away_thr=1):
 
+        sample_size = sampled_networks.shape[2]
+        num_of_features = observed_features.shape[0]
 
+        mahalanobis_dists = np.zeros(num_subsamples)
 
+        sub_sample_indices = np.random.choice(np.arange(sample_size), size=num_subsamples * subsample_size)
+        sub_samples = sampled_networks[:, :, sub_sample_indices]
+        sub_samples_features = metrics_collection.calculate_sample_statistics(sub_samples)
+        sub_samples_features = sub_samples_features.reshape(num_of_features, num_subsamples, subsample_size)
+
+        for cur_subsam_idx in range(num_subsamples):
+            sub_sample = sub_samples_features[:, cur_subsam_idx, :]
+            sub_sample_mean = sub_sample.mean(axis=1)
+            model_covariance_matrix = covariance_matrix_estimation(sub_sample, sub_sample_mean, method="naive")
+            inv_model_cov_matrix = np.linalg.pinv(model_covariance_matrix)
+            mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, sub_sample_mean, inv_model_cov_matrix)
+        
+        empirical_threshold = np.quantile(mahalanobis_dists, confidence)
+
+        return {
+            "success": empirical_threshold < stds_away_thr,
+            "statistic": empirical_threshold,
+            "threshold": stds_away_thr
+        }
