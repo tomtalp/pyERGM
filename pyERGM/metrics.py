@@ -503,11 +503,12 @@ class ExWeightNumEdges(Metric):
         return res
 
     def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int]):
-        # edge_weights shape is (num_weight_mats, n_nodes, n_nodes)
+        # edge_weights shape is (num_weight_mats, n_nodes, n_nodes), the desired outcome is in the shape: (n_nodes**2 - n_nodes, num_weight_mats)
         num_nodes = len(self.exogenous_attr)
-        num_weight_mats = self.edge_weights.shape[0]
-        # remove diagonal and reshape to the desired format
-        Xs = self.edge_weights[:, np.eye(num_nodes) == 0].reshape(num_nodes**2 - num_nodes, num_weight_mats)
+        if self._is_directed:
+            Xs = self.edge_weights[:, np.eye(num_nodes) == 0].transpose()
+        else:
+            Xs = self.edge_weights[:, np.triu(self.edge_weights[0]) != 0].transpose()
         return Xs[edges_indices_lims[0]:edges_indices_lims[1], :]
 
 
