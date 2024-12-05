@@ -508,7 +508,7 @@ class ExWeightNumEdges(Metric):
         if self._is_directed:
             Xs = self.edge_weights[:, np.eye(num_nodes) == 0].transpose()
         else:
-            Xs = self.edge_weights[:, np.triu(self.edge_weights[0]) != 0].transpose()
+            Xs = self.edge_weights[:, np.triu(np.ones_like(self.edge_weights[0]), k=1).astype(bool)].transpose()
         return Xs[edges_indices_lims[0]:edges_indices_lims[1], :]
 
 
