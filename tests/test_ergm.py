@@ -176,13 +176,11 @@ class TestERGM(unittest.TestCase):
         ergm = ERGM(n,
                     [NumberOfEdgesUndirected()],
                     is_directed=is_directed,
-                    sample_size=200,
-                    n_mcmc_steps=10,
                     seed_MCMC_proba=0.25
                     )
 
         ergm.fit(W, lr=0.01, opt_steps=300, sliding_grad_window_k=10, sample_pct_growth=0.05, steps_for_decay=20,
-                 lr_decay_pct=0.05)
+                 lr_decay_pct=0.05, mcmc_sample_size=200, mcmc_steps_per_sample=10)
 
         fit_theta = ergm._thetas[0]
         print(f"ground truth theta: {ground_truth_theta}")

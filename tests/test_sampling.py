@@ -17,7 +17,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         thetas = np.array([np.log(2)])
 
         # UNDIRECTED VERSION
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, metrics_collection=stats_calculator)
 
         test_W = np.array([
             [0., 0., 0., 1.],
@@ -56,7 +56,7 @@ class Test_MetropolisHastings(unittest.TestCase):
 
         # DIRECTED VERSION
         stats_calculator = MetricsCollection([NumberOfEdgesDirected()], is_directed=True, n_nodes=2)
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, metrics_collection=stats_calculator)
 
         test_W = np.array([[0, 1], [0, 0]])
         node_i = 1
@@ -84,7 +84,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         theta_edges = 0.5
         thetas = np.array([theta_edges])
 
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, metrics_collection=stats_calculator)
 
         current_W = np.array([
             [0, 0, 1],
@@ -100,13 +100,14 @@ class Test_MetropolisHastings(unittest.TestCase):
         """
         Test the change score calculation for a undirected graph, based on two variables - num_edges & num_triangles
         """
-        stats_calculator = MetricsCollection([NumberOfEdgesUndirected(), NumberOfTriangles()], is_directed=False, n_nodes=3)
+        stats_calculator = MetricsCollection([NumberOfEdgesUndirected(), NumberOfTriangles()], is_directed=False,
+                                             n_nodes=3)
 
         theta_edges = 2
         theta_triangles = 0.5
         thetas = np.array([theta_edges, theta_triangles])
 
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, metrics_collection=stats_calculator)
 
         current_W = np.array([
             [0, 0, 1],
@@ -131,8 +132,8 @@ class Test_MetropolisHastings(unittest.TestCase):
         theta_edges = -1
         thetas = np.array([theta_edges])
 
-        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, network_stats_calculator=stats_calculator)
-        
+        sampler = sampling.NaiveMetropolisHastings(thetas=thetas, metrics_collection=stats_calculator)
+
         current_W = np.array([
             [0, 0, 1],
             [1, 0, 1],
@@ -152,3 +153,29 @@ class Test_MetropolisHastings(unittest.TestCase):
         expected_change_score = changed_edges * theta_edges
 
         self.assertEqual(total_change_score, expected_change_score)
+
+    def test__calc_edge_influence_on_features(self):
+        np.random.seed(5678234)
+        n = 10
+        graph = nx.fast_gnp_random_graph(n, 0.5, seed=np.random)
+        adj_mat = nx.to_numpy_array(graph)
+        sampler = sampling.NaiveMetropolisHastings(np.zeros(n),
+                                                   MetricsCollection([NumberOfEdgesDirected(), OutDegree()],
+                                                                     is_directed=True, n_nodes=n))
+        # The contribution of degree is n, and of number of edges is 1, for each edge
+        expected_total_influence = (1 + n) * np.ones(n * (n - 1))
+        # The collinearity fixed removed the out degree of the first node, so no contribution for its edges.
+        expected_total_influence[:n - 1] = 1
+        total_influence = sampler._calc_edge_influence_on_features(adj_mat)
+        self.assertTrue(np.all(expected_total_influence == total_influence))
+
+    def test_sample_non_uniform_proposals_smoke_test(self):
+        np.random.seed(5678234)
+        n = 10
+        graph = nx.fast_gnp_random_graph(n, 0.5, seed=np.random)
+        adj_mat = nx.to_numpy_array(graph)
+        sampler = sampling.NaiveMetropolisHastings(np.zeros(n),
+                                                   MetricsCollection([NumberOfEdgesDirected(), OutDegree()],
+                                                                     is_directed=True, n_nodes=n))
+        sampler.sample(initial_state=adj_mat, num_of_nets=10, edge_proposal_method='features_influence__sum')
+        sampler.sample(initial_state=adj_mat, num_of_nets=10, edge_proposal_method='features_influence__softmax')

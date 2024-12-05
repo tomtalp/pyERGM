@@ -3,7 +3,7 @@ Fitting an ERGM model requires a graph and a set of statistics that describe the
 The following example demonstrates how to fit a simple ERGM model from [Sampson's monastery data](https://networkdata.ics.uci.edu/netdata/html/sampson.html).
 
 ```python
-from pyERGM import ERGM
+from pyERGM.ergm import ERGM
 from pyERGM.metrics import *
 from pyERGM.datasets import load_sampson
 
@@ -67,6 +67,8 @@ With the exception of dyadic dependent models, all models are fit using the MCML
 * **no_mple** (*bool*) - Optional. Whether to skip the MPLE step and go directly to MCMLE. *Defaults to False*.
 * **mcmc_burn_in** (*int*) - Optional. The number of burn-in steps for the MCMC sampler. *Defaults to 1000*.
 * **mcmc_steps_per_sample** (*int*) - Optional. The number of steps to run the MCMC sampler for each sample. *Defaults to 10*.
+* **mcmc_seed_network** (*np.ndarray*) - Optional. The seed network for the MCMC sampler. If not provided, the thetas that are currently set are used to calculate the MPLE prediction, from which the sample is drawn. *Defaults to None*.
+* **mcmc_sample_size** (*int*) - Optional. The number of networks to sample with the MCMC sampler. *Defaults to 100*.
 * **mple_lr** (*float*) - Optional. The learning rate for the logistic regression model in the MPLE step. *Defaults to 0.001*.
 * **mple_stopping_thr** (*float*) - Optional. The stopping threshold for the logistic regression model in the MPLE step. *Defaults to 1e-6*.
 * **mple_max_iter** (*int*) - Optional. The maximum number of iterations for the logistic regression model in the MPLE step. *Defaults to 1000*.
