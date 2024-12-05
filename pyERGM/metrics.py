@@ -5,8 +5,7 @@ from copy import deepcopy
 
 import numpy as np
 import pandas as pd
-from scipy.spatial import distance
-
+from scipy.spatial.distance import pdist, squareform
 
 from pyERGM.utils import *
 
@@ -100,11 +99,11 @@ class Metric(ABC):
                     edge_idx += 1
                     if edge_idx == edges_indices_lims[1]:
                         return Xs
-        
+
         else:
-            Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count())) 
-            for i in range(self._n_nodes-1):
-                for j in range(i+1, self._n_nodes):
+            Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count()))
+            for i in range(self._n_nodes - 1):
+                for j in range(i + 1, self._n_nodes):
                     if edge_idx < edges_indices_lims[0]:
                         edge_idx += 1
                         continue
@@ -123,7 +122,6 @@ class Metric(ABC):
                     edge_idx += 1
                     if edge_idx == edges_indices_lims[1]:
                         return Xs
-
 
     def _get_metric_names(self):
         """
@@ -477,8 +475,8 @@ class ExWeightNumEdges(Metric):
 
     def calculate(self, input: np.ndarray):
         # TODO - Since most of our focus is on the `calculate_for_sample` functions,
-        # we can convert all individual calculate(x) functions to calculate_for_sample([x])
-        # and reuse code.
+        #  we can convert all individual calculate(x) functions to calculate_for_sample([x])
+        #  and reuse code.
         res = np.einsum('ij,kij->k', input, self.edge_weights)
         if not self._is_directed:
             res = res / 2
@@ -508,7 +506,8 @@ class ExWeightNumEdges(Metric):
         if self._is_directed:
             Xs = self.edge_weights[:, np.eye(num_nodes) == 0].transpose()
         else:
-            Xs = self.edge_weights[:, np.triu(np.ones_like(self.edge_weights[0]), k=1).astype(bool)].transpose()
+            up_triangle_indices = np.triu_indices(num_nodes, k=1)
+            Xs = self.edge_weights[:, up_triangle_indices[0], up_triangle_indices[1]].transpose()
         return Xs[edges_indices_lims[0]:edges_indices_lims[1], :]
 
 
@@ -738,16 +737,18 @@ class NodeAttrSumIn(ExWeightNumEdges):
 
 class SumDistancesConnectedNeurons(ExWeightNumEdges):
     """
-    This class calculates the sum of euclidean distances between all pairs of connected neurons.
+    This class calculates the sum of Euclidean distances between all pairs of connected neurons.
     rows = samples, columns = axes
     """
+
     def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool):
         # todo: decorator that checks inputs and returns np.ndarray if the inputs were valid, and an error otherwise
         if isinstance(exogenous_attr, (pd.DataFrame, pd.Series, list, tuple)):
             exogenous_attr = np.array(exogenous_attr)
         elif not isinstance(exogenous_attr, np.ndarray):
-            raise ValueError(f"Unsupported type of positions: {type(exogenous_attr)}. Supported types are pd.DataFrame, "
-                             f"pd.Series, list, tuple and np.ndarray.")
+            raise ValueError(
+                f"Unsupported type of positions: {type(exogenous_attr)}. Supported types are pd.DataFrame, "
+                f"pd.Series, list, tuple and np.ndarray.")
         if len(exogenous_attr.shape) == 1:
             exogenous_attr = exogenous_attr.reshape(-1, 1)
 
@@ -756,7 +757,8 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
 
     def _calc_edge_weights(self):
         num_nodes = len(self.exogenous_attr)
-        self.edge_weights = np.reshape(distance.squareform(distance.pdist(self.exogenous_attr, metric='euclidean')), (self._get_num_weight_mats(), num_nodes, num_nodes))
+        self.edge_weights = np.reshape(squareform(pdist(self.exogenous_attr, metric='euclidean')),
+                                       (self._get_num_weight_mats(), num_nodes, num_nodes))
 
     def _get_num_weight_mats(self):
         return 1
@@ -1187,7 +1189,7 @@ class MetricsCollection:
 
         if self.is_directed:
             ys = observed_network[~np.eye(n_nodes, dtype=bool)].flatten()[
-                   edges_indices_lims[0]:edges_indices_lims[1], None]
+                 edges_indices_lims[0]:edges_indices_lims[1], None]
         else:
             ys = observed_network[np.triu_indices(n_nodes, 1)][edges_indices_lims[0]:edges_indices_lims[1], None]
         return Xs, ys
@@ -1210,7 +1212,3 @@ class MetricsCollection:
             parameter_names += metric._get_ignored_features()
 
         return parameter_names
-
-
-
-
