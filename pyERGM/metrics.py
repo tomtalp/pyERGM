@@ -4,6 +4,8 @@ from typing import Collection, Callable
 from copy import deepcopy
 
 import numpy as np
+import pandas as pd
+from scipy.spatial.distance import pdist, squareform
 
 from pyERGM.utils import *
 
@@ -658,6 +660,16 @@ class ExWeightNumEdges(Metric):
 
         return res
 
+    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int]):
+        # edge_weights shape is (num_weight_mats, n_nodes, n_nodes), the desired outcome is in the shape: (n_nodes**2 - n_nodes, num_weight_mats)
+        num_nodes = len(self.exogenous_attr)
+        if self._is_directed:
+            Xs = self.edge_weights[:, np.eye(num_nodes) == 0].transpose()
+        else:
+            up_triangle_indices = np.triu_indices(num_nodes, k=1)
+            Xs = self.edge_weights[:, up_triangle_indices[0], up_triangle_indices[1]].transpose()
+        return Xs[edges_indices_lims[0]:edges_indices_lims[1], :]
+
 
 class NumberOfEdgesTypesDirected(Metric):
     """
@@ -884,6 +896,38 @@ class NodeAttrSumIn(ExWeightNumEdges):
 
     def __str__(self):
         return "node_attribute_in"
+
+
+class SumDistancesConnectedNeurons(ExWeightNumEdges):
+    """
+    This class calculates the sum of Euclidean distances between all pairs of connected neurons.
+    rows = samples, columns = axes
+    """
+
+    def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool):
+        # todo: decorator that checks inputs and returns np.ndarray if the inputs were valid, and an error otherwise
+        if isinstance(exogenous_attr, (pd.DataFrame, pd.Series, list, tuple)):
+            exogenous_attr = np.array(exogenous_attr)
+        elif not isinstance(exogenous_attr, np.ndarray):
+            raise ValueError(
+                f"Unsupported type of positions: {type(exogenous_attr)}. Supported types are pd.DataFrame, "
+                f"pd.Series, list, tuple and np.ndarray.")
+        if len(exogenous_attr.shape) == 1:
+            exogenous_attr = exogenous_attr.reshape(-1, 1)
+
+        super().__init__(exogenous_attr)
+        self._is_directed = is_directed
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.reshape(squareform(pdist(self.exogenous_attr, metric='euclidean')),
+                                       (self._get_num_weight_mats(), num_nodes, num_nodes))
+
+    def _get_num_weight_mats(self):
+        return 1
+
+    def __str__(self):
+        return "sum_distances_connected_neurons"
 
 
 class MetricsCollection:
