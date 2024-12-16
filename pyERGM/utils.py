@@ -636,38 +636,41 @@ def local_mple_logistic_regression_optimization_step(Xs, ys, thetas):
     return prediction, log_like, grad, hessian
 
 
-def minus_log_likelihood_local(thetas, Xs, ys):
-    pred = calc_logistic_regression_predictions(Xs, thetas)
+def minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10):
+    pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1-eps)
     return -calc_logistic_regression_predictions_log_likelihood(pred, ys)
 
 
 def minus_log_likelihood_distributed(thetas, data_path, num_edges_per_job):
-    return -distributed_logistic_regression_optimization_step(data_path, thetas, 'log_likelihood', num_edges_per_job)
+    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
+                                                              'log_likelihood', num_edges_per_job)
 
 
-def minus_log_like_grad_local(thetas, Xs, ys):
-    pred = calc_logistic_regression_predictions(Xs, thetas)
-    return -calc_logistic_regression_log_likelihood_grad(Xs, pred, ys)
+def minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10):
+    pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1-eps)
+    return -calc_logistic_regression_log_likelihood_grad(Xs, pred, ys).reshape(thetas.size,)
 
 
 def minus_log_like_grad_distributed(thetas, data_path, num_edges_per_job):
-    return -distributed_logistic_regression_optimization_step(data_path, thetas, 'log_likelihood_gradient',
+    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
+                                                              'log_likelihood_gradient',
                                                               num_edges_per_job)
 
 
-def minus_log_likelihood_hessian_local(thetas, Xs, ys):
-    pred = calc_logistic_regression_predictions(Xs, thetas)
+def minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10):
+    pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1-eps)
     return -calc_logistic_regression_log_likelihood_hessian(Xs, pred)
 
 
 def minus_log_likelihood_hessian_distributed(thetas, data_path, num_edges_per_job):
-    return -distributed_logistic_regression_optimization_step(data_path, thetas, 'log_likelihood_hessian',
+    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
+                                                              'log_likelihood_hessian',
                                                               num_edges_per_job)
 
 
-def scipy_mple_logistic_regression_optimization_step(metrics_collection, observed_network: np.ndarray,
-                                                     initial_thetas: np.ndarray | None = None,
-                                                     is_distributed: bool = False):
+def scipy_mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
+                                                initial_thetas: np.ndarray | None = None,
+                                                is_distributed: bool = False):
     def after_iteration_callback(intermediate_result: OptimizeResult):
         nonlocal iteration
         iteration += 1
@@ -700,20 +703,22 @@ def scipy_mple_logistic_regression_optimization_step(metrics_collection, observe
 
     num_features = metrics_collection.calc_num_of_features()
     if initial_thetas is None:
-        thetas = np.random.rand(num_features, 1)
+        thetas = np.random.rand(num_features)
     else:
         thetas = initial_thetas.copy()
 
     if not is_distributed:
         res = minimize(minus_log_likelihood_local, thetas, args=(Xs, ys),
                        jac=minus_log_like_grad_local, hess=minus_log_likelihood_hessian_local,
-                       callback=after_iteration_callback)
+                       callback=after_iteration_callback, method="Newton-CG")
     else:
-        num_edges_per_job = 5000 # TODO: make this configurable
+        num_edges_per_job = 5000  # TODO: make this configurable
         res = minimize(minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
                        jac=minus_log_like_grad_distributed, hess=minus_log_likelihood_hessian_distributed,
-                       callback=after_iteration_callback)
-    return res
+                       callback=after_iteration_callback, method="Newton-CG")
+    print(res)
+    sys.stdout.flush()
+    return res.x, calc_logistic_regression_predictions(Xs, res.x.reshape(-1, 1)).flatten()
 
 
 def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,

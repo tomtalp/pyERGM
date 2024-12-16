@@ -160,11 +160,16 @@ class ERGM():
             The estimated coefficients of the ERGM.
         """
         print(f"MPLE with lr {lr}")
-        trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection, observed_network,
-                                                                           is_distributed=self._is_distributed_optimization,
-                                                                           lr=lr,
-                                                                           stopping_thr=stopping_thr,
-                                                                           max_iter=logistic_reg_max_iter)
+        # trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection, observed_network,
+        #                                                                    is_distributed=self._is_distributed_optimization,
+        #                                                                    lr=lr,
+        #                                                                    stopping_thr=stopping_thr,
+        #                                                                    max_iter=logistic_reg_max_iter)
+
+        trained_thetas, prediction = scipy_mple_logistic_regression_optimization(self._metrics_collection,
+                                                                                 observed_network,
+                                                                                 is_distributed=self._is_distributed_optimization)
+
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
 
         if self._is_directed:
@@ -477,16 +482,19 @@ class ERGM():
                 num_model_sub_samples = kwargs.get("num_model_sub_samples", 100)
                 model_subsample_size = kwargs.get("model_subsample_size", 1000)
                 mahalanobis_dists = np.zeros(num_model_sub_samples)
-                
-                sub_sample_indices = np.random.choice(np.arange(mcmc_sample_size), size=num_model_sub_samples * model_subsample_size)
+
+                sub_sample_indices = np.random.choice(np.arange(mcmc_sample_size),
+                                                      size=num_model_sub_samples * model_subsample_size)
 
                 sub_samples = networks_for_sample[:, :, sub_sample_indices]
                 sub_samples_features = self._metrics_collection.calculate_sample_statistics(sub_samples)
-                mean_per_subsample = sub_samples_features.reshape(num_of_features, num_model_sub_samples, model_subsample_size).mean(axis=2)
+                mean_per_subsample = sub_samples_features.reshape(num_of_features, num_model_sub_samples,
+                                                                  model_subsample_size).mean(axis=2)
 
                 for cur_subsam_idx in range(num_model_sub_samples):
                     sub_sample_mean = mean_per_subsample[:, cur_subsam_idx]
-                    mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, sub_sample_mean, inv_observed_covariance)
+                    mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, sub_sample_mean,
+                                                                    inv_observed_covariance)
 
                 bootstrap_convergence_confidence = kwargs.get("bootstrap_convergence_confidence", 0.95)
                 bootstrap_convergence_num_stds_away_thr = kwargs.get("bootstrap_convergence_num_stds_away_thr", 1)
