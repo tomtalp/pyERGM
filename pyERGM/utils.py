@@ -5,6 +5,7 @@ import numpy as np
 import networkx as nx
 from numba import njit, objmode
 from scipy.spatial.distance import mahalanobis
+from scipy.optimize import minimize, OptimizeResult
 import torch
 import random
 import time
@@ -635,6 +636,86 @@ def local_mple_logistic_regression_optimization_step(Xs, ys, thetas):
     return prediction, log_like, grad, hessian
 
 
+def minus_log_likelihood_local(thetas, Xs, ys):
+    pred = calc_logistic_regression_predictions(Xs, thetas)
+    return -calc_logistic_regression_predictions_log_likelihood(pred, ys)
+
+
+def minus_log_likelihood_distributed(thetas, data_path, num_edges_per_job):
+    return -distributed_logistic_regression_optimization_step(data_path, thetas, 'log_likelihood', num_edges_per_job)
+
+
+def minus_log_like_grad_local(thetas, Xs, ys):
+    pred = calc_logistic_regression_predictions(Xs, thetas)
+    return -calc_logistic_regression_log_likelihood_grad(Xs, pred, ys)
+
+
+def minus_log_like_grad_distributed(thetas, data_path, num_edges_per_job):
+    return -distributed_logistic_regression_optimization_step(data_path, thetas, 'log_likelihood_gradient',
+                                                              num_edges_per_job)
+
+
+def minus_log_likelihood_hessian_local(thetas, Xs, ys):
+    pred = calc_logistic_regression_predictions(Xs, thetas)
+    return -calc_logistic_regression_log_likelihood_hessian(Xs, pred)
+
+
+def minus_log_likelihood_hessian_distributed(thetas, data_path, num_edges_per_job):
+    return -distributed_logistic_regression_optimization_step(data_path, thetas, 'log_likelihood_hessian',
+                                                              num_edges_per_job)
+
+
+def scipy_mple_logistic_regression_optimization_step(metrics_collection, observed_network: np.ndarray,
+                                                     initial_thetas: np.ndarray | None = None,
+                                                     is_distributed: bool = False):
+    def after_iteration_callback(intermediate_result: OptimizeResult):
+        nonlocal iteration
+        iteration += 1
+        cur_time = time.time()
+        print(f'iteration: {iteration}, time from start '
+              f'training: {cur_time - start_time} '
+              f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
+        sys.stdout.flush()
+
+    iteration = 0
+    start_time = time.time()
+    print("optimization started")
+    sys.stdout.flush()
+
+    if not is_distributed:
+        Xs, ys = metrics_collection.prepare_mple_data(observed_network)
+    else:
+        out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
+        data_path = (out_dir_path / "data").resolve()
+        os.makedirs(data_path, exist_ok=True)
+
+        # Copy the `MetricsCollection` and the observed network to provide its path to children jobs, so they will be
+        # able to access it.
+        metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
+        with open(metric_collection_path, 'wb') as f:
+            pickle.dump(metrics_collection, f)
+        observed_net_path = os.path.join(data_path, 'observed_network.pkl')
+        with open(observed_net_path, 'wb') as f:
+            pickle.dump(observed_network, f)
+
+    num_features = metrics_collection.calc_num_of_features()
+    if initial_thetas is None:
+        thetas = np.random.rand(num_features, 1)
+    else:
+        thetas = initial_thetas.copy()
+
+    if not is_distributed:
+        res = minimize(minus_log_likelihood_local, thetas, args=(Xs, ys),
+                       jac=minus_log_like_grad_local, hess=minus_log_likelihood_hessian_local,
+                       callback=after_iteration_callback)
+    else:
+        num_edges_per_job = 5000 # TODO: make this configurable
+        res = minimize(minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
+                       jac=minus_log_like_grad_distributed, hess=minus_log_likelihood_hessian_distributed,
+                       callback=after_iteration_callback)
+    return res
+
+
 def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-6,
@@ -753,33 +834,28 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
     return thetas.flatten(), prediction.flatten()
 
 
-def distributed_logistic_regression_optimization_step(data_path, thetas, num_edges_per_job=5000):
+def distributed_logistic_regression_optimization_step(data_path, thetas, func_to_calc, num_edges_per_job=5000):
     # Arrange files and send the children jobs
     num_jobs, out_path, job_array_ids = _run_distributed_logistic_regression_children_jobs(data_path, thetas,
+                                                                                           func_to_calc,
                                                                                            num_edges_per_job)
 
-    # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
-    hessian_path = (out_path / "hessian").resolve()
-    os.makedirs(hessian_path, exist_ok=True)
-    wait_for_distributed_children_outputs(num_jobs, hessian_path, job_array_ids, "log_reg_step")
+    # Wait for all jobs to finish.
+    chunks_path = (out_path / func_to_calc).resolve()
+    os.makedirs(chunks_path, exist_ok=True)
+    wait_for_distributed_children_outputs(num_jobs, chunks_path, job_array_ids, "log_reg_step")
     # Clean current scripts
     shutil.rmtree((out_path / "scripts").resolve())
 
     # Aggregate results
-    predictions = cat_children_jobs_outputs(num_jobs, (out_path / "prediction").resolve())
-    log_likelihood = _sum_children_jobs_outputs(num_jobs, (out_path / "log_like").resolve())
-    grad = _sum_children_jobs_outputs(num_jobs, (out_path / "grad").resolve())
-    hessian = _sum_children_jobs_outputs(num_jobs, (out_path / "hessian").resolve())
+    aggregated_func = _sum_children_jobs_outputs(num_jobs, (out_path / func_to_calc).resolve())
 
     # Clean current outputs
-    shutil.rmtree((out_path / "prediction").resolve())
-    shutil.rmtree((out_path / "log_like").resolve())
-    shutil.rmtree((out_path / "grad").resolve())
-    shutil.rmtree((out_path / "hessian").resolve())
-    return predictions, log_likelihood, grad, hessian
+    shutil.rmtree((out_path / func_to_calc).resolve())
+    return aggregated_func
 
 
-def _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas, num_edges_per_job):
+def _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, func_to_calculate, num_edges_per_job):
     # Construct a string with the current thetas, to pass using the command line to children jobs.
     thetas_str = ''
     for t in cur_thetas:
@@ -789,6 +865,7 @@ def _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas, 
     cmd_line_for_bsub = (f'python ./logistic_regression_distributed_calcs.py '
                          f'--out_dir_path {out_path} '
                          f'--num_edges_per_job {num_edges_per_job} '
+                         f'--function {func_to_calculate}'
                          f'--thetas {thetas_str}')
     return cmd_line_for_bsub
 
@@ -832,11 +909,11 @@ def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_
     return job_array_ids
 
 
-def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, num_edges_per_job):
+def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, func_to_calculate, num_edges_per_job):
     out_path = data_path.parent
 
-    cmd_line_single_batch = _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas,
-                                                                                  num_edges_per_job)
+    cmd_line_single_batch = _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas,
+                                                                                 func_to_calculate, num_edges_per_job)
 
     with open(os.path.join(data_path, "observed_network.pkl"), 'rb') as f:
         observed_network = pickle.load(f)
