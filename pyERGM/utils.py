@@ -690,7 +690,7 @@ def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10):
 def analytical_minus_log_like_grad_distributed(thetas, data_path, num_edges_per_job):
     return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
                                                               'log_likelihood_gradient',
-                                                              num_edges_per_job)
+                                                              num_edges_per_job).reshape(thetas.size, )
 
 
 def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10):
