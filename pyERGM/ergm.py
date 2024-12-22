@@ -66,7 +66,7 @@ class ERGM():
                                                      fix_collinearity=fix_collinearity,
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size,
                                                      is_collinearity_distributed=self._is_distributed_optimization,
-                                                     num_samples_per_job=kwargs.get(
+                                                     num_samples_per_job_collinearity_fixer=kwargs.get(
                                                          'num_samples_per_job_collinearity_fixer', 5))
 
         if initial_thetas is not None:
