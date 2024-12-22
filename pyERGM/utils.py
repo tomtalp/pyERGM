@@ -782,6 +782,8 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
                 f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
         pred = calc_logistic_regression_predictions(Xs, res.x.reshape(-1, 1)).flatten()
     else:
+        # TODO: support L-BFGS-B as an optimization method, and implement a numerically stable version for distributed
+        #  calculations as well.
         num_edges_per_job = kwargs.get('num_edges_per_job', 100000)
         if optimization_method == "Newton-CG":
             res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
@@ -801,6 +803,11 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
 
 
 def distributed_logistic_regression_optimization_step(data_path, thetas, func_to_calc, num_edges_per_job=5000):
+    # TODO: support calculating multiple functions in a single job array, maybe by getting an array of function
+    #  names rather than a single function as func_to_calc. This will enable passing jac=True to scipy.optimize.minimize
+    #  when the optimization method is L-BFGS-B, and calculating both log-likelihood and gradient in a single job array,
+    #  reducing the number of sent jobs significantly.
+
     # Arrange files and send the children jobs
     num_jobs, out_path, job_array_ids = _run_distributed_logistic_regression_children_jobs(data_path, thetas,
                                                                                            func_to_calc,
@@ -809,7 +816,7 @@ def distributed_logistic_regression_optimization_step(data_path, thetas, func_to
     # Wait for all jobs to finish.
     chunks_path = (out_path / func_to_calc).resolve()
     os.makedirs(chunks_path, exist_ok=True)
-    wait_for_distributed_children_outputs(num_jobs, chunks_path, job_array_ids, "log_reg_step")
+    wait_for_distributed_children_outputs(num_jobs, chunks_path, job_array_ids, func_to_calc)
     # Clean current scripts
     shutil.rmtree((out_path / "scripts").resolve())
 

@@ -139,7 +139,7 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_network):
+    def _mple_fit(self, observed_network, optimization_method: str = 'L-BFGS-B'):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -162,7 +162,8 @@ class ERGM():
         print("MPLE")
         trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection,
                                                                            observed_network,
-                                                                           is_distributed=self._is_distributed_optimization)
+                                                                           is_distributed=self._is_distributed_optimization,
+                                                                           optimization_method=optimization_method)
 
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
 
@@ -318,7 +319,8 @@ class ERGM():
             print(f"Using existing thetas")
             pass
         elif not no_mple and self._do_MPLE(theta_init_method):
-            self._thetas = self._mple_fit(observed_network)
+            self._thetas = self._mple_fit(observed_network,
+                                          optimization_method=kwargs.get('mple_optimization_method', 'L-BFGS-B'))
 
             if not self._metrics_collection._has_dyadic_dependent_metrics:
                 print(f"Model is dyadic independent - using only MPLE instead of MCMLE")
