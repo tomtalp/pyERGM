@@ -43,7 +43,9 @@ def main():
     os.makedirs(chunks_dir_path, exist_ok=True)
 
     # Calculate the contributions of the chunk to the log-likelihood, the gradient and the hessian.
-    if func_to_calc == 'log_likelihood':
+    if func_to_calc == 'predictions':
+        func_chunk = chunk_prediction
+    elif func_to_calc == 'log_likelihood':
         func_chunk = calc_logistic_regression_predictions_log_likelihood(chunk_prediction, ys_chunk)
     elif func_to_calc == 'log_likelihood_gradient':
         func_chunk = calc_logistic_regression_log_likelihood_grad(Xs_chunk, chunk_prediction, ys_chunk)
@@ -52,7 +54,7 @@ def main():
     else:
         raise ValueError(f'Unsupported function to calculate for logistic regression distributed '
                          f'optimization: {func_to_calc}. Possibilities are: '
-                         f'log_likelihood, log_likelihood_gradient, log_likelihood_hessian')
+                         f'predictions, log_likelihood, log_likelihood_gradient, log_likelihood_hessian')
 
     with open(os.path.join(chunks_dir_path, f'{func_id}.pkl'), 'wb') as f:
         pickle.dump(func_chunk, f)

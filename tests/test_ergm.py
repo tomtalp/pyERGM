@@ -234,3 +234,112 @@ class TestERGM(unittest.TestCase):
 
         for inferred_proba, real_density in zip(inferred_probas_per_type_pairs, real_densities_per_type):
             self.assertAlmostEqual(inferred_proba, real_density, places=4)
+
+    def test_MPLE_regressors_of_different_scales(self):
+        # TODO: currently this is a smoke test - we validate nothing: neither convergence nor the thetas/predictions.
+        #  Somehow sklearn still finds a slightly better solution than ours.
+        np.random.seed(42)
+
+        W = np.random.randint(0, 2, size=(10, 10))
+        W[np.diag_indices(10)] = 0
+
+        metrics = [NumberOfEdgesDirected(),
+                   NodeAttrSum([np.random.randint(1, 5) ** 10 for x in range(10)], is_directed=True)]
+        model = ERGM(n_nodes=10, metrics_collection=metrics, is_directed=True)
+
+        model.fit(W)
+
+        # sklearn_thetas = np.array([2.82974701e-01, -2.34383474e-07])
+
+        # sklearn_probas = np.array([0.56682151,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.56682151,
+        # 0.56347922,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.44804742,
+        # 0.5092404 ,
+        # 0.50584116,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.44804742,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.50584116,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.56682151,
+        # 0.56347922,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.56682151])
+
+        # self.assertAlmostEqual()
