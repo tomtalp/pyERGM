@@ -10,8 +10,8 @@ class ERGM():
     def __init__(self,
                  n_nodes,
                  metrics_collection: Collection[Metric],
-                 is_directed,
-                 initial_thetas=None,
+                 is_directed: bool,
+                 initial_thetas: dict=None,
                  initial_normalization_factor=None,
                  seed_MCMC_proba=0.25,
                  verbose=True,
@@ -63,14 +63,29 @@ class ERGM():
         self._is_distributed_optimization = is_distributed_optimization
         self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
                                                      use_sparse_matrix=use_sparse_matrix,
-                                                     fix_collinearity=fix_collinearity,
+                                                     fix_collinearity=fix_collinearity and (initial_thetas is None),
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size,
                                                      is_collinearity_distributed=self._is_distributed_optimization,
                                                      num_samples_per_job_collinearity_fixer=kwargs.get(
                                                          'num_samples_per_job_collinearity_fixer', 5))
 
         if initial_thetas is not None:
-            self._thetas = initial_thetas
+            self._thetas = np.zeros(self._metrics_collection.calc_num_of_features())
+            current_model_params = self.get_model_parameters()
+            if len(set(initial_thetas.keys()).difference(set(current_model_params.keys()))) > 0:
+                raise ValueError("Got initial thetas that do not match the collection of Metrics!")
+
+            total_num_features = len(current_model_params.keys())
+            # Iterating the reversed list of keys for not interfering with indexing: always remove the last feature to
+            # be removed, thus not changing the indices of features needed to be removed with smaller indices.
+            for rev_feat_idx, feat_name in enumerate(list(current_model_params.keys())[::-1]):
+                if feat_name not in initial_thetas.keys():
+                    self._metrics_collection.remove_feature_by_idx(total_num_features - rev_feat_idx - 1)
+
+            current_model_params = self.get_model_parameters()
+            for feat_name in current_model_params.keys():
+                current_model_params[feat_name] = initial_thetas[feat_name]
+            self._thetas = np.array(list(current_model_params.values()))
         else:
             self._thetas = self._get_random_thetas(sampling_method="uniform")
 
