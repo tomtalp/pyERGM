@@ -19,7 +19,8 @@ class ERGM():
                  fix_collinearity=True,
                  collinearity_fixer_sample_size=1000,
                  is_distributed_optimization=False,
-                 optimization_options={}):
+                 optimization_options={},
+                 **kwargs):
         """
         An ERGM model object. 
         
@@ -64,7 +65,9 @@ class ERGM():
                                                      use_sparse_matrix=use_sparse_matrix,
                                                      fix_collinearity=fix_collinearity,
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size,
-                                                     is_collinearity_distributed=self._is_distributed_optimization)
+                                                     is_collinearity_distributed=self._is_distributed_optimization,
+                                                     num_samples_per_job=kwargs.get(
+                                                         'num_samples_per_job_collinearity_fixer', 5))
 
         if initial_thetas is not None:
             self._thetas = initial_thetas
@@ -139,7 +142,7 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_network, optimization_method: str = 'L-BFGS-B'):
+    def _mple_fit(self, observed_network, optimization_method: str = 'L-BFGS-B', **kwargs):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -163,7 +166,9 @@ class ERGM():
         trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection,
                                                                            observed_network,
                                                                            is_distributed=self._is_distributed_optimization,
-                                                                           optimization_method=optimization_method)
+                                                                           optimization_method=optimization_method,
+                                                                           num_edges_per_job=kwargs.get(
+                                                                               "num_edges_per_job", 100000))
 
         self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
 
@@ -320,7 +325,8 @@ class ERGM():
             pass
         elif not no_mple and self._do_MPLE(theta_init_method):
             self._thetas = self._mple_fit(observed_network,
-                                          optimization_method=kwargs.get('mple_optimization_method', 'L-BFGS-B'))
+                                          optimization_method=kwargs.get('mple_optimization_method', 'L-BFGS-B'),
+                                          num_edges_per_job=kwargs.get('num_edges_per_job', 100000))
 
             if not self._metrics_collection._has_dyadic_dependent_metrics:
                 print(f"Model is dyadic independent - using only MPLE instead of MCMLE")

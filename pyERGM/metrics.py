@@ -941,7 +941,8 @@ class MetricsCollection:
                  collinearity_fixer_sample_size=1000,
                  is_collinearity_distributed=False,
                  # TODO: For tests only, find a better solution
-                 do_copy_metrics=True):
+                 do_copy_metrics=True,
+                 **kwargs):
 
         if not do_copy_metrics:
             self.metrics = tuple([metric for metric in metrics])
@@ -969,7 +970,8 @@ class MetricsCollection:
         self.collinearity_fixer_sample_size = collinearity_fixer_sample_size
         if self._fix_collinearity:
             self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
-                                    is_distributed=is_collinearity_distributed)
+                                    is_distributed=is_collinearity_distributed,
+                                    num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5))
 
         # Returns the number of features that are being calculated. Since a single metric might return more than one
         # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
@@ -1078,7 +1080,7 @@ class MetricsCollection:
         return whole_sample_statistics
 
     def collinearity_fixer(self, sample_size=1000, nonzero_thr=10 ** -1, ratio_threshold=10 ** -6,
-                           eigenvec_thr=10 ** -4, is_distributed=False):
+                           eigenvec_thr=10 ** -4, is_distributed=False, **kwargs):
         """
         Find collinearity between metrics in the collection.
 
@@ -1094,7 +1096,9 @@ class MetricsCollection:
         if not is_distributed:
             sample_features = self.calc_statistics_for_binomial_tensor_local(sample_size)
         else:
-            sample_features = self.calc_statistics_for_binomial_tensor_distributed(sample_size, num_samples_per_job=5)
+            sample_features = self.calc_statistics_for_binomial_tensor_distributed(sample_size,
+                                                                                   num_samples_per_job=kwargs.get(
+                                                                                       "num_samples_per_job", 5))
         while is_linearly_dependent:
             self.num_of_features = self.calc_num_of_features()
 
