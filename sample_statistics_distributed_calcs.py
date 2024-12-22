@@ -1,7 +1,7 @@
 import argparse
 import sys
 
-from utils import *
+from pyERGM.utils import *
 
 
 def parse_cmd_args():
