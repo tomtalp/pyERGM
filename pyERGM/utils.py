@@ -841,7 +841,7 @@ def _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, f
     cmd_line_for_bsub = (f'python ./logistic_regression_distributed_calcs.py '
                          f'--out_dir_path {out_path} '
                          f'--num_edges_per_job {num_edges_per_job} '
-                         f'--function {func_to_calculate}'
+                         f'--function {func_to_calculate} '
                          f'--thetas {thetas_str}')
     return cmd_line_for_bsub
 
