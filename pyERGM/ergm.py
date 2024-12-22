@@ -11,7 +11,7 @@ class ERGM():
                  n_nodes,
                  metrics_collection: Collection[Metric],
                  is_directed: bool,
-                 initial_thetas: dict=None,
+                 initial_thetas: dict = None,
                  initial_normalization_factor=None,
                  seed_MCMC_proba=0.25,
                  verbose=True,
@@ -185,17 +185,41 @@ class ERGM():
                                                                            num_edges_per_job=kwargs.get(
                                                                                "num_edges_per_job", 100000))
 
-        self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
-
-        if self._is_directed:
-            self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
-        else:
-            upper_triangle_indices = np.triu_indices(self._n_nodes, k=1)
-            self._exact_average_mat[upper_triangle_indices] = prediction
-            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
-            self._exact_average_mat[lower_triangle_indices_aligned] = prediction
+        self._exact_average_mat = self._rearrange_prediction_to_av_mat(prediction)
 
         return trained_thetas
+
+    def _rearrange_prediction_to_av_mat(self, prediction):
+        av_mat = np.zeros((self._n_nodes, self._n_nodes))
+        if self._is_directed:
+            av_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
+        else:
+            upper_triangle_indices = np.triu_indices(self._n_nodes, k=1)
+            av_mat[upper_triangle_indices] = prediction
+            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
+            av_mat[lower_triangle_indices_aligned] = prediction
+        return av_mat
+
+    # TODO: decide how a getter for self._exact_average_mat fits in now - if the model is dyadic
+    #  independent, the observed_network doesn't matter - predictions will be always the same, and this is the exact
+    #  average matrix of the model, so should be computed once and stored. If the model is dyadic dependent, this is an
+    #  approximation, and the degree to which changes in the observed_network will change the prediction depend on the
+    #  metrics and the specific networks, it can not be pre-determined.
+    def get_mple_prediction(self, observed_network: np.ndarray):
+        is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
+        if is_dyadic_independent and self._exact_average_mat is not None:
+            return self._exact_average_mat.copy()
+
+        # TODO: handle this case
+        if self._is_distributed_optimization:
+            raise NotImplementedError(
+                "calculating mple predictions distributed without fitting is yet to be implemented")
+        Xs, _ = self._metrics_collection.prepare_mple_data(observed_network)
+        pred = calc_logistic_regression_predictions(Xs, self._thetas).flatten()
+        if is_dyadic_independent:
+            self._exact_average_mat = self._rearrange_prediction_to_av_mat(pred)
+            return self._exact_average_mat.copy()
+        return self._rearrange_prediction_to_av_mat(pred)
 
     def _do_MPLE(self, theta_init_method):
         if not self._metrics_collection._has_dyadic_dependent_metrics or theta_init_method == "mple":

@@ -371,3 +371,21 @@ class TestERGM(unittest.TestCase):
             [-0.5479023176512173, -0.02727153085065387, 0.022474879697902, 0.022461903905710654,
              18.45553104887986])
         self.assertTrue(np.all(np.abs(model_2._thetas - expected_model_1_params) < 1e-10))
+
+    def test_calculate_prediction(self):
+        n_nodes = 4
+        W = np.array([[0, 1, 0, 1],
+                      [0, 0, 1, 1],
+                      [1, 0, 0, 0],
+                      [0, 0, 1, 0]])
+
+        metrics = [NumberOfEdgesDirected()]
+        model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        model.fit(W)
+
+        model_2 = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True,
+                       initial_thetas=model.get_model_parameters())
+        model_2_av_mat = model_2.get_mple_prediction(W)
+        expected_model_2_av_mat = 0.5 * np.ones((n_nodes, n_nodes))
+        expected_model_2_av_mat[np.diag_indices(n_nodes)] = 0
+        self.assertTrue(np.abs(model_2_av_mat - expected_model_2_av_mat).max() < 1e-10)
