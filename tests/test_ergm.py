@@ -370,14 +370,7 @@ class TestERGM(unittest.TestCase):
                      NumberOfEdgesTypesDirected(['B', 'B', 'B', 'A', 'A'])]
         model_2 = ERGM(n_nodes=n_nodes, metrics_collection=metrics_2, is_directed=True, initial_thetas=model_1_params)
 
-        expected_model_1_params = np.array(
-            [-0.5479023176512173, -0.02727153085065387, 0.022474879697902, 0.022461903905710654,
-             18.45553104887986])
-        print("#########")
-        print(model_2._thetas)
-        print("#########")
-        print(np.abs(model_2._thetas - expected_model_1_params))
-        self.assertTrue(np.all(np.abs(model_2._thetas - expected_model_1_params) < 1e-10))
+        self.assertTrue(model_2.get_model_parameters() == model_1_params)
 
     def test_calculate_prediction(self):
         n_nodes = 4
