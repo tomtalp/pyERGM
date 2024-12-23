@@ -373,6 +373,10 @@ class TestERGM(unittest.TestCase):
         expected_model_1_params = np.array(
             [-0.5479023176512173, -0.02727153085065387, 0.022474879697902, 0.022461903905710654,
              18.45553104887986])
+        print("#########")
+        print(model_2._thetas)
+        print("#########")
+        print(np.abs(model_2._thetas - expected_model_1_params))
         self.assertTrue(np.all(np.abs(model_2._thetas - expected_model_1_params) < 1e-10))
 
     def test_calculate_prediction(self):
