@@ -638,7 +638,8 @@ def analytical_minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10):
 def numerically_stable_minus_log_like_and_grad_local(thetas, Xs, ys):
     linear_pred = Xs @ thetas
 
-    # Magic numbers are taken from sklearn
+    # Magic numbers are taken from sklearn:
+    # https://github.com/scikit-learn/scikit-learn/blob/72b35a46684c0ecf4182500d3320836607d1f17c/sklearn/_loss/_loss.pyx.tp#L728
     rng_1_idx = np.where(linear_pred <= -37)[0]
     rng_2_idx = np.where((-37 < linear_pred) & (linear_pred <= -2))[0]
     rng_3_idx = np.where((-2 < linear_pred) & (linear_pred <= 18))[0]

@@ -13,6 +13,7 @@ def parse_cmd_args():
     parser.add_argument('--out_dir_path', type=str)
     parser.add_argument('--num_edges_per_job', type=int)
     parser.add_argument('--function', type=str)
+    # TODO: it seems like the parser doesn't know to deal with scientific format (e.g. -3.243718829521125e-05).
     parser.add_argument('--thetas', action=StoreNpArr, type=float, nargs='+')
     args = parser.parse_args()
     return args

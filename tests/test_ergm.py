@@ -348,6 +348,7 @@ class TestERGM(unittest.TestCase):
         # self.assertAlmostEqual()
 
     def test_assigning_model_initial_thetas(self):
+        # TODO: seems like convergence of the model in this test depends on the seed...
         np.random.seed(8765)
         n_nodes = 5
         W = np.array([[0, 0, 1, 1, 0],
