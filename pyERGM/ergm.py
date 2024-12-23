@@ -70,6 +70,9 @@ class ERGM():
                                                          'num_samples_per_job_collinearity_fixer', 5))
 
         if initial_thetas is not None:
+            if type(initial_thetas) != dict:
+                raise ValueError("Initial thetas must be a dictionary keyed by feature names, as returned by "
+                                 "`ERGM.get_model_parameters`")
             self._thetas = np.zeros(self._metrics_collection.calc_num_of_features())
             current_model_params = self.get_model_parameters()
             if len(set(initial_thetas.keys()).difference(set(current_model_params.keys()))) > 0:
@@ -695,12 +698,16 @@ class BruteForceERGM(ERGM):
 
     def fit(self, observed_network):
         def nll(thetas):
-            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics), initial_thetas=thetas,
+            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
+                                   initial_thetas={feat_name: thetas[i] for i, feat_name in
+                                                   enumerate(self._metrics_collection.get_parameter_names())},
                                    is_directed=self._is_directed)
             return np.log(model._normalization_factor) - np.log(model.calculate_weight(observed_network))
 
         def nll_grad(thetas):
-            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics), initial_thetas=thetas,
+            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
+                                   initial_thetas={feat_name: thetas[i] for i, feat_name in
+                                                   enumerate(self._metrics_collection.get_parameter_names())},
                                    is_directed=self._is_directed)
             observed_features = model._metrics_collection.calculate_statistics(observed_network)
             all_probs = model._all_weights / model._normalization_factor

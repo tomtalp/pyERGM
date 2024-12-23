@@ -12,7 +12,7 @@ class TestERGM(unittest.TestCase):
         self.n_nodes = 3
 
         self.K = 100
-        self.thetas = np.ones(MetricsCollection(self.metrics, is_directed=False, n_nodes=self.n_nodes).num_of_features)
+        self.thetas = {str(m): 1 for m in self.metrics}
 
     def test_calculate_weight(self):
         ergm = ERGM(self.n_nodes, self.metrics, is_directed=False, initial_thetas=self.thetas,
@@ -60,7 +60,8 @@ class TestERGM(unittest.TestCase):
         thetas = [-np.log(2), np.log(3)]
         K = 29 / 8
 
-        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False, initial_thetas=thetas,
+        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False,
+                    initial_thetas={str(m): thetas[i] for i, m in enumerate(self.metrics)},
                     initial_normalization_factor=K)
 
         W_0_edges = np.array([[0, 0, 0],
@@ -138,7 +139,8 @@ class TestERGM(unittest.TestCase):
 
         number_of_edges_metric = NumberOfEdgesDirected() if is_directed else NumberOfEdgesUndirected()
         model_with_true_theta = BruteForceERGM(n, [number_of_edges_metric],
-                                               initial_thetas=np.array(ground_truth_theta), is_directed=is_directed)
+                                               initial_thetas={str(number_of_edges_metric): ground_truth_theta[0]},
+                                               is_directed=is_directed)
 
         ground_truth_model_log_like = np.log(model_with_true_theta.calculate_weight(adj_mat)) - np.log(
             model_with_true_theta._normalization_factor)
