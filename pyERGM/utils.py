@@ -3,7 +3,6 @@ from collections import Counter
 from typing import Collection
 import numpy as np
 import networkx as nx
-from PIL.GimpGradientFile import linear
 from numba import njit, objmode
 from scipy.spatial.distance import mahalanobis
 from scipy.optimize import minimize, OptimizeResult
