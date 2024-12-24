@@ -941,7 +941,8 @@ class MetricsCollection:
                  collinearity_fixer_sample_size=1000,
                  is_collinearity_distributed=False,
                  # TODO: For tests only, find a better solution
-                 do_copy_metrics=True):
+                 do_copy_metrics=True,
+                 **kwargs):
 
         if not do_copy_metrics:
             self.metrics = tuple([metric for metric in metrics])
@@ -969,7 +970,8 @@ class MetricsCollection:
         self.collinearity_fixer_sample_size = collinearity_fixer_sample_size
         if self._fix_collinearity:
             self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
-                                    is_distributed=is_collinearity_distributed)
+                                    is_distributed=is_collinearity_distributed,
+                                    num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5))
 
         # Returns the number of features that are being calculated. Since a single metric might return more than one
         # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
@@ -1077,8 +1079,21 @@ class MetricsCollection:
         shutil.rmtree(sample_stats_path)
         return whole_sample_statistics
 
+    def remove_feature_by_idx(self, idx: int):
+        metric_of_feat = self.get_metric_by_feat_idx(idx)
+        is_trimmable = metric_of_feat._get_effective_feature_count() > 1
+        if not is_trimmable:
+            print(f"Removing the metric {str(metric_of_feat)} from the collection")
+            sys.stdout.flush()
+            self._delete_metric(metric=metric_of_feat)
+        else:
+            idx_to_delete_within_metric = self.get_feature_idx_within_metric(idx)
+            print(f"Removing the {idx_to_delete_within_metric} feature of {str(metric_of_feat)}")
+            sys.stdout.flush()
+            metric_of_feat.update_indices_to_ignore([idx_to_delete_within_metric])
+
     def collinearity_fixer(self, sample_size=1000, nonzero_thr=10 ** -1, ratio_threshold=10 ** -6,
-                           eigenvec_thr=10 ** -4, is_distributed=False):
+                           eigenvec_thr=10 ** -4, is_distributed=False, **kwargs):
         """
         Find collinearity between metrics in the collection.
 
@@ -1094,7 +1109,9 @@ class MetricsCollection:
         if not is_distributed:
             sample_features = self.calc_statistics_for_binomial_tensor_local(sample_size)
         else:
-            sample_features = self.calc_statistics_for_binomial_tensor_distributed(sample_size, num_samples_per_job=5)
+            sample_features = self.calc_statistics_for_binomial_tensor_distributed(sample_size,
+                                                                                   num_samples_per_job=kwargs.get(
+                                                                                       "num_samples_per_job", 5))
         while is_linearly_dependent:
             self.num_of_features = self.calc_num_of_features()
 
@@ -1112,6 +1129,9 @@ class MetricsCollection:
             if small_eigen_vals_indices.size == 0:
                 is_linearly_dependent = False
             else:
+                print("Collinearity detected, identifying features to remove")
+                sys.stdout.flush()
+
                 # For each linear dependency (corresponding to an eigen vector with a low value), mark the indices of
                 # features that are involved (identified by a non-zero coefficient in the eigen vector).
                 dependent_features_flags = np.zeros((small_eigen_vals_indices.size, self.num_of_features))
@@ -1144,20 +1164,10 @@ class MetricsCollection:
                 # metrics with an effective number of features of 1), totally remove the metric that is involved in most
                 # dependencies.
                 if not is_trimmable:
-                    first_metric = self.get_metric_by_feat_idx(removal_order[0])
-                    print(f"Removing the metric {str(first_metric)} from the collection to fix multi-collinearity")
-                    sys.stdout.flush()
-                    self._delete_metric(metric=first_metric)
+                    i = 0
+                self.remove_feature_by_idx(removal_order[i])
 
-                    sample_features = np.delete(sample_features, removal_order[0], axis=0)
-
-                else:
-                    idx_to_delete = self.get_feature_idx_within_metric(removal_order[i])
-                    print(f"Removing the {idx_to_delete} feature of {str(cur_metric)} to fix multi-collinearity")
-                    sys.stdout.flush()
-                    cur_metric.update_indices_to_ignore([idx_to_delete])
-
-                    sample_features = np.delete(sample_features, removal_order[i], axis=0)
+                sample_features = np.delete(sample_features, removal_order[i], axis=0)
 
     def calculate_statistics(self, W: np.ndarray):
         """

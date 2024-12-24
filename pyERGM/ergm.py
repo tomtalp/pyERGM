@@ -10,8 +10,8 @@ class ERGM():
     def __init__(self,
                  n_nodes,
                  metrics_collection: Collection[Metric],
-                 is_directed,
-                 initial_thetas=None,
+                 is_directed: bool,
+                 initial_thetas: dict = None,
                  initial_normalization_factor=None,
                  seed_MCMC_proba=0.25,
                  verbose=True,
@@ -19,7 +19,8 @@ class ERGM():
                  fix_collinearity=True,
                  collinearity_fixer_sample_size=1000,
                  is_distributed_optimization=False,
-                 optimization_options={}):
+                 optimization_options={},
+                 **kwargs):
         """
         An ERGM model object. 
         
@@ -62,12 +63,32 @@ class ERGM():
         self._is_distributed_optimization = is_distributed_optimization
         self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
                                                      use_sparse_matrix=use_sparse_matrix,
-                                                     fix_collinearity=fix_collinearity,
+                                                     fix_collinearity=fix_collinearity and (initial_thetas is None),
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size,
-                                                     is_collinearity_distributed=self._is_distributed_optimization)
+                                                     is_collinearity_distributed=self._is_distributed_optimization,
+                                                     num_samples_per_job_collinearity_fixer=kwargs.get(
+                                                         'num_samples_per_job_collinearity_fixer', 5))
 
         if initial_thetas is not None:
-            self._thetas = initial_thetas
+            if type(initial_thetas) != dict:
+                raise ValueError("Initial thetas must be a dictionary keyed by feature names, as returned by "
+                                 "`ERGM.get_model_parameters`")
+            self._thetas = np.zeros(self._metrics_collection.calc_num_of_features())
+            current_model_params = self.get_model_parameters()
+            if len(set(initial_thetas.keys()).difference(set(current_model_params.keys()))) > 0:
+                raise ValueError("Got initial thetas that do not match the collection of Metrics!")
+
+            total_num_features = len(current_model_params.keys())
+            # Iterating the reversed list of keys for not interfering with indexing: always remove the last feature to
+            # be removed, thus not changing the indices of features needed to be removed with smaller indices.
+            for rev_feat_idx, feat_name in enumerate(list(current_model_params.keys())[::-1]):
+                if feat_name not in initial_thetas.keys():
+                    self._metrics_collection.remove_feature_by_idx(total_num_features - rev_feat_idx - 1)
+
+            current_model_params = self.get_model_parameters()
+            for feat_name in current_model_params.keys():
+                current_model_params[feat_name] = initial_thetas[feat_name]
+            self._thetas = np.array(list(current_model_params.values()))
         else:
             self._thetas = self._get_random_thetas(sampling_method="uniform")
 
@@ -139,7 +160,7 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_network, lr=0.001, stopping_thr: float = 1e-6, logistic_reg_max_iter=1000):
+    def _mple_fit(self, observed_network, optimization_method: str = 'L-BFGS-B', **kwargs):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -159,23 +180,49 @@ class ERGM():
         thetas: np.ndarray
             The estimated coefficients of the ERGM.
         """
-        print(f"MPLE with lr {lr}")
-        trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection, observed_network,
+        print("MPLE")
+        trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection,
+                                                                           observed_network,
                                                                            is_distributed=self._is_distributed_optimization,
-                                                                           lr=lr,
-                                                                           stopping_thr=stopping_thr,
-                                                                           max_iter=logistic_reg_max_iter)
-        self._exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
+                                                                           optimization_method=optimization_method,
+                                                                           num_edges_per_job=kwargs.get(
+                                                                               "num_edges_per_job", 100000))
 
-        if self._is_directed:
-            self._exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
-        else:
-            upper_triangle_indices = np.triu_indices(self._n_nodes, k=1)
-            self._exact_average_mat[upper_triangle_indices] = prediction
-            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
-            self._exact_average_mat[lower_triangle_indices_aligned] = prediction
+        self._exact_average_mat = self._rearrange_prediction_to_av_mat(prediction)
 
         return trained_thetas
+
+    def _rearrange_prediction_to_av_mat(self, prediction):
+        av_mat = np.zeros((self._n_nodes, self._n_nodes))
+        if self._is_directed:
+            av_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
+        else:
+            upper_triangle_indices = np.triu_indices(self._n_nodes, k=1)
+            av_mat[upper_triangle_indices] = prediction
+            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
+            av_mat[lower_triangle_indices_aligned] = prediction
+        return av_mat
+
+    # TODO: decide how a getter for self._exact_average_mat fits in now - if the model is dyadic
+    #  independent, the observed_network doesn't matter - predictions will be always the same, and this is the exact
+    #  average matrix of the model, so should be computed once and stored. If the model is dyadic dependent, this is an
+    #  approximation, and the degree to which changes in the observed_network will change the prediction depend on the
+    #  metrics and the specific networks, it can not be pre-determined.
+    def get_mple_prediction(self, observed_network: np.ndarray):
+        is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
+        if is_dyadic_independent and self._exact_average_mat is not None:
+            return self._exact_average_mat.copy()
+
+        # TODO: handle this case
+        if self._is_distributed_optimization:
+            raise NotImplementedError(
+                "calculating mple predictions distributed without fitting is yet to be implemented")
+        Xs, _ = self._metrics_collection.prepare_mple_data(observed_network)
+        pred = calc_logistic_regression_predictions(Xs, self._thetas).flatten()
+        if is_dyadic_independent:
+            self._exact_average_mat = self._rearrange_prediction_to_av_mat(pred)
+            return self._exact_average_mat.copy()
+        return self._rearrange_prediction_to_av_mat(pred)
 
     def _do_MPLE(self, theta_init_method):
         if not self._metrics_collection._has_dyadic_dependent_metrics or theta_init_method == "mple":
@@ -214,9 +261,6 @@ class ERGM():
             mcmc_seed_network=None,
             mcmc_steps_per_sample=10,
             mcmc_sample_size=100,
-            mple_lr=1,
-            mple_stopping_thr=1e-6,
-            mple_max_iter=1000,
             edge_proposal_method='uniform',
             **kwargs
             ):
@@ -302,15 +346,6 @@ class ERGM():
         
         mcmc_sample_size : int
             Optional. The number of networks to sample with the MCMC sampler. *Defaults to 100*.
-        
-        mple_lr : float
-            Optional. The learning rate for the logistic regression model in the MPLE step. *Defaults to 0.001*.
-        
-        mple_stopping_thr : float
-            Optional. The stopping threshold for the logistic regression model in the MPLE step. *Defaults to 1e-6*.
-        
-        mple_max_iter : int
-            Optional. The maximum number of iterations for the logistic regression model in the MPLE step. *Defaults to 1000*.
 
         edge_proposal_method : str
             Optional. The method for the MCMC proposal distribution. This is defined as a distribution over the edges
@@ -331,8 +366,9 @@ class ERGM():
             print(f"Using existing thetas")
             pass
         elif not no_mple and self._do_MPLE(theta_init_method):
-            self._thetas = self._mple_fit(observed_network, lr=mple_lr, stopping_thr=mple_stopping_thr,
-                                          logistic_reg_max_iter=mple_max_iter)
+            self._thetas = self._mple_fit(observed_network,
+                                          optimization_method=kwargs.get('mple_optimization_method', 'L-BFGS-B'),
+                                          num_edges_per_job=kwargs.get('num_edges_per_job', 100000))
 
             if not self._metrics_collection._has_dyadic_dependent_metrics:
                 print(f"Model is dyadic independent - using only MPLE instead of MCMLE")
@@ -654,12 +690,16 @@ class BruteForceERGM(ERGM):
 
     def fit(self, observed_network):
         def nll(thetas):
-            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics), initial_thetas=thetas,
+            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
+                                   initial_thetas={feat_name: thetas[i] for i, feat_name in
+                                                   enumerate(self._metrics_collection.get_parameter_names())},
                                    is_directed=self._is_directed)
             return np.log(model._normalization_factor) - np.log(model.calculate_weight(observed_network))
 
         def nll_grad(thetas):
-            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics), initial_thetas=thetas,
+            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
+                                   initial_thetas={feat_name: thetas[i] for i, feat_name in
+                                                   enumerate(self._metrics_collection.get_parameter_names())},
                                    is_directed=self._is_directed)
             observed_features = model._metrics_collection.calculate_statistics(observed_network)
             all_probs = model._all_weights / model._normalization_factor

@@ -5,6 +5,7 @@ import numpy as np
 import networkx as nx
 from numba import njit, objmode
 from scipy.spatial.distance import mahalanobis
+from scipy.optimize import minimize, OptimizeResult
 import torch
 import random
 import time
@@ -627,21 +628,88 @@ def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas
     return (-np.log(1 + np.exp(-Xs @ thetas)) + (ys - 1) * Xs @ thetas).sum()
 
 
-def local_mple_logistic_regression_optimization_step(Xs, ys, thetas):
-    prediction = calc_logistic_regression_predictions(Xs, thetas)
-    log_like = calc_logistic_regression_predictions_log_likelihood(prediction, ys)
-    grad = calc_logistic_regression_log_likelihood_grad(Xs, prediction, ys)
-    hessian = calc_logistic_regression_log_likelihood_hessian(Xs, prediction)
-    return prediction, log_like, grad, hessian
+def analytical_minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10):
+    pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
+    return -calc_logistic_regression_predictions_log_likelihood(pred, ys)
+
+
+@njit
+def numerically_stable_minus_log_like_and_grad_local(thetas, Xs, ys):
+    linear_pred = Xs @ thetas
+
+    # Magic numbers are taken from sklearn:
+    # https://github.com/scikit-learn/scikit-learn/blob/72b35a46684c0ecf4182500d3320836607d1f17c/sklearn/_loss/_loss.pyx.tp#L728
+    rng_1_idx = np.where(linear_pred <= -37)[0]
+    rng_2_idx = np.where((-37 < linear_pred) & (linear_pred <= -2))[0]
+    rng_3_idx = np.where((-2 < linear_pred) & (linear_pred <= 18))[0]
+    rng_4_idx = np.where(linear_pred > 18)[0]
+
+    minus_log_like = 0
+    minus_log_like_der_per_sample = np.zeros(linear_pred.size)
+    if rng_1_idx.size > 0:
+        exp_rng_1 = np.exp(linear_pred[rng_1_idx])
+        minus_log_like += (exp_rng_1 - ys[rng_1_idx, 0] * linear_pred[rng_1_idx]).sum()
+        minus_log_like_der_per_sample[:rng_1_idx.size] = exp_rng_1 - ys[rng_1_idx, 0]
+    if rng_2_idx.size > 0:
+        exp_rng_2 = np.exp(linear_pred[rng_2_idx])
+        minus_log_like += (
+                np.log(1 + exp_rng_2) - ys[rng_2_idx, 0] * linear_pred[rng_2_idx]).sum()
+        minus_log_like_der_per_sample[rng_1_idx.size:rng_1_idx.size + rng_2_idx.size] = ((1 - ys[
+            rng_2_idx, 0]) * exp_rng_2 - ys[rng_2_idx, 0]) / (1 + exp_rng_2)
+    if rng_3_idx.size > 0:
+        exp_rng_3 = np.exp(-linear_pred[rng_3_idx])
+        minus_log_like += (
+                np.log(1 + exp_rng_3) + (1 - ys[rng_3_idx, 0]) * linear_pred[rng_3_idx]).sum()
+        minus_log_like_der_per_sample[
+        rng_1_idx.size + rng_2_idx.size: minus_log_like_der_per_sample.size - rng_4_idx.size
+        ] = ((1 - ys[rng_3_idx, 0]) - ys[rng_3_idx, 0] * exp_rng_3) / (1 + exp_rng_3)
+    if rng_4_idx.size > 0:
+        exp_rng_4 = np.exp(-linear_pred[rng_4_idx])
+        minus_log_like += (exp_rng_4 + (1 - ys[rng_4_idx, 0]) * linear_pred[rng_4_idx]).sum()
+        minus_log_like_der_per_sample[minus_log_like_der_per_sample.size - rng_4_idx.size:
+        ] = ((1 - ys[rng_4_idx, 0]) - ys[rng_4_idx, 0] * exp_rng_4) / (1 + exp_rng_4)
+
+    return minus_log_like, Xs.T @ minus_log_like_der_per_sample
+
+
+def analytical_minus_log_likelihood_distributed(thetas, data_path, num_edges_per_job):
+    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
+                                                              'log_likelihood', num_edges_per_job)
+
+
+def analytical_logistic_regression_predictions_distributed(thetas, data_path, num_edges_per_job):
+    return distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
+                                                             'predictions', num_edges_per_job)
+
+
+def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10):
+    pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
+    return -calc_logistic_regression_log_likelihood_grad(Xs, pred, ys).reshape(thetas.size, )
+
+
+def analytical_minus_log_like_grad_distributed(thetas, data_path, num_edges_per_job):
+    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
+                                                              'log_likelihood_gradient',
+                                                              num_edges_per_job).reshape(thetas.size, )
+
+
+def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10):
+    pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
+    return -calc_logistic_regression_log_likelihood_hessian(Xs, pred)
+
+
+def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_edges_per_job):
+    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
+                                                              'log_likelihood_hessian',
+                                                              num_edges_per_job)
 
 
 def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
-                                          lr: float = 1, max_iter: int = 5000, stopping_thr: float = 1e-6,
-                                          is_distributed: bool = False,
-                                          minimal_lr=1e-10):
+                                          is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
+                                          **kwargs):
     """
-    Optimize the parameters of a Logistic Regression model by maximizing the likelihood using Newton-Raphson.
+    Optimize the parameters of a Logistic Regression model by maximizing the likelihood using scipy.optimize.minimize.
     Parameters
     ----------
     metrics_collection
@@ -652,29 +720,32 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         The observed network used as data for the optimization.
     initial_thetas
         The initial vector of parameters. If `None`, the initial state is randomly sampled from (0,1)
-    lr
-        The learning rate of the gradient-ascent, scales the step size of the optimization.
-    max_iter
-        The maximum number of optimization iterations to run.
-    stopping_thr
-        The fraction of change in the objective function (which is the log-likelihood) that is used as stopping
-        criterion (i.e., if the percent change of the objective is smaller than this threshold we stop)
     is_distributed
         Whether the calculations are carried locally or distributed over many compute nodes of an IBM LSF cluster.
+    optimization_method
+        The optimization method to use. Currently only 'L-BFGS-B' and 'Newton-CG' are supported.
+    num_edges_per_job
+        The number of graph edges (representing data points in this optimization) to consider for each job. Relevant
+        only for distributed optimization.
     Returns
         Parameters of the trained model.
     -------
 
     """
-    num_features = metrics_collection.calc_num_of_features()
-    if initial_thetas is None:
-        thetas = np.random.rand(num_features, 1)
-    else:
-        thetas = initial_thetas.copy()
 
-    cur_log_like = -np.inf
-    prev_log_like = -np.inf
-    prev_thetas = thetas.copy()
+    def after_iteration_callback(intermediate_result: OptimizeResult):
+        nonlocal iteration
+        iteration += 1
+        cur_time = time.time()
+        print(f'iteration: {iteration}, time from start '
+              f'training: {cur_time - start_time} '
+              f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
+        sys.stdout.flush()
+
+    iteration = 0
+    start_time = time.time()
+    print("optimization started")
+    sys.stdout.flush()
 
     if not is_distributed:
         Xs, ys = metrics_collection.prepare_mple_data(observed_network)
@@ -692,94 +763,75 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         with open(observed_net_path, 'wb') as f:
             pickle.dump(observed_network, f)
 
-    idx = 0
-    with objmode(start='f8'):
-        start = time.perf_counter()
-    print("Logistic regression optimization started")
-    sys.stdout.flush()
-    for i in range(max_iter):
-        idx = i
-        if not is_distributed:
-            prediction, cur_log_like, grad, hessian = local_mple_logistic_regression_optimization_step(Xs, ys, thetas)
+    num_features = metrics_collection.calc_num_of_features()
+    if initial_thetas is None:
+        thetas = np.random.rand(num_features)
+    else:
+        thetas = initial_thetas.copy()
+
+    if not is_distributed:
+        if optimization_method == "Newton-CG":
+            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
+                           jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
+                           callback=after_iteration_callback, method="Newton-CG")
+        elif optimization_method == "L-BFGS-B":
+            res = minimize(numerically_stable_minus_log_like_and_grad_local, thetas, args=(Xs, ys), jac=True,
+                           method="L-BFGS-B", callback=after_iteration_callback)
         else:
-            prediction, cur_log_like, grad, hessian = distributed_logistic_regression_optimization_step(data_path,
-                                                                                                        thetas)
-        if (i - 1) % 1 == 0:
-            with objmode():
-                print(
-                    "Iteration {0}, log-likelihood: {1}, time from start: {2} seconds, lr: {3}".format(i, cur_log_like,
-                                                                                                       time.perf_counter() - start,
-                                                                                                       lr))
-                sys.stdout.flush()
-        if i > 0:
-            log_like_frac_change = (cur_log_like - prev_log_like)
-            if cur_log_like != 0:
-                log_like_frac_change /= np.abs(prev_log_like)
-            if 0 < log_like_frac_change < stopping_thr:  # TODO - If the lr is extremely small, then "by definition" we will have very small changes in the log-likelihood. So we need to account for small lr's
-                with objmode():
-                    print(
-                        "Optimization terminated successfully! (the log-likelihood doesn't increase)\nLast iteration: {0}, final log-likelihood: {1}, time from start: {2} seconds".format(
-                            i, cur_log_like, time.perf_counter() - start))
-                break
-            elif log_like_frac_change < 0:
-                print(
-                    f"\tLog-likelihood decreased from {prev_log_like} to {cur_log_like} in iteration {i}! Decreasing learning rate and reverting to previous thetas.")
+            raise ValueError(
+                f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
+        pred = calc_logistic_regression_predictions(Xs, res.x.reshape(-1, 1)).flatten()
+    else:
+        # TODO: support L-BFGS-B as an optimization method, and implement a numerically stable version for distributed
+        #  calculations as well.
+        num_edges_per_job = kwargs.get('num_edges_per_job', 100000)
+        if optimization_method == "Newton-CG":
+            res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
+                           jac=analytical_minus_log_like_grad_distributed,
+                           hess=analytical_minus_log_likelihood_hessian_distributed,
+                           callback=after_iteration_callback, method="Newton-CG")
+        else:
+            raise ValueError(
+                f"Unsupported optimization method: {optimization_method} for distributed optimization. "
+                f"Options are: Newton-CG")
+        pred = analytical_logistic_regression_predictions_distributed(res.x.reshape(-1, 1), data_path,
+                                                                      num_edges_per_job).flatten()
 
-                thetas = prev_thetas
-                if lr > minimal_lr:
-                    lr /= 2
-                else:
-                    with objmode():
-                        # raise Exception("Learning rate decreased to minimal value while log-likelihood is still decreasing. Stopping optimization.")
-                        print(
-                            "Learning rate decreased to minimal value while log-likelihood is still decreasing. Stopping optimization.")
-                    break
-                continue
-
-        prev_thetas = thetas.copy()
-        hessian_inv = np.linalg.pinv(hessian)
-        thetas += lr * hessian_inv @ grad
-        prev_log_like = cur_log_like
-
-    if idx == max_iter:
-        with objmode():
-            print(
-                "Optimization reached max iterations of {0}!\nlast log-likelihood: {1}, time from start: {2} seconds".format(
-                    max_iter, cur_log_like, time.perf_counter() - start))
-
-    if is_distributed:
-        shutil.rmtree(data_path)
-
-    return thetas.flatten(), prediction.flatten()
+    print(res)
+    sys.stdout.flush()
+    return res.x, pred
 
 
-def distributed_logistic_regression_optimization_step(data_path, thetas, num_edges_per_job=5000):
+def distributed_logistic_regression_optimization_step(data_path, thetas, func_to_calc, num_edges_per_job=5000):
+    # TODO: support calculating multiple functions in a single job array, maybe by getting an array of function
+    #  names rather than a single function as func_to_calc. This will enable passing jac=True to scipy.optimize.minimize
+    #  when the optimization method is L-BFGS-B, and calculating both log-likelihood and gradient in a single job array,
+    #  reducing the number of sent jobs significantly.
+
     # Arrange files and send the children jobs
     num_jobs, out_path, job_array_ids = _run_distributed_logistic_regression_children_jobs(data_path, thetas,
+                                                                                           func_to_calc,
                                                                                            num_edges_per_job)
 
-    # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
-    hessian_path = (out_path / "hessian").resolve()
-    os.makedirs(hessian_path, exist_ok=True)
-    wait_for_distributed_children_outputs(num_jobs, hessian_path, job_array_ids, "log_reg_step")
+    # Wait for all jobs to finish.
+    chunks_path = (out_path / func_to_calc).resolve()
+    os.makedirs(chunks_path, exist_ok=True)
+    wait_for_distributed_children_outputs(num_jobs, chunks_path, job_array_ids, func_to_calc)
     # Clean current scripts
     shutil.rmtree((out_path / "scripts").resolve())
 
     # Aggregate results
-    predictions = cat_children_jobs_outputs(num_jobs, (out_path / "prediction").resolve())
-    log_likelihood = _sum_children_jobs_outputs(num_jobs, (out_path / "log_like").resolve())
-    grad = _sum_children_jobs_outputs(num_jobs, (out_path / "grad").resolve())
-    hessian = _sum_children_jobs_outputs(num_jobs, (out_path / "hessian").resolve())
+    if func_to_calc == "predictions":
+        aggregated_func = cat_children_jobs_outputs(num_jobs, (out_path / func_to_calc).resolve())
+    else:
+        aggregated_func = _sum_children_jobs_outputs(num_jobs, (out_path / func_to_calc).resolve())
 
     # Clean current outputs
-    shutil.rmtree((out_path / "prediction").resolve())
-    shutil.rmtree((out_path / "log_like").resolve())
-    shutil.rmtree((out_path / "grad").resolve())
-    shutil.rmtree((out_path / "hessian").resolve())
-    return predictions, log_likelihood, grad, hessian
+    shutil.rmtree((out_path / func_to_calc).resolve())
+    return aggregated_func
 
 
-def _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas, num_edges_per_job):
+def _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, func_to_calculate, num_edges_per_job):
     # Construct a string with the current thetas, to pass using the command line to children jobs.
     thetas_str = ''
     for t in cur_thetas:
@@ -789,6 +841,7 @@ def _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas, 
     cmd_line_for_bsub = (f'python ./logistic_regression_distributed_calcs.py '
                          f'--out_dir_path {out_path} '
                          f'--num_edges_per_job {num_edges_per_job} '
+                         f'--function {func_to_calculate} '
                          f'--thetas {thetas_str}')
     return cmd_line_for_bsub
 
@@ -832,11 +885,11 @@ def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_
     return job_array_ids
 
 
-def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, num_edges_per_job):
+def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, func_to_calculate, num_edges_per_job):
     out_path = data_path.parent
 
-    cmd_line_single_batch = _construct_single_batch_bash_file_logistic_regression(out_path, cur_thetas,
-                                                                                  num_edges_per_job)
+    cmd_line_single_batch = _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas,
+                                                                                 func_to_calculate, num_edges_per_job)
 
     with open(os.path.join(data_path, "observed_network.pkl"), 'rb') as f:
         observed_network = pickle.load(f)
@@ -846,7 +899,7 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, nu
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
 
     job_array_ids = run_distributed_children_jobs(out_path, cmd_line_single_batch, "distributed_logistic_regression.sh",
-                                                  num_jobs, "log_reg_step")
+                                                  num_jobs, func_to_calculate)
     return num_jobs, out_path, job_array_ids
 
 
