@@ -336,7 +336,7 @@ class ERGM():
 
             if not self._metrics_collection._has_dyadic_dependent_metrics:
                 print(f"Model is dyadic independent - using only MPLE instead of MCMLE")
-                return None, None  # TODO - Remove this in the future. Grads are returned only for debug
+                return {"success": True}
 
         elif theta_init_method == "uniform":
             self._thetas = self._get_random_thetas(sampling_method="uniform")
@@ -500,7 +500,7 @@ class ERGM():
 
         self._last_mcmc_chain_features = features_of_net_samples
 
-        return grads, convergence_results
+        return convergence_results
 
     def get_mcmc_diagnostics(self, sampled_networks=None, observed_network=None):
         """
@@ -779,6 +779,35 @@ class ConvergenceTester():
                                     subsample_size=1000,
                                     confidence=0.95,
                                     stds_away_thr=1):
+        """
+        Repeatedly subsample from a collection of networks sampled from the model (`sampled_networks`), and calculate the Mahalanobis distance 
+        between each subsample mean and the observed network. This is equivalent to generating multiple estimations of the model mean & covariance.
+        We calculate the cutoff threshold for the Mahalanobis distance, according to the provided `confidence` level, and then verify whether
+        the empirical threshold is below `stds_away_thr` (which is standard deviations away from the observed data).
+
+        Parameters
+        ----------
+        observed_features : np.ndarray
+            The observed features of the network.
+        
+        sampled_networks : np.ndarray
+            The networks sampled from the model.
+        
+        metrics_collection : MetricsCollection
+            The collection of metrics used for calculating the features.
+        
+        num_subsamples : int
+            The number of subsamples to draw. *Defaults to 100*.
+
+        subsample_size : int
+            The size of each subsample. *Defaults to 1000*.
+        
+        confidence : float
+            The confidence level for the test. *Defaults to 0.95*.
+
+        stds_away_thr : float
+            The desired threshold for the Mahalanobis distance, in units of std *Defaults to 1*.
+        """
 
         sample_size = sampled_networks.shape[2]
         num_of_features = observed_features.shape[0]

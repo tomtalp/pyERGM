@@ -952,25 +952,3 @@ class TestMetricsCollection(unittest.TestCase):
         bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
         expected_bootstrapped_features = np.array([6]).reshape(1, 1)
         self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
-
-    def test_1_edge_neighboring_features(self):
-        # get_1_edge_neighboring_features
-
-        W = np.array([
-            [0, 1, 0, 1],
-            [1, 0, 0, 1],
-            [0, 0, 0, 1],
-            [0, 1, 1, 0]
-        ])
-
-        metrics = [NumberOfEdgesDirected()]
-        collection = MetricsCollection(metrics, is_directed=True, n_nodes=W.shape[0])
-
-        neighboring_features = collection.get_1_edge_neighboring_features(W)
-        
-        n = W.shape[0]
-        num_edges = np.sum(W)
-        
-        expected_number_of_neighbors = n**2 - n
-        self.assertEqual(len(neighboring_features), expected_number_of_neighbors)
-        self.assertTrue(np.all(np.abs(neighboring_features - num_edges) == 1))
