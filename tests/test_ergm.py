@@ -12,10 +12,11 @@ class TestERGM(unittest.TestCase):
         self.n_nodes = 3
 
         self.K = 100
-        self.thetas = np.ones(MetricsCollection(self.metrics, is_directed=False, n_nodes=self.n_nodes).num_of_features)
+        self.thetas = {str(m): 1 for m in self.metrics}
 
     def test_calculate_weight(self):
-        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False, initial_thetas=self.thetas, initial_normalization_factor=self.K)
+        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False, initial_thetas=self.thetas,
+                    initial_normalization_factor=self.K)
 
         W = np.array([[0, 1, 1],
                       [1, 0, 1],
@@ -40,7 +41,8 @@ class TestERGM(unittest.TestCase):
         self.assertEqual(weight, expected_weight)
 
     def test_calculate_probability(self):
-        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False, initial_thetas=self.thetas, initial_normalization_factor=self.K)
+        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False, initial_thetas=self.thetas,
+                    initial_normalization_factor=self.K)
 
         W = np.array([[0, 1, 1],
                       [1, 0, 1],
@@ -58,7 +60,9 @@ class TestERGM(unittest.TestCase):
         thetas = [-np.log(2), np.log(3)]
         K = 29 / 8
 
-        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False, initial_thetas=thetas, initial_normalization_factor=K)
+        ergm = ERGM(self.n_nodes, self.metrics, is_directed=False,
+                    initial_thetas={str(m): thetas[i] for i, m in enumerate(self.metrics)},
+                    initial_normalization_factor=K)
 
         W_0_edges = np.array([[0, 0, 0],
                               [0, 0, 0],
@@ -135,7 +139,8 @@ class TestERGM(unittest.TestCase):
 
         number_of_edges_metric = NumberOfEdgesDirected() if is_directed else NumberOfEdgesUndirected()
         model_with_true_theta = BruteForceERGM(n, [number_of_edges_metric],
-                                               initial_thetas=np.array(ground_truth_theta), is_directed=is_directed)
+                                               initial_thetas={str(number_of_edges_metric): ground_truth_theta[0]},
+                                               is_directed=is_directed)
 
         ground_truth_model_log_like = np.log(model_with_true_theta.calculate_weight(adj_mat)) - np.log(
             model_with_true_theta._normalization_factor)
@@ -234,3 +239,153 @@ class TestERGM(unittest.TestCase):
 
         for inferred_proba, real_density in zip(inferred_probas_per_type_pairs, real_densities_per_type):
             self.assertAlmostEqual(inferred_proba, real_density, places=4)
+
+    def test_MPLE_regressors_of_different_scales(self):
+        # TODO: currently this is a smoke test - we validate nothing: neither convergence nor the thetas/predictions.
+        #  Somehow sklearn still finds a slightly better solution than ours.
+        np.random.seed(42)
+
+        W = np.random.randint(0, 2, size=(10, 10))
+        W[np.diag_indices(10)] = 0
+
+        metrics = [NumberOfEdgesDirected(),
+                   NodeAttrSum([np.random.randint(1, 5) ** 10 for x in range(10)], is_directed=True)]
+        model = ERGM(n_nodes=10, metrics_collection=metrics, is_directed=True)
+
+        model.fit(W)
+
+        # sklearn_thetas = np.array([2.82974701e-01, -2.34383474e-07])
+
+        # sklearn_probas = np.array([0.56682151,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.56682151,
+        # 0.56347922,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.44804742,
+        # 0.5092404 ,
+        # 0.50584116,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.44804742,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.5092404 ,
+        # 0.50584116,
+        # 0.56682151,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.57015772,
+        # 0.5092404 ,
+        # 0.56682151,
+        # 0.56347922,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.56682151,
+        # 0.50584116,
+        # 0.56682151])
+
+        # self.assertAlmostEqual()
+
+    def test_assigning_model_initial_thetas(self):
+        # TODO: seems like convergence of the model in this test depends on the seed...
+        np.random.seed(8765)
+        n_nodes = 5
+        W = np.array([[0, 0, 1, 1, 0],
+                      [1, 0, 0, 0, 1],
+                      [0, 0, 0, 0, 1],
+                      [0, 1, 0, 0, 0],
+                      [0, 1, 0, 1, 0]])
+        metrics_1 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(1, n_nodes + 1), is_directed=True),
+                     NumberOfEdgesTypesDirected(['A', 'B', 'A', 'A', 'B'])]
+        model_1 = ERGM(n_nodes=n_nodes, metrics_collection=metrics_1, is_directed=True)
+
+        model_1.fit(W)
+
+        model_1_params = model_1.get_model_parameters()
+
+        metrics_2 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(n_nodes + 1, 1, -1), is_directed=True),
+                     NumberOfEdgesTypesDirected(['B', 'B', 'B', 'A', 'A'])]
+        model_2 = ERGM(n_nodes=n_nodes, metrics_collection=metrics_2, is_directed=True, initial_thetas=model_1_params)
+
+        self.assertTrue(model_2.get_model_parameters() == model_1_params)
+
+    def test_calculate_prediction(self):
+        n_nodes = 4
+        W = np.array([[0, 1, 0, 1],
+                      [0, 0, 1, 1],
+                      [1, 0, 0, 0],
+                      [0, 0, 1, 0]])
+
+        metrics = [NumberOfEdgesDirected()]
+        model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        model.fit(W)
+
+        model_2 = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True,
+                       initial_thetas=model.get_model_parameters())
+        model_2_av_mat = model_2.get_mple_prediction(W)
+        expected_model_2_av_mat = 0.5 * np.ones((n_nodes, n_nodes))
+        expected_model_2_av_mat[np.diag_indices(n_nodes)] = 0
+        self.assertTrue(np.abs(model_2_av_mat - expected_model_2_av_mat).max() < 1e-10)
