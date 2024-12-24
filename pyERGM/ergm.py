@@ -181,7 +181,7 @@ class ERGM():
             The estimated coefficients of the ERGM.
         """
         print("MPLE")
-        trained_thetas, prediction = mple_logistic_regression_optimization(self._metrics_collection,
+        trained_thetas, prediction, success = mple_logistic_regression_optimization(self._metrics_collection,
                                                                            observed_network,
                                                                            is_distributed=self._is_distributed_optimization,
                                                                            optimization_method=optimization_method,
@@ -190,7 +190,7 @@ class ERGM():
 
         self._exact_average_mat = self._rearrange_prediction_to_av_mat(prediction)
 
-        return trained_thetas
+        return trained_thetas, success
 
     def _rearrange_prediction_to_av_mat(self, prediction):
         av_mat = np.zeros((self._n_nodes, self._n_nodes))
@@ -366,13 +366,13 @@ class ERGM():
             print(f"Using existing thetas")
             pass
         elif not no_mple and self._do_MPLE(theta_init_method):
-            self._thetas = self._mple_fit(observed_network,
+            self._thetas, success = self._mple_fit(observed_network,
                                           optimization_method=kwargs.get('mple_optimization_method', 'L-BFGS-B'),
                                           num_edges_per_job=kwargs.get('num_edges_per_job', 100000))
 
             if not self._metrics_collection._has_dyadic_dependent_metrics:
                 print(f"Model is dyadic independent - using only MPLE instead of MCMLE")
-                return {"success": True}
+                return {"success": success}
 
         elif theta_init_method == "uniform":
             self._thetas = self._get_random_thetas(sampling_method="uniform")

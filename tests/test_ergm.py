@@ -208,7 +208,9 @@ class TestERGM(unittest.TestCase):
         types = ["A", "A", "B", "B"]
         metrics = [NumberOfEdgesTypesDirected(types)]
         model = ERGM(n, metrics, is_directed=True)
-        model.fit(M1, mple_lr=1)
+        result = model.fit(M1, mple_lr=1)
+
+        self.assertTrue(result["success"])
 
         inferred_probas_per_type_pairs = list(np.exp(model._thetas) / (1 + np.exp(model._thetas)))
 
