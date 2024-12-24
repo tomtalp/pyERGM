@@ -8,6 +8,7 @@ from pyERGM.metrics import *
 
 import networkx as nx
 import math
+import pandas as pd
 
 
 class TestNumberOfEdgesUndirected(unittest.TestCase):
@@ -497,6 +498,230 @@ class TestNodeAttrSums(unittest.TestCase):
         calculated_change_score = metric_in.calc_change_score(W_on, (1, 2))
         expected_change_score = -2
         self.assertEqual(expected_change_score, calculated_change_score)
+
+    def test_calculate_mple_regressors(self):
+        # directed both (in+out)
+        node_attr = np.array([3, 5, 7])
+        W = np.array([[0, 1, 0],
+                      [1, 0, 1],
+                      [1, 0, 0]])
+
+        attr_sum_mat = np.array([[0, 8, 10],
+                                 [8, 0, 12],
+                                 [10, 12, 0]])
+
+        metric_both = NodeAttrSum(node_attr, is_directed=True)
+        indices_lims = (0, 6)
+        expected_regressors_1_1 = np.array([[8.],
+                                            [10.],
+                                            [8.],
+                                            [12.],
+                                            [10.],
+                                            [12.]])
+        self.assertTrue(np.all(metric_both.calculate_mple_regressors(W, indices_lims) == expected_regressors_1_1))
+
+        indices_lims = (1, 4)
+        expected_regressors_1_2 = np.array([[10.],
+                                            [8.],
+                                            [12.]])
+        self.assertTrue(np.all(metric_both.calculate_mple_regressors(W, indices_lims) == expected_regressors_1_2))
+
+        # directed in
+        attr_sum_mat_in = np.array([[0, 5, 7],
+                                    [3, 0, 7],
+                                    [3, 5, 0]])
+
+        metric_in = NodeAttrSumIn(node_attr)
+        indices_lims = (0, 6)
+        expected_regressors_2_1 = np.array([[5.],
+                                            [7.],
+                                            [3.],
+                                            [7.],
+                                            [3.],
+                                            [5.]])
+        self.assertTrue(np.all(metric_in.calculate_mple_regressors(W, indices_lims) == expected_regressors_2_1))
+
+        indices_lims = (1, 4)
+        expected_regressors_2_2 = np.array([[7.],
+                                            [3.],
+                                            [7.]])
+        self.assertTrue(np.all(metric_in.calculate_mple_regressors(W, indices_lims) == expected_regressors_2_2))
+
+        # directed out
+        attr_sum_mat_out = np.array([[0, 3, 3],
+                                     [5, 0, 5],
+                                     [7, 7, 0]])
+
+        metric_out = NodeAttrSumOut(node_attr)
+        indices_lims = (0, 6)
+        expected_regressors_3_1 = np.array([[3.],
+                                            [3.],
+                                            [5.],
+                                            [5.],
+                                            [7.],
+                                            [7.]])
+
+        self.assertTrue(np.all(metric_out.calculate_mple_regressors(W, indices_lims) == expected_regressors_3_1))
+
+        indices_lims = (1, 4)
+        expected_regressors_3_2 = np.array([[3.],
+                                            [5.],
+                                            [5.]])
+        self.assertTrue(np.all(metric_out.calculate_mple_regressors(W, indices_lims) == expected_regressors_3_2))
+
+        # undirected (both)
+        node_attr = np.array([3, 5, 7])
+        W = np.array([[0, 1, 0],
+                      [1, 0, 1],
+                      [0, 1, 0]])
+        attr_sum_mat = np.array([[0, 8, 10],
+                                 [8, 0, 12],
+                                 [10, 12, 0]])
+
+        metric_both = NodeAttrSum(node_attr, is_directed=False)
+        indices_lims = (0, 3)
+        # in undirected graphs the expected outcome is the upper triangle (without the diagonal)
+        expected_regressors_1 = np.array([[8.],
+                                          [10.],
+                                          [12.]])
+        self.assertTrue(np.all(metric_both.calculate_mple_regressors(W, indices_lims) == expected_regressors_1))
+
+        indices_lims = (1, 2)
+        expected_regressors_2 = np.array([[10.]])
+        self.assertTrue(np.all(metric_both.calculate_mple_regressors(W, indices_lims) == expected_regressors_2))
+
+
+class TestSumDistancesConnectedNeurons(unittest.TestCase):
+    def test_sum_distances(self):
+        positions = pd.DataFrame({"x_pos": [0, 0, 4], "y_pos": [0, 3, 0], "z_pos": [2, 2, 2]})
+        W = np.array([[0, 1, 0],
+                      [1, 0, 1],
+                      [1, 0, 0]])
+
+        # Dataframe with multiple columns
+        metric_1 = SumDistancesConnectedNeurons(positions, is_directed=True)
+        expected_res_1 = 3 + 3 + 5 + 4
+        self.assertTrue(metric_1.calculate(W) == expected_res_1)
+
+        # 2D numpy array
+        metric_2 = SumDistancesConnectedNeurons(positions.to_numpy(), is_directed=True)
+        expected_res_2 = 3 + 3 + 5 + 4
+        self.assertTrue(metric_2.calculate(W) == expected_res_2)
+
+        # Series
+        metric_3 = SumDistancesConnectedNeurons(positions.x_pos, is_directed=True)
+        expected_res_3 = 4 + 4
+        self.assertTrue(metric_3.calculate(W) == expected_res_3)
+
+        # 1D numpy array
+        metric_4 = SumDistancesConnectedNeurons(positions.z_pos.to_numpy(), is_directed=True)
+        expected_res_4 = 0
+        self.assertTrue(metric_4.calculate(W) == expected_res_4)
+
+        # list
+        positions_y_list = [0, 3, 0]
+        metric_5 = SumDistancesConnectedNeurons(positions_y_list, is_directed=True)
+        expected_res_5 = 3 + 3 + 3
+        self.assertTrue(metric_5.calculate(W) == expected_res_5)
+
+        # tuple
+        positions_y_tuple = (0, 3, 0)
+        metric_6 = SumDistancesConnectedNeurons(positions_y_tuple, is_directed=True)
+        expected_res_6 = 3 + 3 + 3
+        self.assertTrue(metric_6.calculate(W) == expected_res_6)
+
+        # undirected_graph
+        W_undirected = np.array([[0, 1, 1],
+                                 [1, 0, 0],
+                                 [1, 0, 0]])
+
+        metric_7 = SumDistancesConnectedNeurons(positions, is_directed=False)
+        expected_res_7 = 3 + 4
+        self.assertTrue(metric_7.calculate(W_undirected) == expected_res_7)
+
+    def test_calculate_mple_regressors(self):
+        positions = pd.DataFrame({"x_pos": [0, 0, 4], "y_pos": [0, 3, 0], "z_pos": [2, 2, 2]})
+        W = np.array([[0, 1, 0],
+                      [1, 0, 1],
+                      [1, 0, 0]])
+
+        # multiple columns
+        metric_1 = SumDistancesConnectedNeurons(positions, is_directed=True)
+        distances = np.array([[0, 3, 4],
+                              [3, 0, 5],
+                              [4, 5, 0]])
+        indices_lims = (0, 6)
+        expected_regressors_1_1 = np.array([[3.],
+                                            [4.],
+                                            [3.],
+                                            [5.],
+                                            [4.],
+                                            [5.]])
+        self.assertTrue(np.all(metric_1.calculate_mple_regressors(W, indices_lims) == expected_regressors_1_1))
+
+        indices_lims = (1, 4)
+        expected_regressors_1_2 = np.array([[4.],
+                                            [3.],
+                                            [5.]])
+        self.assertTrue(np.all(metric_1.calculate_mple_regressors(W, indices_lims) == expected_regressors_1_2))
+
+        # Series
+        metric_2 = SumDistancesConnectedNeurons(positions.x_pos, is_directed=True)
+        distances = np.array([[0, 0, 4],
+                              [0, 0, 4],
+                              [4, 4, 0]])
+        indices_lims = (0, 6)
+        expected_regressors_2_1 = np.array([[0.],
+                                            [4.],
+                                            [0.],
+                                            [4.],
+                                            [4.],
+                                            [4.]])
+        self.assertTrue(np.all(metric_2.calculate_mple_regressors(W, indices_lims) == expected_regressors_2_1))
+
+        indices_lims = (1, 4)
+        expected_regressors_2_2 = np.array([[4.],
+                                            [0.],
+                                            [4.]])
+        self.assertTrue(np.all(metric_2.calculate_mple_regressors(W, indices_lims) == expected_regressors_2_2))
+
+        metric_3 = SumDistancesConnectedNeurons(positions.z_pos, is_directed=True)
+        distances = np.array([[0, 0, 0],
+                              [0, 0, 0],
+                              [0, 0, 0]])
+        indices_lims = (0, 6)
+        expected_regressors_3 = np.array([[0.],
+                                          [0.],
+                                          [0.],
+                                          [0.],
+                                          [0.],
+                                          [0.]])
+        self.assertTrue(np.all(metric_3.calculate_mple_regressors(W, indices_lims) == expected_regressors_3))
+
+        # undirected
+        metric_4 = SumDistancesConnectedNeurons(positions, is_directed=False)
+        distances = np.array([[0, 3, 4],
+                              [3, 0, 5],
+                              [4, 5, 0]])
+        indices_lims = (0, 3)
+        expected_regressors_4_1 = np.array([[3.],
+                                            [4.],
+                                            [5.]])
+        self.assertTrue(np.all(metric_4.calculate_mple_regressors(W, indices_lims) == expected_regressors_4_1))
+
+        indices_lims = (1, 2)
+        expected_regressors_4_2 = np.array([[4.]])
+        self.assertTrue(np.all(metric_4.calculate_mple_regressors(W, indices_lims) == expected_regressors_4_2))
+
+        metric_5 = SumDistancesConnectedNeurons(positions.z_pos, is_directed=False)
+        distances = np.array([[0, 0, 0],
+                              [0, 0, 0],
+                              [0, 0, 0]])
+        indices_lims = (0, 3)
+        expected_regressors_5 = np.array([[0.],
+                                          [0.],
+                                          [0.]])
+        self.assertTrue(np.all(metric_5.calculate_mple_regressors(W, indices_lims) == expected_regressors_5))
 
 
 class TestMetricsCollection(unittest.TestCase):
