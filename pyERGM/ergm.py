@@ -726,6 +726,39 @@ class ConvergenceTester():
     def __init__(self):
         pass
     
+    def _get_subsample_features(self, sampled_networks, num_subsamples, subsample_size, metrics_collection: MetricsCollection):
+        """
+        Receives a sample of networks, and subsample for `num_subsamples` times, each time with `subsample_size` networks.
+        For each subsample, calculates the sample statistics and reshapes the result to a tensor of shape (num_of_features, num_subsamples, subsample_size).
+
+        Parameters
+        ----------
+        sampled_networks : np.ndarray
+            A sample of networks that will be used for subsampling
+        
+        num_subsamples : int
+            The number of subsamples to draw from the sample.
+        
+        subsample_size : int
+            The size of each subsample.
+        
+        metrics_collection : MetricsCollection
+            The collection of metrics used for calculating the features.
+    
+        Returns
+        -------
+        sub_samples_features : np.ndarray
+            A tensor of shape (num_of_features, num_subsamples, subsample_size) containing the features of all subsamples.
+        """
+        sample_size = sampled_networks.shape[2]
+
+        sub_sample_indices = np.random.choice(np.arange(sample_size), size=num_subsamples * subsample_size)
+        sub_samples = sampled_networks[:, :, sub_sample_indices]
+        sub_samples_features = metrics_collection.calculate_sample_statistics(sub_samples)
+        sub_samples_features = sub_samples_features.reshape(-1, num_subsamples, subsample_size)
+
+        return sub_samples_features
+
     def hotelling(self, observed_features, mean_features, inverted_sample_cov_matrix, sample_size, confidence=0.99):
         """
         Run the Hotelling's T-squared test for convergence.
@@ -788,16 +821,10 @@ class ConvergenceTester():
         being an estimation of the observed covariance. The observed covariance can either be the real covariance of the data,
         or an estimation of the covariance matrix (using methods like `Network splitting augmentation` or `Noise augmentation`).
         """
-
-        sample_size = sampled_networks.shape[2]
-        num_of_features = observed_features.shape[0]
-
         mahalanobis_dists = np.zeros(num_subsamples)
 
-        sub_sample_indices = np.random.choice(np.arange(sample_size), size=num_subsamples * subsample_size)
-        sub_samples = sampled_networks[:, :, sub_sample_indices]
-        sub_samples_features = metrics_collection.calculate_sample_statistics(sub_samples)
-        mean_per_subsample = sub_samples_features.reshape(num_of_features, num_subsamples, subsample_size).mean(axis=2)
+        sub_samples_features = self._get_subsample_features(sampled_networks, num_subsamples, subsample_size, metrics_collection)
+        mean_per_subsample = sub_samples_features.mean(axis=2)
 
         for cur_subsam_idx in range(num_subsamples):
             cur_subsample_mean = mean_per_subsample[:, cur_subsam_idx]
@@ -848,16 +875,9 @@ class ConvergenceTester():
         stds_away_thr : float
             The desired threshold for the Mahalanobis distance, in units of std *Defaults to 1*.
         """
-
-        sample_size = sampled_networks.shape[2]
-        num_of_features = observed_features.shape[0]
-
         mahalanobis_dists = np.zeros(num_subsamples)
 
-        sub_sample_indices = np.random.choice(np.arange(sample_size), size=num_subsamples * subsample_size)
-        sub_samples = sampled_networks[:, :, sub_sample_indices]
-        sub_samples_features = metrics_collection.calculate_sample_statistics(sub_samples)
-        sub_samples_features = sub_samples_features.reshape(num_of_features, num_subsamples, subsample_size)
+        sub_samples_features = self._get_subsample_features(sampled_networks, num_subsamples, subsample_size, metrics_collection)
 
         for cur_subsam_idx in range(num_subsamples):
             sub_sample = sub_samples_features[:, cur_subsam_idx, :]

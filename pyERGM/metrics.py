@@ -1443,36 +1443,3 @@ class MetricsCollection:
             feature_idx += n_features_from_metric
 
         return bootstrapped_features
-
-    def get_1_edge_neighboring_features(self, observed_network):
-        """
-        Receives an observed network and returns a collection of network features, where the networks
-        are all 1-edge away from the observed network. 
-
-        neighborhood size = 2^{n^2-n} - |E| ?
-        """
-        neighborhood_features = []
-
-        n_nodes = observed_network.shape[0]
-
-        for i in range(n_nodes):
-            for j in range(n_nodes):
-                if i == j:
-                    continue
-                if observed_network[i, j] == 0:
-                    new_network = observed_network.copy()
-                    new_network[i, j] = 1
-                    if not self.is_directed:
-                        new_network[j, i] = 1
-
-                    neighborhood_features.append(self.calculate_statistics(new_network))
-                
-                elif observed_network[i, j] == 1:
-                    new_network = observed_network.copy()
-                    new_network[i, j] = 0
-                    if not self.is_directed:
-                        new_network[j, i] = 0
-
-                    neighborhood_features.append(self.calculate_statistics(new_network))
-        
-        return np.array(neighborhood_features).reshape(self.num_of_features, -1)

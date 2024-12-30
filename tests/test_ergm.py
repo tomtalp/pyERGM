@@ -280,8 +280,7 @@ class TestERGM(unittest.TestCase):
                }
         expected_thetas = np.array(list(expected_values.values()))
         
-        thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas)**2) / np.sum((expected_thetas - np.mean(expected_thetas))**2),
-        thetas_R_2 = thetas_R_2[0]
+        thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas)**2) / np.sum((expected_thetas - np.mean(expected_thetas))**2)
         self.assertTrue(thetas_R_2 > 0.99)
         self.assertTrue(convergence_result["success"])
 
