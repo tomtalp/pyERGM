@@ -727,10 +727,15 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
     num_edges_per_job
         The number of graph edges (representing data points in this optimization) to consider for each job. Relevant
         only for distributed optimization.
+    
     Returns
-        Parameters of the trained model.
     -------
-
+    thetas: np.ndarray
+        The optimized parameters of the model
+    pred: np.ndarray
+        The predictions of the model on the observed network
+    success: bool
+        Whether the optimization was successful
     """
 
     def after_iteration_callback(intermediate_result: OptimizeResult):
@@ -799,7 +804,7 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
 
     print(res)
     sys.stdout.flush()
-    return res.x, pred
+    return res.x, pred, res.success
 
 
 def distributed_logistic_regression_optimization_step(data_path, thetas, func_to_calc, num_edges_per_job=5000):

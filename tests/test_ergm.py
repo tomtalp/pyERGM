@@ -2,6 +2,7 @@ import unittest
 from pyERGM.utils import *
 from pyERGM.metrics import *
 from pyERGM.ergm import ERGM, BruteForceERGM
+from pyERGM.datasets import sampson_matrix
 import sys
 from scipy.linalg import eigh
 
@@ -207,7 +208,9 @@ class TestERGM(unittest.TestCase):
         types = ["A", "A", "B", "B"]
         metrics = [NumberOfEdgesTypesDirected(types)]
         model = ERGM(n, metrics, is_directed=True)
-        model.fit(M1, mple_lr=1)
+        result = model.fit(M1, mple_lr=1)
+
+        self.assertTrue(result["success"])
 
         inferred_probas_per_type_pairs = list(np.exp(model._thetas) / (1 + np.exp(model._thetas)))
 
@@ -239,6 +242,47 @@ class TestERGM(unittest.TestCase):
 
         for inferred_proba, real_density in zip(inferred_probas_per_type_pairs, real_densities_per_type):
             self.assertAlmostEqual(inferred_proba, real_density, places=4)
+    
+    def test_sampson_MCMLE(self):
+        np.random.seed(1234)
+        metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
+        n_nodes = sampson_matrix.shape[0]
+
+        mcmle_model = ERGM(n_nodes, metrics, is_directed=True)
+
+        convergence_result = mcmle_model.fit(sampson_matrix, 
+                opt_steps=10, 
+                steps_for_decay=1, 
+                lr=1, 
+                mple_lr=0.5, 
+                convergence_criterion="model_bootstrap",
+                mcmc_burn_in=0,
+                mcmc_steps_per_sample=n_nodes**2,
+                mcmc_sample_size=1000,
+                num_model_sub_samples=10,
+                model_subsample_size=1000,
+                bootstrap_convergence_confidence=0.95,
+                bootstrap_convergence_num_stds_away_thr=1,
+            )
+    
+        model_thethas = mcmle_model._thetas
+
+        expected_values = {"edges": -1.1761, "sender2": -0.2945, "sender3": 1.4141, "sender4": 0.3662, "sender5": 0.1315,
+               "sender6": 1.2148, "sender7": 0.6055,
+               "sender8": 1.3609, "sender9": 0.6402, "sender10": 2.0639, "sender11": 1.4355, "sender12": -0.1681,
+               "sender13": -0.2322, "sender14": 0.5841, "sender15": 1.8600,
+               "sender16": 1.4317, "sender17": 1.2211, "sender18": 1.8724, "receiver2": -0.1522, "receiver3": -3.0453,
+               "receiver4": -1.7596, "receiver5": -0.8198, "receiver6": -3.3922,
+               "receiver7": -1.6074, "receiver8": -2.2656, "receiver9": -2.2069, "receiver10": -3.9189,
+               "receiver11": -3.0257, "receiver12": -0.9457, "receiver13": -1.4749, "receiver14": -1.5950,
+               "receiver15": -3.3147, "receiver16": -3.0567, "receiver17": -3.4436, "receiver18": -3.3239,
+               "mutual": 3.6918
+               }
+        expected_thetas = np.array(list(expected_values.values()))
+        
+        thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas)**2) / np.sum((expected_thetas - np.mean(expected_thetas))**2)
+        self.assertTrue(thetas_R_2 > 0.99)
+        self.assertTrue(convergence_result["success"])
 
     def test_MPLE_regressors_of_different_scales(self):
         # TODO: currently this is a smoke test - we validate nothing: neither convergence nor the thetas/predictions.
