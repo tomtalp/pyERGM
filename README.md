@@ -16,7 +16,7 @@ Fitting a model for even moderately large graphs can be a computationally challe
 
 
 ## Installation
-TODO
+https://pypi.org/project/pyERGM/
 
 
 ## Getting started
