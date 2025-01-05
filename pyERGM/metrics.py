@@ -1091,6 +1091,7 @@ class MetricsCollection:
             print(f"Removing the {idx_to_delete_within_metric} feature of {str(metric_of_feat)}")
             sys.stdout.flush()
             metric_of_feat.update_indices_to_ignore([idx_to_delete_within_metric])
+        self.num_of_features = self.calc_num_of_features()
 
     def collinearity_fixer(self, sample_size=1000, nonzero_thr=10 ** -1, ratio_threshold=10 ** -6,
                            eigenvec_thr=10 ** -4, is_distributed=False, **kwargs):

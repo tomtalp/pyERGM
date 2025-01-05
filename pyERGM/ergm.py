@@ -626,6 +626,7 @@ class ERGM():
 
         if self._is_directed:
             exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
+        self._exact_average_mat = exact_average_mat
 
         return exact_average_mat
 
