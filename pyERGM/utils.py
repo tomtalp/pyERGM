@@ -176,6 +176,37 @@ def get_uniform_random_edges_to_flip(num_nodes, num_pairs):
     return edges_to_flip
 
 
+def get_uniform_random_nodes_to_flip(num_nodes, num_flips):
+    """
+    Create a vector of size num_flips, where each entry represents a node we wish to flip.
+    The nodes are sampled randomly.
+    """
+
+    nodes_to_flip = np.random.choice(num_nodes, size=num_flips)
+
+    return nodes_to_flip
+
+def get_uniform_random_new_node_feature_categories(num_flips, node_features_n_categories):
+    """
+    Create a dictionary of all the possible category flips for node features:
+    keys are node features, and values are dictionaries with the key being a category, and the value being
+    random new categories (excluding the current category) - a vector of size num_flips, where each entry
+    represents the new category to flip to.
+    The categories are sampled randomly.
+    """
+
+    new_node_features_categories = {}
+    for feature_name, n_categories in node_features_n_categories.items():
+        categories = np.arange(n_categories)
+        new_node_feature_categories = {}
+        for c in categories:
+            categories_without_c = np.delete(categories, c)
+            random_new_categories = np.random.choice(categories_without_c, size=num_flips)
+            new_node_feature_categories[c] = random_new_categories
+        new_node_features_categories[feature_name] = new_node_feature_categories
+    return new_node_features_categories
+
+
 def convert_flat_no_diag_idx_to_i_j(flat_no_diag_idx: Collection[int], full_mat_size: int) -> np.ndarray[int]:
     """
     Converts the index in the flattened square matrix without the main diagonal to the pair of indices in the original
@@ -1042,11 +1073,11 @@ def _parse_sent_job_array_ids(process_stdout) -> list:
     return job_array_ids
 
 
-def generate_binomial_tensor(net_size, num_samples, p=0.5):
+def generate_binomial_tensor(net_size, node_features_size, num_samples, p=0.5):
     """
     Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
     """
-    return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)
+    return np.random.binomial(1, p, (net_size, net_size+node_features_size, num_samples)).astype(np.int8)
 
 
 def sample_from_independent_probabilities_matrix(probability_matrix, sample_size):

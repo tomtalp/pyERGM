@@ -20,6 +20,9 @@ class ERGM():
                  collinearity_fixer_sample_size=1000,
                  is_distributed_optimization=False,
                  optimization_options={},
+                 n_node_features=0,
+                 node_feature_names={},
+                 node_features_n_categories={},
                  **kwargs):
         """
         An ERGM model object. 
@@ -61,13 +64,19 @@ class ERGM():
         self._n_nodes = n_nodes
         self._is_directed = is_directed
         self._is_distributed_optimization = is_distributed_optimization
+        self.n_node_features = n_node_features
+        self.node_feature_names = node_feature_names
+        self.node_features_n_categories = node_features_n_categories
+
         self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
                                                      use_sparse_matrix=use_sparse_matrix,
                                                      fix_collinearity=fix_collinearity and (initial_thetas is None),
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size,
                                                      is_collinearity_distributed=self._is_distributed_optimization,
                                                      num_samples_per_job_collinearity_fixer=kwargs.get(
-                                                         'num_samples_per_job_collinearity_fixer', 5))
+                                                         'num_samples_per_job_collinearity_fixer', 5),
+                                                     n_node_features=self.n_node_features,
+                                                     node_feature_names=self.node_feature_names,)
 
         if initial_thetas is not None:
             if type(initial_thetas) != dict:
@@ -118,7 +127,7 @@ class ERGM():
         print(f"Is directed: {self._is_directed}")
 
     def calculate_weight(self, W: np.ndarray):
-        if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] != self._n_nodes:
+        if len(W.shape) != 2 or W.shape[0] != self._n_nodes:
             raise ValueError(f"The dimensions of the given adjacency matrix, {W.shape}, don't comply with the number of"
                              f" nodes in the network: {self._n_nodes}")
         features = self._metrics_collection.calculate_statistics(W)
@@ -144,11 +153,19 @@ class ERGM():
         if sampling_method == "metropolis_hastings":
             if seed_network is None:
                 G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
-                seed_network = nx.to_numpy_array(G)
+                seed_connectivity_matrix = nx.to_numpy_array(G)
+                seed_neuron_features = np.zeros((self._n_nodes, self.n_node_features))
+                for feature_name, feature_indices in self.node_feature_names.items():
+                    for feature_index in feature_indices:
+                        seed_neuron_features[:, feature_index] = np.random.choice(self.node_features_n_categories[feature_name], size=self._n_nodes)
+                seed_network = np.concatenate((seed_connectivity_matrix, seed_neuron_features), axis=1)
+
             self.mh_sampler.set_thetas(self._thetas)
             return self.mh_sampler.sample(seed_network, sample_size, replace=replace, burn_in=burn_in,
                                           steps_per_sample=mcmc_steps_per_sample,
-                                          edge_proposal_method=edge_proposal_method)
+                                          edge_proposal_method=edge_proposal_method,
+                                          node_feature_names=self.node_feature_names,
+                                          node_features_n_categories=self.node_features_n_categories)
         elif sampling_method == "exact":
             return self._generate_exact_sample(sample_size)
         else:
@@ -270,7 +287,7 @@ class ERGM():
         Parameters
         ----------
         observed_network : np.ndarray
-            The adjacency matrix of the observed network. #TODO - how do we support nx.Graph?
+            The network matrix of size (n, n+k) of adjacency matrix + node features of the observed network. #TODO - how do we support nx.Graph?
 
         lr : float
             Optional. The learning rate for the optimization. *Defaults to 0.1*
@@ -413,7 +430,7 @@ class ERGM():
             hotelling_critical_value = f.ppf(1 - hotelling_confidence, num_of_features,
                                              mcmc_sample_size - num_of_features)  # F(p, n-p) TODO - doc this better
 
-        if mcmc_seed_network is None:
+        if mcmc_seed_network is None and not no_mple:
             probabilities_matrix = self.get_mple_prediction(observed_network)
             mcmc_seed_network = sample_from_independent_probabilities_matrix(probabilities_matrix, 1)
             mcmc_seed_network = mcmc_seed_network[:, :, 0]
@@ -477,10 +494,11 @@ class ERGM():
 
             convergence_tester = ConvergenceTester()
 
+            print(convergence_criterion)
             if convergence_criterion == "hotelling":
-                convergence_result = convergence_tester.hotelling(observed_features, mean_features, inv_estimated_cov_matrix, mcmc_sample_size, hotelling_confidence)
+                convergence_results = convergence_tester.hotelling(observed_features, mean_features, inv_estimated_cov_matrix, mcmc_sample_size, hotelling_confidence)
 
-                if convergence_result["success"]:
+                if convergence_results["success"]:
                     print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
                     grads = grads[:i]
                     break
@@ -545,9 +563,9 @@ class ERGM():
         Parameters
         ----------
         sampled_networks : np.ndarray
-            Optional. A (n, n, k) tensor of sampled networks. If not provided, the last chain is used.
+            Optional. A (n, n+k, sample_size) tensor of sampled networks. If not provided, the last chain is used.
         observed_network : np.ndarray
-            Optional. The adjacency matrix of the observed network. If provided, the traces of the features across the
+            Optional. The network matrix of the observed network. If provided, the traces of the features across the
             chain are normalized based on the observed network features.
         """
         if sampled_networks is not None:
