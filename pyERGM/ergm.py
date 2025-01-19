@@ -327,7 +327,7 @@ class ERGM():
             Optional. The confidence level for the Hotelling's T-squared test. *Defaults to 0.99*.
         
         theta_init_method : str
-            Optional. The method to initialize the theta values. Can be either "uniform" or "mple".
+            Optional. The method to initialize the theta values. Can be either "uniform", "mple" or "use_existing" (which uses the current thetas).
             The MPLE method can be used even for dyadic dependent models, since it serves as a good starting point for the MCMLE.
             *Defaults to "mple"*.
 
@@ -478,9 +478,9 @@ class ERGM():
             convergence_tester = ConvergenceTester()
 
             if convergence_criterion == "hotelling":
-                convergence_result = convergence_tester.hotelling(observed_features, mean_features, inv_estimated_cov_matrix, mcmc_sample_size, hotelling_confidence)
+                convergence_results = convergence_tester.hotelling(observed_features, mean_features, inv_estimated_cov_matrix, mcmc_sample_size, hotelling_confidence)
 
-                if convergence_result["success"]:
+                if convergence_results["success"]:
                     print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
                     grads = grads[:i]
                     break

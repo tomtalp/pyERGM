@@ -304,7 +304,21 @@ class NumberOfEdgesDirected(Metric):
                                                       lambda n: n * (n - 1))
 
 
-# TODO: change the name of this one to undirected and implement also a directed version?
+class NumberOfThreeCycles(Metric):
+    def __str__(self):
+        return "num_3cycle"
+    
+    def __init__(self):
+        super().__init__(requires_graph=False)
+        self._is_directed = True
+        self._is_dyadic_independent = False
+    
+    def calculate(self, W: np.ndarray):
+        W3 = W @ W @ W
+        num_3_cycles = int(np.trace(W3) // 3 ) # Each cycle is counted 3 times, one for each node
+
+        return num_3_cycles
+    
 class NumberOfTriangles(Metric):
     def __str__(self):
         return "num_triangles"
