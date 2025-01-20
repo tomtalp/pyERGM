@@ -936,11 +936,12 @@ class NumberOfNodesPerType(Metric):
     def __str__(self):
         return "num_nodes_per_type"
 
-    def __init__(self, metric_node_feature, n_node_categories):
+    def __init__(self, metric_node_feature, n_node_categories, feature_dim=1):
         super().__init__(requires_graph=False, metric_type='node', metric_node_feature=metric_node_feature)
         self._is_directed = False
         self._is_dyadic_independent = True
         self.n_node_categories = n_node_categories
+        self.feature_dim = feature_dim
 
     def _get_total_feature_count(self):
         """
@@ -1000,8 +1001,6 @@ class MetricsCollection:
                  is_collinearity_distributed=False,
                  # TODO: For tests only, find a better solution
                  do_copy_metrics=True,
-                 n_node_features=0,
-                 node_feature_names={},
                  **kwargs):
 
         if not do_copy_metrics:
@@ -1020,10 +1019,16 @@ class MetricsCollection:
                 metric_is_directed_str = "a directed" if x._is_directed else "an undirected"
                 raise ValueError(f"Trying to initialize {model_is_directed_str} model with {metric_is_directed_str} "
                                  f"metric `{str(x)}`!")
-
         self.n_nodes = n_nodes
-        self.n_node_features = n_node_features
-        self.node_feature_names = node_feature_names # a dict with keys of node feature names and values of lists of indices
+        node_feature_name_to_dim = {m.metric_node_feature: m.feature_dim for m in self.metrics if m._metric_type=='node'}
+        node_features_dims = list(node_feature_name_to_dim.values())
+        node_features_indices_limits = np.cumsum(np.concatenate([[0], node_features_dims])).astype(int)
+        node_features_indices = [np.arange(node_features_indices_limits[i], node_features_indices_limits[i+1])
+                                 for i in range(len(node_features_indices_limits) - 1)]
+        node_feature_names = list(node_feature_name_to_dim.keys())
+        self.node_feature_names = dict(zip(node_feature_names, node_features_indices)) # a dict with keys of node feature names and values of lists of indices
+        self.n_node_features = sum([len(v) for v in self.node_feature_names.values()])
+        self.node_features_n_categories = {m.metric_node_feature: m.n_node_categories for m in self.metrics if m._metric_type=='node'}
 
         self.use_sparse_matrix = use_sparse_matrix
         self.requires_graph = any([x.requires_graph for x in self.metrics])

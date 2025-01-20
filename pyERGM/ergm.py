@@ -20,9 +20,6 @@ class ERGM():
                  collinearity_fixer_sample_size=1000,
                  is_distributed_optimization=False,
                  optimization_options={},
-                 n_node_features=0,
-                 node_feature_names={},
-                 node_features_n_categories={},
                  **kwargs):
         """
         An ERGM model object. 
@@ -64,9 +61,6 @@ class ERGM():
         self._n_nodes = n_nodes
         self._is_directed = is_directed
         self._is_distributed_optimization = is_distributed_optimization
-        self.n_node_features = n_node_features
-        self.node_feature_names = node_feature_names
-        self.node_features_n_categories = node_features_n_categories
 
         self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
                                                      use_sparse_matrix=use_sparse_matrix,
@@ -74,9 +68,11 @@ class ERGM():
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size,
                                                      is_collinearity_distributed=self._is_distributed_optimization,
                                                      num_samples_per_job_collinearity_fixer=kwargs.get(
-                                                         'num_samples_per_job_collinearity_fixer', 5),
-                                                     n_node_features=self.n_node_features,
-                                                     node_feature_names=self.node_feature_names,)
+                                                         'num_samples_per_job_collinearity_fixer', 5))
+
+        self.n_node_features = self._metrics_collection.n_node_features
+        self.node_feature_names = self._metrics_collection.node_feature_names
+        self.node_features_n_categories = self._metrics_collection.node_features_n_categories
 
         if initial_thetas is not None:
             if type(initial_thetas) != dict:
