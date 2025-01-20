@@ -947,7 +947,7 @@ class NumberOfNodesPerType(Metric):
         """
         How many features does this metric produce, including the ignored ones.
         """
-        return self.n_node_categories
+        return self.n_node_categories - 1
 
     def calculate(self, V: np.ndarray):
         V = V.astype(int)
@@ -955,7 +955,7 @@ class NumberOfNodesPerType(Metric):
             raise ValueError("the metric NumberOfNodesPerType only works for one kind of node feature.")
         else:
             V = V[:, 0]
-        return self._handle_indices_to_ignore(np.bincount(V, minlength=self.n_node_categories))
+        return self._handle_indices_to_ignore(np.bincount(V, minlength=self.n_node_categories)[:-1])  # last category is redundant
 
     def calc_change_score(self, current_node_features: np.ndarray, index: int, new_category: int, feature_to_flip=None):
         if current_node_features.shape[1] != 1:
@@ -966,7 +966,7 @@ class NumberOfNodesPerType(Metric):
         changes = np.zeros(self.n_node_categories)
         changes[old_category] = -1
         changes[new_category] = 1
-        return self._handle_indices_to_ignore(changes)
+        return self._handle_indices_to_ignore(changes[:-1]) # last category is redundant
 
     def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         """
@@ -986,7 +986,7 @@ class NumberOfNodesPerType(Metric):
         flat_counts = np.bincount(flat_indices.ravel(), minlength=n_samples*self.n_node_categories)
         counts_for_sample = flat_counts.reshape(n_samples, self.n_node_categories).T
 
-        return self._handle_indices_to_ignore(counts_for_sample)
+        return self._handle_indices_to_ignore(counts_for_sample[:-1]) # last category is redundant
 
 
 class MetricsCollection:
