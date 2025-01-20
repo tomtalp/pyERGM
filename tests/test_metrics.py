@@ -734,7 +734,7 @@ class TestNumberOfNodesPerType(unittest.TestCase):
         expected_num_neurons_per_type = np.array([1, 2, 1])
         metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
         calculated_num_neurons_per_type = metric.calculate(V[:, [0]])
-        self.assertTrue(np.all(expected_num_neurons_per_type == calculated_num_neurons_per_type))
+        self.assertTrue(np.all(expected_num_neurons_per_type[:-1] == calculated_num_neurons_per_type))
 
     def test_calculate_for_sample(self):
         n = 4
@@ -758,7 +758,7 @@ class TestNumberOfNodesPerType(unittest.TestCase):
         sample[:, :, 1] = V2[:, [0]]
         metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
         calculated_num_neurons_per_type = metric.calculate_for_sample(sample)
-        self.assertTrue(np.all(expected_num_neurons_per_type == calculated_num_neurons_per_type))
+        self.assertTrue(np.all(expected_num_neurons_per_type[:-1] == calculated_num_neurons_per_type))
 
     def test_calc_change_score(self):
         V1 = np.array([[1, 0],
@@ -772,21 +772,21 @@ class TestNumberOfNodesPerType(unittest.TestCase):
 
         metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
 
-        calculated_change_score = metric.calc_change_score(V1[:, [0]], index=2, new_category=0)
+        calculated_change_score = metric.calc_change_score(V1[:, [0]], idx=2, new_category=0)
         expected_change_score = np.array([1, -1, 0])
-        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
 
-        calculated_change_score = metric.calc_change_score(V1[:, [1]], index=0, new_category=2)
+        calculated_change_score = metric.calc_change_score(V1[:, [1]], idx=0, new_category=2)
         expected_change_score = np.array([-1, 0, 1])
-        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
 
-        calculated_change_score = metric.calc_change_score(V2[:, [0]], index=1, new_category=1)
+        calculated_change_score = metric.calc_change_score(V2[:, [0]], idx=1, new_category=1)
         expected_change_score = np.array([-1, 1, 0])
-        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
 
-        calculated_change_score = metric.calc_change_score(V2[:, [1]], index=0, new_category=1)
+        calculated_change_score = metric.calc_change_score(V2[:, [1]], idx=0, new_category=1)
         expected_change_score = np.array([-1, 1, 0])
-        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
 
 
 class TestMetricsCollection(unittest.TestCase):
