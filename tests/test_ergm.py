@@ -236,8 +236,8 @@ class TestERGM(unittest.TestCase):
                     seed_MCMC_proba=0.25
                     )
 
-        ergm.fit(W, observed_node_features=node_features, lr=0.01, opt_steps=300, sliding_grad_window_k=10, sample_pct_growth=0.05,
-                 steps_for_decay=20, lr_decay_pct=0.05, mcmc_sample_size=200, mcmc_steps_per_sample=10, no_mple=True,
+        ergm.fit(W, observed_node_features=node_features, lr=0.1, opt_steps=500, sliding_grad_window_k=10, sample_pct_growth=0.05,
+                 steps_for_decay=20, lr_decay_pct=0.05, mcmc_sample_size=300, mcmc_steps_per_sample=10, no_mple=True,
                  theta_init_method='uniform')
 
         fit_theta = ergm._thetas[0]
