@@ -71,8 +71,8 @@ class ERGM():
                                                          'num_samples_per_job_collinearity_fixer', 5))
 
         self.n_node_features = self._metrics_collection.n_node_features
-        self.node_feature_names = self._metrics_collection.node_feature_names
-        self.node_features_n_categories = self._metrics_collection.node_features_n_categories
+        self.node_feature_names = self._metrics_collection.node_feature_names.copy()
+        self.node_features_n_categories = self._metrics_collection.node_features_n_categories.copy()
 
         if initial_thetas is not None:
             if type(initial_thetas) != dict:

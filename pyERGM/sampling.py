@@ -165,7 +165,10 @@ class NaiveMetropolisHastings(Sampler):
         sampled_networks = np.zeros((net_size, net_size + num_of_node_features, num_of_nets))
         sampled_node_features = np.zeros((net_size, num_of_node_features, num_of_nets))
         if edge_node_flip_ratio is None:
-            edge_node_flip_ratio = net_size
+            if num_of_node_features > 0:
+                edge_node_flip_ratio = max(1, int(net_size / num_of_node_features))
+            else:
+                edge_node_flip_ratio = net_size
 
         num_flips = burn_in + (num_of_nets * steps_per_sample)
         if edge_proposal_method == 'uniform':
@@ -187,13 +190,15 @@ class NaiveMetropolisHastings(Sampler):
         if num_of_node_features != 0:
             nodes_to_flip = get_uniform_random_nodes_to_flip(net_size, num_flips)
             node_features_to_flip = np.random.choice(num_of_node_features, size=num_flips)
-            new_node_feature_categories = get_uniform_random_new_node_feature_categories(num_flips, node_features_n_categories)
+            node_features_inds_to_n_categories = {feature_ind: node_features_n_categories[feature_name] for feature_ind, feature_name in inverse_node_feature_names.items()}
+            new_node_feature_categories = get_uniform_random_new_node_feature_categories(node_features_to_flip, node_features_inds_to_n_categories)
 
         random_nums_for_change_acceptance = np.random.rand(num_flips)
 
         networks_count = 0
         mcmc_iter_count = 0
-        
+        feature_flip_counts = {feature_ind: 0 for feature_ind in range(num_of_node_features)}
+
         t1 = time.time()
         while networks_count != num_of_nets:
             # Edge flip:
@@ -207,8 +212,10 @@ class NaiveMetropolisHastings(Sampler):
                 random_node_entry = nodes_to_flip[mcmc_iter_count % nodes_to_flip.shape[0]]
                 random_feature_to_flip = node_features_to_flip[mcmc_iter_count % nodes_to_flip.shape[0]]
                 current_category = current_network[random_node_entry, random_feature_to_flip]
-                random_feature_name_to_flip = inverse_node_feature_names[random_feature_to_flip]
-                random_new_category = new_node_feature_categories[random_feature_name_to_flip][current_category][mcmc_iter_count % nodes_to_flip.shape[0]]
+                # random_feature_name_to_flip = inverse_node_feature_names[random_feature_to_flip]
+                random_new_category = new_node_feature_categories[random_feature_to_flip][current_category][feature_flip_counts[random_feature_to_flip]]
+                feature_flip_counts[random_feature_to_flip] += 1
+
             else:
                 random_node_entry = None
                 random_feature_to_flip = None

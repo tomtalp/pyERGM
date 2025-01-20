@@ -186,24 +186,25 @@ def get_uniform_random_nodes_to_flip(num_nodes, num_flips):
 
     return nodes_to_flip
 
-def get_uniform_random_new_node_feature_categories(num_flips, node_features_n_categories):
+def get_uniform_random_new_node_feature_categories(node_features_to_flip, node_features_inds_to_n_categories):
     """
-    Create a dictionary of all the possible category flips for node features:
-    keys are node features, and values are dictionaries with the key being a category, and the value being
-    random new categories (excluding the current category) - a vector of size num_flips, where each entry
-    represents the new category to flip to.
+    Create a dictionary of all the possible category flips for the predetermined node features.
+    keys are node features indices, and values are dictionaries with the key being a category, and the value being
+    random new categories (excluding the current category) - a vector of size of the number of appearances of the
+    feature in the random feature flips array given as input. Each entry represents the new category to flip to.
+    Totally, we save num_flips x (mean_num_categories - 1) numbers.
     The categories are sampled randomly.
     """
 
     new_node_features_categories = {}
-    for feature_name, n_categories in node_features_n_categories.items():
+    for feature_ind, n_categories in node_features_inds_to_n_categories.items():
         categories = np.arange(n_categories)
         new_node_feature_categories = {}
         for c in categories:
             categories_without_c = np.delete(categories, c)
-            random_new_categories = np.random.choice(categories_without_c, size=num_flips)
+            random_new_categories = np.random.choice(categories_without_c, size=(node_features_to_flip == feature_ind).sum())
             new_node_feature_categories[c] = random_new_categories
-        new_node_features_categories[feature_name] = new_node_feature_categories
+        new_node_features_categories[feature_ind] = new_node_feature_categories
     return new_node_features_categories
 
 

@@ -20,6 +20,9 @@ class Metric(ABC):
         self._n_nodes = None
         self._indices_to_ignore = None
         self._metric_type = metric_type # can have values "node", "binary_edge", "non_binary_edge"
+        if self._metric_type not in ['node', 'binary_edge', 'binary_edge']:
+            raise ValueError(f"invalid metric type: {self._metric_type}. Should be one of: 'node', 'binary_edge', 'binary_edge'")
+
         self.metric_node_feature = metric_node_feature # relevant only if metric_type='node'
 
     def initialize_indices_to_ignore(self):
@@ -938,7 +941,6 @@ class NumberOfNodesPerType(Metric):
 
     def __init__(self, metric_node_feature, n_node_categories, feature_dim=1):
         super().__init__(requires_graph=False, metric_type='node', metric_node_feature=metric_node_feature)
-        self._is_directed = False
         self._is_dyadic_independent = True
         self.n_node_categories = n_node_categories
         self.feature_dim = feature_dim
@@ -957,12 +959,12 @@ class NumberOfNodesPerType(Metric):
             V = V[:, 0]
         return self._handle_indices_to_ignore(np.bincount(V, minlength=self.n_node_categories)[:-1])  # last category is redundant
 
-    def calc_change_score(self, current_node_features: np.ndarray, index: int, new_category: int, feature_to_flip=None):
+    def calc_change_score(self, current_node_features: np.ndarray, idx: int, new_category: int, feature_to_flip=None):
         if current_node_features.shape[1] != 1:
             raise ValueError("the metric NumberOfNodesPerType only works for one kind of node feature.")
         else:
             current_node_features = current_node_features[:, 0]
-        old_category = current_node_features[index]
+        old_category = current_node_features[idx]
         changes = np.zeros(self.n_node_categories)
         changes[old_category] = -1
         changes[new_category] = 1
@@ -1014,7 +1016,7 @@ class MetricsCollection:
 
         self.is_directed = is_directed
         for x in self.metrics:
-            if x._is_directed != self.is_directed:
+            if (x._is_directed is not None) and (x._is_directed != self.is_directed):
                 model_is_directed_str = "a directed" if self.is_directed else "an undirected"
                 metric_is_directed_str = "a directed" if x._is_directed else "an undirected"
                 raise ValueError(f"Trying to initialize {model_is_directed_str} model with {metric_is_directed_str} "
@@ -1262,7 +1264,7 @@ class MetricsCollection:
             else:
                 if metric._metric_type in ['binary_edge', 'non_binary_edge']:
                     input = W[:self.n_nodes, :self.n_nodes]
-                else: # metric._metric_type == 'node'
+                elif metric._metric_type == 'node':
                     feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature, list(np.arange(self.n_node_features)))
                     feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
                     input = W[:, feature_indices_to_pass]
@@ -1299,7 +1301,7 @@ class MetricsCollection:
                     input = current_network[:self.n_nodes, :self.n_nodes]
                     change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input,
                                                                                                                edge_flip_info['edge'])
-                else: # metric._metric_type == 'node'
+                elif metric._metric_type == 'node':
                     feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature, list(np.arange(self.n_node_features)))
                     feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
                     if node_flip_info['feature'] not in feature_indices_to_pass:
@@ -1348,14 +1350,14 @@ class MetricsCollection:
             elif self.use_sparse_matrix:
                 if metric._metric_type in ['binary_edge', 'non_binary_edge']:
                     networks = networks_as_sparse_tensor[:self.n_nodes, :self.n_nodes]
-                else: # metric._metric_type == 'node'
+                elif metric._metric_type == 'node':
                     feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature, list(np.arange(self.n_node_features)))
                     feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
                     networks = networks_as_sparse_tensor[:, feature_indices_to_pass]
             else:
                 if metric._metric_type in ['binary_edge', 'non_binary_edge']:
                     networks = networks_sample[:self.n_nodes, :self.n_nodes]
-                else: # metric._metric_type == 'node'
+                elif metric._metric_type == 'node':
                     feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature, list(np.arange(self.n_node_features)))
                     feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
                     networks = networks_sample[:, feature_indices_to_pass]
@@ -1400,7 +1402,7 @@ class MetricsCollection:
             else:
                 if metric._metric_type in ['binary_edge', 'non_binary_edge']:
                     input = current_network[:self.n_nodes, :self.n_nodes]
-                else: # metric._metric_type == 'node'
+                elif metric._metric_type == 'node':
                     feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature, list(np.arange(self.n_node_features)))
                     feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
                     input = current_network[:, feature_indices_to_pass]
@@ -1447,7 +1449,7 @@ class MetricsCollection:
             else:
                 if metric._metric_type in ['binary_edge', 'non_binary_edge']:
                     input = observed_network[:self.n_nodes, :self.n_nodes]
-                else: # metric._metric_type == 'node'
+                elif metric._metric_type == 'node':
                     feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature, list(np.arange(self.n_node_features)))
                     feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
                     input = observed_network[:, feature_indices_to_pass]
