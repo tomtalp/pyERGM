@@ -123,7 +123,7 @@ class ERGM():
         print(f"Is directed: {self._is_directed}")
 
     def calculate_weight(self, W: np.ndarray):
-        if len(W.shape) != 2 or W.shape[0] != self._n_nodes:
+        if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] < self._n_nodes:
             raise ValueError(f"The dimensions of the given adjacency matrix, {W.shape}, don't comply with the number of"
                              f" nodes in the network: {self._n_nodes}")
         features = self._metrics_collection.calculate_statistics(W)
@@ -144,7 +144,8 @@ class ERGM():
                                      burn_in=10000,
                                      mcmc_steps_per_sample=1000,
                                      sampling_method="metropolis_hastings",
-                                     edge_proposal_method='uniform'
+                                     edge_proposal_method='uniform',
+                                     edge_node_flip_ratio=None
                                      ):
         if sampling_method == "metropolis_hastings":
             if seed_network is None:
@@ -161,7 +162,8 @@ class ERGM():
                                           steps_per_sample=mcmc_steps_per_sample,
                                           edge_proposal_method=edge_proposal_method,
                                           node_feature_names=self.node_feature_names,
-                                          node_features_n_categories=self.node_features_n_categories)
+                                          node_features_n_categories=self.node_features_n_categories,
+                                          edge_node_flip_ratio=edge_node_flip_ratio)
         elif sampling_method == "exact":
             return self._generate_exact_sample(sample_size)
         else:
@@ -275,6 +277,8 @@ class ERGM():
             mcmc_steps_per_sample=10,
             mcmc_sample_size=100,
             edge_proposal_method='uniform',
+            edge_node_flip_ratio=None,
+            observed_node_features=None,
             **kwargs
             ):
         """
@@ -370,6 +374,13 @@ class ERGM():
         (grads, hotelling_statistics) : (np.ndarray, list)
         # TODO - what do we want to return?
         """
+        # Create the full observed network from adjacency matrix and node features:
+        if observed_node_features is not None:
+            ordered_observed_node_features = [observed_node_features[fname] for fname in self.node_feature_names.keys()]
+            ordered_observed_node_features = [one_d_f for f in ordered_observed_node_features for one_d_f in f]
+            ordered_observed_node_features = np.array(ordered_observed_node_features).T
+            observed_network = np.concatenate([observed_network, ordered_observed_node_features], axis=1)
+
         # This is because we assume the sample size is even when estimating the covariance matrix (in
         # calc_capital_gammas).
         if mcmc_sample_size % 2 != 0:
@@ -437,7 +448,8 @@ class ERGM():
             networks_for_sample = self.generate_networks_for_sample(sample_size=mcmc_sample_size,
                                                                     seed_network=mcmc_seed_network, burn_in=burn_in,
                                                                     mcmc_steps_per_sample=mcmc_steps_per_sample,
-                                                                    edge_proposal_method=edge_proposal_method)
+                                                                    edge_proposal_method=edge_proposal_method,
+                                                                    edge_node_flip_ratio=edge_node_flip_ratio)
             mcmc_seed_network = networks_for_sample[:, :, -1]
 
             features_of_net_samples = self._metrics_collection.calculate_sample_statistics(networks_for_sample)
@@ -490,7 +502,6 @@ class ERGM():
 
             convergence_tester = ConvergenceTester()
 
-            print(convergence_criterion)
             if convergence_criterion == "hotelling":
                 convergence_results = convergence_tester.hotelling(observed_features, mean_features, inv_estimated_cov_matrix, mcmc_sample_size, hotelling_confidence)
 

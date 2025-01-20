@@ -206,9 +206,8 @@ class TestERGM(unittest.TestCase):
 
         ground_truth_num_edges = round(num_pos_connect * p)
         ground_truth_p = ground_truth_num_edges / num_pos_connect
-        ground_truth_nodes_per_type = np.array([1, 3])
 
-        ground_truth_theta = np.array([np.log(ground_truth_p / (1 - ground_truth_p)), 0, 0])
+        ground_truth_theta = np.log(ground_truth_p / (1 - ground_truth_p))
 
         adj_mat_no_diag = np.zeros(num_pos_connect)
         on_indices = np.random.choice(num_pos_connect, size=ground_truth_num_edges, replace=False).astype(int)
@@ -223,35 +222,37 @@ class TestERGM(unittest.TestCase):
         else:
             adj_mat[~np.eye(n, dtype=bool)] = adj_mat_no_diag
 
-        node_types = np.array([[0, 1, 1, 1]]).T
+        node_features = {"E_I": [[0, 1, 1, 1]]}
+        ground_truth_e_nodes = 0.25
+        ground_truth_theta_e = np.log(ground_truth_e_nodes / (1 - ground_truth_e_nodes))
 
-        W = np.concatenate([adj_mat, node_types], axis=1)
+        W = adj_mat # np.concatenate([adj_mat, node_types], axis=1)
         print(f"Fitting matrix ({W.shape}) - ")
         print(W)
 
         ergm = ERGM(n,
                     [NumberOfEdgesUndirected(), NumberOfNodesPerType(metric_node_feature='E_I', n_node_categories=2)],
                     is_directed=is_directed,
-                    seed_MCMC_proba=0.25,
-                    n_node_features=1,
-                    node_feature_names={'E_I': [0]},
-                    node_features_n_categories={'E_I': 2}
+                    seed_MCMC_proba=0.25
                     )
 
-        ergm.fit(W, lr=0.01, opt_steps=500, sliding_grad_window_k=10, sample_pct_growth=0.05, steps_for_decay=20,
-                 lr_decay_pct=0.05, mcmc_sample_size=200, mcmc_steps_per_sample=10, no_mple=True, theta_init_method='uniform')
+        ergm.fit(W, observed_node_features=node_features, lr=0.01, opt_steps=300, sliding_grad_window_k=10, sample_pct_growth=0.05,
+                 steps_for_decay=20, lr_decay_pct=0.05, mcmc_sample_size=200, mcmc_steps_per_sample=10, no_mple=True,
+                 theta_init_method='uniform')
 
-        fit_theta = ergm._thetas
-        print(f"ground truth theta: {ground_truth_theta}")
-        print(f"fit theta: {fit_theta}")
+        fit_theta = ergm._thetas[0]
+        fit_theta_e = ergm._thetas[1]
+        print(f"ground truth theta: {ground_truth_theta, ground_truth_theta_e}")
+        print(f"fit theta: {fit_theta, fit_theta_e}")
 
 
+        # ergm._thetas = np.array([ground_truth_theta, ground_truth_theta_e])
         sampled_networks = ergm.generate_networks_for_sample(sample_size=100)
         fit_p = sampled_networks[:, :-1, :].mean()
         fit_e_i_fraction = sampled_networks[:, -1, :].mean()
         print(f"ground truth p: {p}")
         print(f"fit p: {fit_p}")
-        print(f"ground truth excitatory fraction: {node_types.mean()}")
+        print(f"ground truth excitatory fraction: {np.array(node_features['E_I']).mean()}")
         print(f"fit excitatory fraction: {fit_e_i_fraction}")
 
     def test_MPLE(self):
