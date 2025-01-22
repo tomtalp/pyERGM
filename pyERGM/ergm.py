@@ -287,8 +287,14 @@ class ERGM():
         Parameters
         ----------
         observed_network : np.ndarray
-            The network matrix of size (n, n+k) of adjacency matrix + node features of the observed network. #TODO - how do we support nx.Graph?
-
+            The observed network connectivity matrix, with shape (n, n).
+        
+        observed_node_features: dict
+            Optional. A dictionary of node features. Each key is the name of the feature, and the value is a list of
+            `n` numbers representing the feature of every node. *Defaults to None*.
+            
+            e.g. - `observed_node_features = {"E_I": [[0, 1, 1, 1]]}`
+            
         lr : float
             Optional. The learning rate for the optimization. *Defaults to 0.1*
 
