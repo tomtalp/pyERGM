@@ -195,6 +195,66 @@ class TestERGM(unittest.TestCase):
         # TODO - what criteria to use for testing convergence? From manual tests, it doesn't seem to perfectly converge on the true thetas...
         # Nevertheless, even without an assert, this will catch errors - fit won't work if something breaks.
 
+    def test_fit_small_ER_network_with_e_i_node_feature(self):
+        n = 4
+        p = 0.25
+        is_directed = False
+
+        num_pos_connect = n * (n - 1)
+        if not is_directed:
+            num_pos_connect //= 2
+
+        ground_truth_num_edges = round(num_pos_connect * p)
+        ground_truth_p = ground_truth_num_edges / num_pos_connect
+
+        ground_truth_theta = np.log(ground_truth_p / (1 - ground_truth_p))
+
+        adj_mat_no_diag = np.zeros(num_pos_connect)
+        on_indices = np.random.choice(num_pos_connect, size=ground_truth_num_edges, replace=False).astype(int)
+        adj_mat_no_diag[on_indices] = 1
+        adj_mat = np.zeros((n, n))
+
+        if not is_directed:
+            upper_triangle_indices = np.triu_indices(n, k=1)
+            adj_mat[upper_triangle_indices] = adj_mat_no_diag
+            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
+            adj_mat[lower_triangle_indices_aligned] = adj_mat_no_diag
+        else:
+            adj_mat[~np.eye(n, dtype=bool)] = adj_mat_no_diag
+
+        node_features = {"E_I": [[0, 1, 1, 1]]}
+        ground_truth_e_nodes = 0.25
+        ground_truth_theta_e = np.log(ground_truth_e_nodes / (1 - ground_truth_e_nodes))
+
+        W = adj_mat # np.concatenate([adj_mat, node_types], axis=1)
+        print(f"Fitting matrix ({W.shape}) - ")
+        print(W)
+
+        ergm = ERGM(n,
+                    [NumberOfEdgesUndirected(), NumberOfNodesPerType(metric_node_feature='E_I', n_node_categories=2)],
+                    is_directed=is_directed,
+                    seed_MCMC_proba=0.25
+                    )
+
+        ergm.fit(W, observed_node_features=node_features, lr=0.1, opt_steps=500, sliding_grad_window_k=10, sample_pct_growth=0.05,
+                 steps_for_decay=20, lr_decay_pct=0.05, mcmc_sample_size=300, mcmc_steps_per_sample=10, no_mple=True,
+                 theta_init_method='uniform')
+
+        fit_theta = ergm._thetas[0]
+        fit_theta_e = ergm._thetas[1]
+        print(f"ground truth theta: {ground_truth_theta, ground_truth_theta_e}")
+        print(f"fit theta: {fit_theta, fit_theta_e}")
+
+
+        # ergm._thetas = np.array([ground_truth_theta, ground_truth_theta_e])
+        sampled_networks = ergm.generate_networks_for_sample(sample_size=100)
+        fit_p = sampled_networks[:, :-1, :].mean()
+        fit_e_i_fraction = sampled_networks[:, -1, :].mean()
+        print(f"ground truth p: {p}")
+        print(f"fit p: {fit_p}")
+        print(f"ground truth excitatory fraction: {np.array(node_features['E_I']).mean()}")
+        print(f"fit excitatory fraction: {fit_e_i_fraction}")
+
     def test_MPLE(self):
         n = 4
 
@@ -281,6 +341,53 @@ class TestERGM(unittest.TestCase):
         expected_thetas = np.array(list(expected_values.values()))
         
         thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas)**2) / np.sum((expected_thetas - np.mean(expected_thetas))**2)
+        self.assertTrue(thetas_R_2 > 0.99)
+        self.assertTrue(convergence_result["success"])
+
+    def test_sampson_MCMLE_with_node_features(self):
+        np.random.seed(1234)
+        metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
+        n_nodes = sampson_matrix.shape[0]
+
+        mcmle_model = ERGM(n_nodes, metrics, is_directed=True)
+
+        node_features = np.random.choice(3, size=(n_nodes, 2))
+        sampson_matrix_with_node_features = np.concatenate([sampson_matrix, node_features], axis=1)
+        convergence_result = mcmle_model.fit(sampson_matrix_with_node_features,
+                                             opt_steps=10,
+                                             steps_for_decay=1,
+                                             lr=1,
+                                             mple_lr=0.5,
+                                             convergence_criterion="model_bootstrap",
+                                             mcmc_burn_in=0,
+                                             mcmc_steps_per_sample=n_nodes ** 2,
+                                             mcmc_sample_size=1000,
+                                             num_model_sub_samples=10,
+                                             model_subsample_size=1000,
+                                             bootstrap_convergence_confidence=0.95,
+                                             bootstrap_convergence_num_stds_away_thr=1,
+                                             )
+
+        model_thethas = mcmle_model._thetas
+
+        expected_values = {"edges": -1.1761, "sender2": -0.2945, "sender3": 1.4141, "sender4": 0.3662,
+                           "sender5": 0.1315,
+                           "sender6": 1.2148, "sender7": 0.6055,
+                           "sender8": 1.3609, "sender9": 0.6402, "sender10": 2.0639, "sender11": 1.4355,
+                           "sender12": -0.1681,
+                           "sender13": -0.2322, "sender14": 0.5841, "sender15": 1.8600,
+                           "sender16": 1.4317, "sender17": 1.2211, "sender18": 1.8724, "receiver2": -0.1522,
+                           "receiver3": -3.0453,
+                           "receiver4": -1.7596, "receiver5": -0.8198, "receiver6": -3.3922,
+                           "receiver7": -1.6074, "receiver8": -2.2656, "receiver9": -2.2069, "receiver10": -3.9189,
+                           "receiver11": -3.0257, "receiver12": -0.9457, "receiver13": -1.4749, "receiver14": -1.5950,
+                           "receiver15": -3.3147, "receiver16": -3.0567, "receiver17": -3.4436, "receiver18": -3.3239,
+                           "mutual": 3.6918
+                           }
+        expected_thetas = np.array(list(expected_values.values()))
+
+        thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas) ** 2) / np.sum(
+            (expected_thetas - np.mean(expected_thetas)) ** 2)
         self.assertTrue(thetas_R_2 > 0.99)
         self.assertTrue(convergence_result["success"])
 
