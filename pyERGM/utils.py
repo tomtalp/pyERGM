@@ -812,8 +812,8 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
                            jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
                            callback=after_iteration_callback, method="Newton-CG")
         elif optimization_method == "L-BFGS-B":
-            res = minimize(numerically_stable_minus_log_like_and_grad_local, thetas, args=(Xs, ys), jac=True,
-                           method="L-BFGS-B", callback=after_iteration_callback)
+            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys), 
+                           jac=analytical_minus_log_like_grad_local, method="L-BFGS-B", callback=after_iteration_callback)
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
