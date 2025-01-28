@@ -266,7 +266,7 @@ class ERGM():
             max_nets_for_sample=1000,
             sample_pct_growth=0.02,
             optimization_method="newton_raphson",
-            convergence_criterion="hotelling",
+            convergence_criterion="model_bootstrap",
             cov_matrix_estimation_method="naive",
             cov_matrix_num_batches=25,
             hotelling_confidence=0.99,
@@ -350,7 +350,7 @@ class ERGM():
             Optional. The confidence level for the Hotelling's T-squared test. *Defaults to 0.99*.
         
         theta_init_method : str
-            Optional. The method to initialize the theta values. Can be either "uniform" or "mple".
+            Optional. The method to initialize the theta values. Can be either "uniform", "mple" or "use_existing" (which uses the current thetas).
             The MPLE method can be used even for dyadic dependent models, since it serves as a good starting point for the MCMLE.
             *Defaults to "mple"*.
 
@@ -564,6 +564,8 @@ class ERGM():
                     break
             else:
                 raise ValueError(f"Convergence criterion {convergence_criterion} not defined")
+        
+            sys.stdout.flush()
 
         self._last_mcmc_chain_features = features_of_net_samples
 
