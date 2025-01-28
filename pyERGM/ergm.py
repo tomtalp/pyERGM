@@ -439,10 +439,6 @@ class ERGM():
 
         grads = np.zeros((opt_steps, num_of_features))
 
-        if convergence_criterion == "hotelling":
-            hotelling_critical_value = f.ppf(1 - hotelling_confidence, num_of_features,
-                                             mcmc_sample_size - num_of_features)  # F(p, n-p) TODO - doc this better
-
         if mcmc_seed_network is None and not no_mple:
             probabilities_matrix = self.get_mple_prediction(observed_network)
             mcmc_seed_network = sample_from_independent_probabilities_matrix(probabilities_matrix, 1)
@@ -530,8 +526,7 @@ class ERGM():
 
                 convergence_results = convergence_tester.bootstrapped_mahalanobis_from_observed(
                     observed_features,
-                    networks_for_sample,
-                    self._metrics_collection,
+                    features_of_net_samples,
                     inv_observed_covariance,
                     num_subsamples=kwargs.get("num_model_sub_samples", 100),
                     subsample_size=kwargs.get("model_subsample_size", 1000),
@@ -548,8 +543,7 @@ class ERGM():
             elif convergence_criterion == "model_bootstrap":            
                 convergence_results = convergence_tester.bootstrapped_mahalanobis_from_model(
                     observed_features,
-                    networks_for_sample,
-                    self._metrics_collection,
+                    features_of_net_samples,
                     num_subsamples=kwargs.get("num_model_sub_samples", 100),
                     subsample_size=kwargs.get("model_subsample_size", 1000),
                     confidence=kwargs.get("bootstrap_convergence_confidence", 0.95),
@@ -755,44 +749,42 @@ class BruteForceERGM(ERGM):
         return res
 
 
-class ConvergenceTester():
+class ConvergenceTester:
     def __init__(self):
         pass
     
-    def _get_subsample_features(self, sampled_networks, num_subsamples, subsample_size, metrics_collection: MetricsCollection):
+    @staticmethod
+    def _get_subsample_features(sampled_networks_features, num_subsamples, subsample_size):
         """
         Receives a sample of networks, and subsample for `num_subsamples` times, each time with `subsample_size` networks.
         For each subsample, calculates the sample statistics and reshapes the result to a tensor of shape (num_of_features, num_subsamples, subsample_size).
 
         Parameters
         ----------
-        sampled_networks : np.ndarray
-            A sample of networks that will be used for subsampling
+        sampled_networks_features : np.ndarray
+            Features of a sample of networks that will be used for subsampling
         
         num_subsamples : int
             The number of subsamples to draw from the sample.
         
         subsample_size : int
             The size of each subsample.
-        
-        metrics_collection : MetricsCollection
-            The collection of metrics used for calculating the features.
     
         Returns
         -------
         sub_samples_features : np.ndarray
             A tensor of shape (num_of_features, num_subsamples, subsample_size) containing the features of all subsamples.
         """
-        sample_size = sampled_networks.shape[2]
+        sample_size = sampled_networks_features.shape[1]
 
         sub_sample_indices = np.random.choice(np.arange(sample_size), size=num_subsamples * subsample_size)
-        sub_samples = sampled_networks[:, :, sub_sample_indices]
-        sub_samples_features = metrics_collection.calculate_sample_statistics(sub_samples)
+        sub_samples_features = sampled_networks_features[:, sub_sample_indices]
         sub_samples_features = sub_samples_features.reshape(-1, num_subsamples, subsample_size)
 
         return sub_samples_features
 
-    def hotelling(self, observed_features, mean_features, inverted_sample_cov_matrix, sample_size, confidence=0.99):
+    @staticmethod
+    def hotelling(observed_features, mean_features, inverted_sample_cov_matrix, sample_size, confidence=0.99):
         """
         Run the Hotelling's T-squared test for convergence.
 
@@ -839,11 +831,11 @@ class ConvergenceTester():
             "threshold": hotelling_critical_value
         }
         
-    def bootstrapped_mahalanobis_from_observed(self,
+    @staticmethod
+    def bootstrapped_mahalanobis_from_observed(
                                     observed_features, 
-                                    sampled_networks,
-                                    metrics_collection, 
-                                    inverted_observed_cov_matrix, 
+                                    sampled_networks_features,
+                                    inverted_observed_cov_matrix,
                                     num_subsamples=100,
                                     subsample_size=1000,
                                     confidence=0.95,
@@ -856,7 +848,7 @@ class ConvergenceTester():
         """
         mahalanobis_dists = np.zeros(num_subsamples)
 
-        sub_samples_features = self._get_subsample_features(sampled_networks, num_subsamples, subsample_size, metrics_collection)
+        sub_samples_features = ConvergenceTester._get_subsample_features(sampled_networks_features, num_subsamples, subsample_size)
         mean_per_subsample = sub_samples_features.mean(axis=2)
 
         for cur_subsam_idx in range(num_subsamples):
@@ -871,10 +863,10 @@ class ConvergenceTester():
             "threshold": stds_away_thr
         }
 
-    def bootstrapped_mahalanobis_from_model(self,
+    @staticmethod
+    def bootstrapped_mahalanobis_from_model(
                                     observed_features, 
-                                    sampled_networks,
-                                    metrics_collection, 
+                                    sampled_networks_features,
                                     num_subsamples=100,
                                     subsample_size=1000,
                                     confidence=0.95,
@@ -890,11 +882,8 @@ class ConvergenceTester():
         observed_features : np.ndarray
             The observed features of the network.
         
-        sampled_networks : np.ndarray
-            The networks sampled from the model.
-        
-        metrics_collection : MetricsCollection
-            The collection of metrics used for calculating the features.
+        sampled_networks_features : np.ndarray
+            Features of networks sampled from the model.
         
         num_subsamples : int
             The number of subsamples to draw. *Defaults to 100*.
@@ -910,7 +899,7 @@ class ConvergenceTester():
         """
         mahalanobis_dists = np.zeros(num_subsamples)
 
-        sub_samples_features = self._get_subsample_features(sampled_networks, num_subsamples, subsample_size, metrics_collection)
+        sub_samples_features = ConvergenceTester._get_subsample_features(sampled_networks_features, num_subsamples, subsample_size)
 
         for cur_subsam_idx in range(num_subsamples):
             sub_sample = sub_samples_features[:, cur_subsam_idx, :]
