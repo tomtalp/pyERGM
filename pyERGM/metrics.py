@@ -1047,6 +1047,7 @@ class MetricsCollection:
         # on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count
         # function
         self.num_of_features = self.calc_num_of_features()
+        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
@@ -1291,8 +1292,9 @@ class MetricsCollection:
         change_scores = np.zeros(self.num_of_features)
 
         feature_idx = 0
-        for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
+        for i, metric in enumerate(self.metrics):
+            # n_features_from_metric = metric._get_effective_feature_count()
+            n_features_from_metric = self.features_per_metric[i]
 
             if metric.requires_graph: # it cannot require graph and also have _metric_type='node'
                 input = G1
