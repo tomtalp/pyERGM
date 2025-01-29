@@ -1,3 +1,4 @@
+import datetime
 import numpy as np
 from scipy.optimize import minimize, OptimizeResult
 from scipy.stats import f
@@ -432,7 +433,7 @@ class ERGM():
             inv_observed_covariance = np.linalg.inv(observed_covariance)
 
         print(f"Initial thetas - {self._thetas}")
-        print("optimization started")
+        print(f"{datetime.datetime.now()} optimization started")
 
         self.optimization_start_time = time.time()
         num_of_features = self._metrics_collection.num_of_features
@@ -462,13 +463,14 @@ class ERGM():
             if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):
                 # This is for allowing numba to compile and pickle the large function
                 sys.setrecursionlimit(2000)
-                print(f"Started estimating cov matrix ")
+                print(f"{datetime.datetime.now()} Started estimating cov matrix ")
                 estimated_cov_matrix = covariance_matrix_estimation(features_of_net_samples,
                                                                     mean_features,
                                                                     method=cov_matrix_estimation_method,
                                                                     num_batches=cov_matrix_num_batches)
-                print(f"Done estimating cov matrix ")
+                print(f"{datetime.datetime.now()} Done estimating cov matrix ")
                 inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
+                print(f"{datetime.datetime.now()} Done inverting cov matrix ")
             if optimization_method == "newton_raphson":
                 self._thetas = self._thetas - lr * inv_estimated_cov_matrix @ grad
 
@@ -502,11 +504,13 @@ class ERGM():
                     sliding_grad_window_k = np.min(
                         [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
+            print(f"{datetime.datetime.now()} Starting to test for convergence")
             convergence_tester = ConvergenceTester()
 
             if convergence_criterion == "hotelling":
+                print(f"{datetime.datetime.now()} \t Starting a `hotelling` test")
                 convergence_results = convergence_tester.hotelling(observed_features, mean_features, inv_estimated_cov_matrix, mcmc_sample_size, hotelling_confidence)
-
+                print(f"{datetime.datetime.now()} \t DONE with `hotelling` test")
                 if convergence_results["success"]:
                     print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
                     grads = grads[:i]
@@ -540,7 +544,8 @@ class ERGM():
                           f"the data, according to the estimated data variability DONE! ")
                     grads = grads[:i]
                     break
-            elif convergence_criterion == "model_bootstrap":            
+            elif convergence_criterion == "model_bootstrap": 
+                print(f"{datetime.datetime.now()} \t Starting a `model_bootstrap` test")           
                 convergence_results = convergence_tester.bootstrapped_mahalanobis_from_model(
                     observed_features,
                     features_of_net_samples,
@@ -549,7 +554,7 @@ class ERGM():
                     confidence=kwargs.get("bootstrap_convergence_confidence", 0.95),
                     stds_away_thr=kwargs.get("bootstrap_convergence_stds_away_thr", 1),
                 )     
-
+                print(f"{datetime.datetime.now()} \t DONE with `model_bootstrap` test")
                 if convergence_results["success"]:
                     print(f"Reached a confidence of {kwargs.get('bootstrap_convergence_confidence', 0.95)} with the bootstrap convergence "
                           f"test! The model is likely to be up to {kwargs.get('bootstrap_convergence_stds_away_thr', 1)} stds from "
@@ -902,6 +907,7 @@ class ConvergenceTester:
         sub_samples_features = ConvergenceTester._get_subsample_features(sampled_networks_features, num_subsamples, subsample_size)
 
         for cur_subsam_idx in range(num_subsamples):
+            print(f"{datetime.datetime.now()} [model_bootstrap] \t\t Working on subsample {cur_subsam_idx}/{num_subsamples}")
             sub_sample = sub_samples_features[:, cur_subsam_idx, :]
             sub_sample_mean = sub_sample.mean(axis=1)
             model_covariance_matrix = covariance_matrix_estimation(sub_sample, sub_sample_mean, method="naive")
