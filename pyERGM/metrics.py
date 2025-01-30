@@ -706,6 +706,8 @@ class NumberOfEdgesTypesDirected(Metric):
 
         self._effective_feature_count = self._get_effective_feature_count()
         self._indices_to_ignore_up_to_idx = np.cumsum(self._indices_to_ignore)
+        self._change_score = np.zeros(self._effective_feature_count)
+        self._change_score_on_idx = None
 
         self._is_directed = True
 
@@ -775,6 +777,8 @@ class NumberOfEdgesTypesDirected(Metric):
         super().update_indices_to_ignore(indices_to_ignore)
         self._effective_feature_count = self._get_effective_feature_count()
         self._indices_to_ignore_up_to_idx = np.cumsum(self._indices_to_ignore)
+        self._change_score = np.zeros(self._effective_feature_count)
+        self._change_score_on_idx = None
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         edge_type_pair = (self.exogenous_attr[indices[0]], self.exogenous_attr[indices[1]])
@@ -782,17 +786,19 @@ class NumberOfEdgesTypesDirected(Metric):
 
         sign = -1 if current_network[indices[0], indices[1]] else 1
         
-        change_score = np.zeros(self._effective_feature_count)
+        if self._change_score_on_idx is not None:
+            self._change_score[self._change_score_on_idx] = 0
+            self._change_score_on_idx = None
         if self._indices_to_ignore is not None:
             if self._indices_to_ignore[idx_in_features_vec]:
-                return change_score
-            
-            change_score[idx_in_features_vec - self._indices_to_ignore_up_to_idx[idx_in_features_vec]] = sign
+                return self._change_score
 
-            return change_score
+            self._change_score_on_idx = idx_in_features_vec - self._indices_to_ignore_up_to_idx[idx_in_features_vec]
         else:
-            change_score[idx_in_features_vec] = sign
-            return change_score
+            self._change_score_on_idx = idx_in_features_vec
+
+        self._change_score[self._change_score_on_idx] = sign
+        return self._change_score
 
     def calculate_change_score_full_network(self, current_network: np.ndarray):
         """
@@ -1069,6 +1075,7 @@ class MetricsCollection:
         # function
         self.num_of_features = self.calc_num_of_features()
         self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
+        self._change_scores = np.zeros(self.num_of_features)
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
@@ -1310,21 +1317,18 @@ class MetricsCollection:
         if self.requires_graph:
             G1 = connectivity_matrix_to_G(current_network[:self.n_nodes, :self.n_nodes], directed=self.is_directed)
 
-        change_scores = np.zeros(self.num_of_features)
-
         feature_idx = 0
         for i, metric in enumerate(self.metrics):
-            # n_features_from_metric = metric._get_effective_feature_count()
             n_features_from_metric = self.features_per_metric[i]
 
             if metric.requires_graph: # it cannot require graph and also have _metric_type='node'
                 input = G1
-                change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input,
+                self._change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input,
                                                                                                            edge_flip_info['edge'])
             else:
                 if metric._metric_type in ['binary_edge', 'non_binary_edge']:
                     input = current_network[:self.n_nodes, :self.n_nodes]
-                    change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input,
+                    self._change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input,
                                                                                                                edge_flip_info['edge'])
                 elif metric._metric_type == 'node':
                     feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature, list(np.arange(self.n_node_features)))
@@ -1332,13 +1336,13 @@ class MetricsCollection:
                     if node_flip_info['feature'] not in feature_indices_to_pass:
                         continue
                     input = current_network[:, feature_indices_to_pass]
-                    change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input,
+                    self._change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input,
                                                                                                                current_network[:, feature_indices_to_pass],
                                                                                                                node_flip_info['node'],
                                                                                                                node_flip_info['new_category'])
             feature_idx += n_features_from_metric
 
-        return change_scores
+        return self._change_scores
 
     def calculate_sample_statistics(self, networks_sample: np.ndarray) -> np.ndarray:
         """

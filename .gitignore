@@ -1,4 +1,5 @@
 .DS_Store
+profiling
 
 neuronal_data.ipynb
 distributed_mple_fit.py
