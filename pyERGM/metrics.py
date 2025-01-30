@@ -716,6 +716,8 @@ class NumberOfEdgesTypesDirected(Metric):
                 self.indices_of_types[t].append(i)
 
         self.sorted_type_pairs = get_sorted_type_pairs(self.unique_types)
+        self._sorted_type_pairs_indices = {pair: i for i, pair in enumerate(self.sorted_type_pairs)}
+
         self._calc_edge_type_idx_assignment()
 
     def _calc_edge_type_idx_assignment(self):
@@ -739,7 +741,7 @@ class NumberOfEdgesTypesDirected(Metric):
                 type_1 = self.exogenous_attr[i]
                 type_2 = self.exogenous_attr[j]
 
-                self._edge_type_idx_assignment[i, j] = self.sorted_type_pairs.index((type_1, type_2))
+                self._edge_type_idx_assignment[i, j] = self._sorted_type_pairs_indices[(type_1, type_2)]
 
         self._edge_type_idx_assignment += 1  # Increment by 1 to avoid 0-indexing (the index 0 will be kept for non-existing edges)
 
@@ -770,7 +772,7 @@ class NumberOfEdgesTypesDirected(Metric):
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         edge_type_pair = (self.exogenous_attr[indices[0]], self.exogenous_attr[indices[1]])
-        idx_in_features_vec = self.sorted_type_pairs.index(edge_type_pair)
+        idx_in_features_vec = self._sorted_type_pairs_indices[edge_type_pair]
         sign = -1 if current_network[indices[0], indices[1]] else 1
         change_score = np.zeros(len(self.sorted_type_pairs))
         change_score[idx_in_features_vec] = sign
@@ -927,6 +929,10 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
         num_nodes = len(self.exogenous_attr)
         self.edge_weights = np.reshape(squareform(pdist(self.exogenous_attr, metric='euclidean')),
                                        (self._get_num_weight_mats(), num_nodes, num_nodes))
+
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        sign = -1 if current_network[indices[0], indices[1]] else 1
+        return sign * self.edge_weights[:, indices[0], indices[1]]
 
     def _get_num_weight_mats(self):
         return 1
