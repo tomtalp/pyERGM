@@ -660,8 +660,6 @@ class ExWeightNumEdges(Metric):
         reshaped_networks_sample = networks_sample.reshape(-1, networks_sample.shape[2]).astype(np.float64)
 
         res = reshaped_edge_weights @ reshaped_networks_sample
-        # res = np.einsum('ijk,mij->mk', networks_sample, self.edge_weights)
-        # res = np.tensordot(self.edge_weights, networks_sample, axes=2)
 
         return res
 
@@ -703,9 +701,12 @@ class NumberOfEdgesTypesDirected(Metric):
 
         self.unique_types = sorted(list(set(self.exogenous_attr)))
 
+        self._indices_from_user = indices_from_user.copy() if indices_from_user is not None else None
         super().__init__()
 
-        self._indices_from_user = indices_from_user.copy() if indices_from_user is not None else None
+        self._effective_feature_count = self._get_effective_feature_count()
+        self._indices_to_ignore_up_to_idx = np.cumsum(self._indices_to_ignore)
+
         self._is_directed = True
 
         self.indices_of_types = {}
@@ -716,6 +717,8 @@ class NumberOfEdgesTypesDirected(Metric):
                 self.indices_of_types[t].append(i)
 
         self.sorted_type_pairs = get_sorted_type_pairs(self.unique_types)
+        self._sorted_type_pairs_indices = {pair: i for i, pair in enumerate(self.sorted_type_pairs)}
+
         self._calc_edge_type_idx_assignment()
 
     def _calc_edge_type_idx_assignment(self):
@@ -739,7 +742,7 @@ class NumberOfEdgesTypesDirected(Metric):
                 type_1 = self.exogenous_attr[i]
                 type_2 = self.exogenous_attr[j]
 
-                self._edge_type_idx_assignment[i, j] = self.sorted_type_pairs.index((type_1, type_2))
+                self._edge_type_idx_assignment[i, j] = self._sorted_type_pairs_indices[(type_1, type_2)]
 
         self._edge_type_idx_assignment += 1  # Increment by 1 to avoid 0-indexing (the index 0 will be kept for non-existing edges)
 
@@ -768,14 +771,28 @@ class NumberOfEdgesTypesDirected(Metric):
             idx += 1
         return stats
 
+    def update_indices_to_ignore(self, indices_to_ignore):
+        super().update_indices_to_ignore(indices_to_ignore)
+        self._effective_feature_count = self._get_effective_feature_count()
+        self._indices_to_ignore_up_to_idx = np.cumsum(self._indices_to_ignore)
+
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         edge_type_pair = (self.exogenous_attr[indices[0]], self.exogenous_attr[indices[1]])
-        idx_in_features_vec = self.sorted_type_pairs.index(edge_type_pair)
-        sign = -1 if current_network[indices[0], indices[1]] else 1
-        change_score = np.zeros(len(self.sorted_type_pairs))
-        change_score[idx_in_features_vec] = sign
+        idx_in_features_vec = self._sorted_type_pairs_indices[edge_type_pair]
 
-        return self._handle_indices_to_ignore(change_score)
+        sign = -1 if current_network[indices[0], indices[1]] else 1
+        
+        change_score = np.zeros(self._effective_feature_count)
+        if self._indices_to_ignore is not None:
+            if self._indices_to_ignore[idx_in_features_vec]:
+                return change_score
+            
+            change_score[idx_in_features_vec - self._indices_to_ignore_up_to_idx[idx_in_features_vec]] = sign
+
+            return change_score
+        else:
+            change_score[idx_in_features_vec] = sign
+            return change_score
 
     def calculate_change_score_full_network(self, current_network: np.ndarray):
         """
@@ -928,6 +945,10 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
         self.edge_weights = np.reshape(squareform(pdist(self.exogenous_attr, metric='euclidean')),
                                        (self._get_num_weight_mats(), num_nodes, num_nodes))
 
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        sign = -1 if current_network[indices[0], indices[1]] else 1
+        return sign * self.edge_weights[:, indices[0], indices[1]]
+
     def _get_num_weight_mats(self):
         return 1
 
@@ -1047,6 +1068,7 @@ class MetricsCollection:
         # on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count
         # function
         self.num_of_features = self.calc_num_of_features()
+        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
@@ -1291,8 +1313,9 @@ class MetricsCollection:
         change_scores = np.zeros(self.num_of_features)
 
         feature_idx = 0
-        for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
+        for i, metric in enumerate(self.metrics):
+            # n_features_from_metric = metric._get_effective_feature_count()
+            n_features_from_metric = self.features_per_metric[i]
 
             if metric.requires_graph: # it cannot require graph and also have _metric_type='node'
                 input = G1
