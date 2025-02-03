@@ -1342,7 +1342,7 @@ class MetricsCollection:
                                                                                                                node_flip_info['new_category'])
             feature_idx += n_features_from_metric
 
-        return self._change_scores
+        return self._change_scores.copy()
 
     def calculate_sample_statistics(self, networks_sample: np.ndarray) -> np.ndarray:
         """
