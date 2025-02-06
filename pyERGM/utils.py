@@ -6,6 +6,7 @@ import networkx as nx
 from numba import njit, objmode
 from scipy.spatial.distance import mahalanobis
 from scipy.optimize import minimize, OptimizeResult
+from scipy.special import softmax
 import torch
 import random
 import time
@@ -735,7 +736,6 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
                                                               'log_likelihood_hessian',
                                                               num_edges_per_job)
 
-
 def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
@@ -769,8 +769,9 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
     success: bool
         Whether the optimization was successful
     """
-
-    def after_iteration_callback(intermediate_result: OptimizeResult):
+    # TODO: this code is duplicated, but the scoping of the nonlocal variables makes it not trivial to export out of
+    #  the scope of each function using it.
+    def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
         nonlocal iteration
         iteration += 1
         cur_time = time.time()
@@ -810,10 +811,10 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         if optimization_method == "Newton-CG":
             res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
                            jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
-                           callback=after_iteration_callback, method="Newton-CG")
+                           callback=_after_optim_iteration_callback, method="Newton-CG")
         elif optimization_method == "L-BFGS-B":
             res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys), 
-                           jac=analytical_minus_log_like_grad_local, method="L-BFGS-B", callback=after_iteration_callback)
+                           jac=analytical_minus_log_like_grad_local, method="L-BFGS-B", callback=_after_optim_iteration_callback)
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
@@ -826,7 +827,7 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
             res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
                            jac=analytical_minus_log_like_grad_distributed,
                            hess=analytical_minus_log_likelihood_hessian_distributed,
-                           callback=after_iteration_callback, method="Newton-CG")
+                           callback=_after_optim_iteration_callback, method="Newton-CG")
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method} for distributed optimization. "
@@ -1111,3 +1112,51 @@ def split_network_for_bootstrapping(net_size: int, first_part_size: int, splitti
         (net_size - first_part_size, 1))
 
     return first_part_indices, second_part_indices
+
+
+def predict_multi_class_logistic_regression(Xs, thetas):
+    return softmax(Xs @ thetas, axis=1)
+
+def minus_log_likelihood_multi_class_logistic_regression(thetas, Xs, ys):
+    return -np.log(predict_multi_class_logistic_regression(Xs, thetas)[np.where(ys == 1)]).sum()
+
+def minus_log_likelihood_gradient_multi_class_logistic_regression(thetas, Xs, ys):
+    prediction = predict_multi_class_logistic_regression(Xs, thetas)
+    num_features = Xs.shape[-1]
+    return -(ys - prediction).flatten() @ Xs.reshape(-1, num_features)
+
+def mple_reciprocity_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
+                                          initial_thetas: np.ndarray | None = None,
+                                          optimization_method: str = 'L-BFGS-B'):
+
+    def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
+        nonlocal iteration
+        iteration += 1
+        cur_time = time.time()
+        print(f'iteration: {iteration}, time from start '
+              f'training: {cur_time - start_time} '
+              f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
+        sys.stdout.flush()
+
+    iteration = 0
+    start_time = time.time()
+    print("optimization started")
+    sys.stdout.flush()
+
+    Xs, ys = metrics_collection.prepare_mple_reciprocity_data(observed_network)
+
+    num_features = metrics_collection.calc_num_of_features()
+    if initial_thetas is None:
+        thetas = np.random.rand(num_features)
+    else:
+        thetas = initial_thetas.copy()
+
+    if optimization_method == "L-BFGS-B":
+        res = minimize(minus_log_likelihood_multi_class_logistic_regression, thetas, args=(Xs, ys),
+                       jac=minus_log_likelihood_gradient_multi_class_logistic_regression, method="L-BFGS-B",
+                       callback=_after_optim_iteration_callback)
+    else:
+        raise ValueError(
+            f"Unsupported optimization method: {optimization_method}. Options are: L-BFGS-B")
+    pred = predict_multi_class_logistic_regression(Xs, thetas)
+    return res.x, pred, res.success
