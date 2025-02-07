@@ -262,13 +262,24 @@ class ERGM():
     def _generate_exact_sample(self, sample_size: int = 1):
         # TODO: support getting a flag of `replace` which will enable sampling with no replacements (generating samples
         #  of different networks).
-        if self._metrics_collection._has_dyadic_dependent_metrics:
-            raise ValueError("Cannot sample exactly from a model that is dyadic dependent!")
-        if self._exact_average_mat is None:
+        auto_optimization_scheme = self._metrics_collection.choose_optimization_scheme()
+        if auto_optimization_scheme == 'MCMLE':
+            # TODO: Actually we can sample for node metrics that are independent, but this is anyhow not implemented
+            #  right now, deal with that in the future.
+            raise ValueError("Cannot sample exactly from a model that has dependence that not comes from reciprocity or "
+                             "has node features!")
+        if self._exact_average_mat is None and self._exact_dyadic_distributions is None:
             raise ValueError("Cannot sample exactly from a model that is not trained! Call `model.fit()` and pass an "
                              "observed network!")
 
-        return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size)
+        if auto_optimization_scheme == 'MPLE':
+            return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size)
+        elif auto_optimization_scheme == 'MPLE_RECIPROCITY':
+            return sample_from_dyads_distribution(self._exact_dyadic_distributions, sample_size)
+        else:
+            raise ValueError(f"Received an unrecognized optimization scheme from "
+                             f"MetricsCollection.choose_optimization_scheme(): {auto_optimization_scheme}. "
+                             f"Options are supposed to be MPLE, MPLE_RECIPROCITY, MCMLE.")
 
     def fit(self, observed_network,
             lr=0.1,
@@ -437,6 +448,9 @@ class ERGM():
                 return {"success": success}
             is_theta_init = True
         elif optimization_scheme == "MPLE_RECIPROCITY":
+            if not self._is_directed:
+                raise ValueError("There is not meaning for reciprocity in undirected graphs, "
+                                 "can't perform MPLE_RECIPROCITY optimization.")
             self._thetas, success = self._mple_reciprocity_fit(observed_network,
                                                                optimization_method=kwargs.get(
                                                                    'mple_optimization_method',

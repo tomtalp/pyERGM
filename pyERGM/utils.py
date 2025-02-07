@@ -25,6 +25,12 @@ EXIT_IDX = 7
 
 LSF_ID_LIST_LEN_LIMIT = 100
 
+# Dyad states indexing convention
+EMPTY_IDX = 0
+UPPER_IDX = 1
+LOWER_IDX = 2
+RECIPROCAL_IDX = 3
+
 
 def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
     perturbed_net = network.copy()
@@ -187,6 +193,7 @@ def get_uniform_random_nodes_to_flip(num_nodes, num_flips):
 
     return nodes_to_flip
 
+
 def get_uniform_random_new_node_feature_categories(node_features_to_flip, node_features_inds_to_n_categories):
     """
     Create a dictionary of all the possible category flips for the predetermined node features.
@@ -203,7 +210,8 @@ def get_uniform_random_new_node_feature_categories(node_features_to_flip, node_f
         new_node_feature_categories = {}
         for c in categories:
             categories_without_c = np.delete(categories, c)
-            random_new_categories = np.random.choice(categories_without_c, size=(node_features_to_flip == feature_ind).sum())
+            random_new_categories = np.random.choice(categories_without_c,
+                                                     size=(node_features_to_flip == feature_ind).sum())
             new_node_feature_categories[c] = random_new_categories
         new_node_features_categories[feature_ind] = new_node_feature_categories
     return new_node_features_categories
@@ -736,6 +744,7 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
                                                               'log_likelihood_hessian',
                                                               num_edges_per_job)
 
+
 def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
@@ -769,6 +778,7 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
     success: bool
         Whether the optimization was successful
     """
+
     # TODO: this code is duplicated, but the scoping of the nonlocal variables makes it not trivial to export out of
     #  the scope of each function using it.
     def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
@@ -813,8 +823,9 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
                            jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
                            callback=_after_optim_iteration_callback, method="Newton-CG")
         elif optimization_method == "L-BFGS-B":
-            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys), 
-                           jac=analytical_minus_log_like_grad_local, method="L-BFGS-B", callback=_after_optim_iteration_callback)
+            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
+                           jac=analytical_minus_log_like_grad_local, method="L-BFGS-B",
+                           callback=_after_optim_iteration_callback)
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
@@ -1079,7 +1090,7 @@ def generate_binomial_tensor(net_size, node_features_size, num_samples, p=0.5):
     """
     Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
     """
-    return np.random.binomial(1, p, (net_size, net_size+node_features_size, num_samples)).astype(np.int8)
+    return np.random.binomial(1, p, (net_size, net_size + node_features_size, num_samples)).astype(np.int8)
 
 
 def sample_from_independent_probabilities_matrix(probability_matrix, sample_size):
@@ -1117,18 +1128,20 @@ def split_network_for_bootstrapping(net_size: int, first_part_size: int, splitti
 def predict_multi_class_logistic_regression(Xs, thetas):
     return softmax(Xs @ thetas, axis=1)
 
+
 def minus_log_likelihood_multi_class_logistic_regression(thetas, Xs, ys):
     return -np.log(predict_multi_class_logistic_regression(Xs, thetas)[np.where(ys == 1)]).sum()
+
 
 def minus_log_likelihood_gradient_multi_class_logistic_regression(thetas, Xs, ys):
     prediction = predict_multi_class_logistic_regression(Xs, thetas)
     num_features = Xs.shape[-1]
     return -(ys - prediction).flatten() @ Xs.reshape(-1, num_features)
 
-def mple_reciprocity_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
-                                          initial_thetas: np.ndarray | None = None,
-                                          optimization_method: str = 'L-BFGS-B'):
 
+def mple_reciprocity_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
+                                                      initial_thetas: np.ndarray | None = None,
+                                                      optimization_method: str = 'L-BFGS-B'):
     def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
         nonlocal iteration
         iteration += 1
@@ -1160,3 +1173,48 @@ def mple_reciprocity_logistic_regression_optimization(metrics_collection, observ
             f"Unsupported optimization method: {optimization_method}. Options are: L-BFGS-B")
     pred = predict_multi_class_logistic_regression(Xs, thetas)
     return res.x, pred, res.success
+
+
+def convert_dyads_states_to_connectivity(dyads_states):
+    num_edges = dyads_states.shape[0]
+    # The solution for the equation n(n-1)=num_possible_edges
+    num_nodes = np.round((1 + np.sqrt(1 + 4 * num_edges)) / 2).astype(int)
+    indices = np.triu_indices(num_nodes, k=1)
+    network = np.zeros((num_nodes, num_nodes))
+    for i in range(num_edges):
+        is_upper = dyads_states[i, UPPER_IDX] or dyads_states[i, RECIPROCAL_IDX]
+        is_lower = dyads_states[i, LOWER_IDX] or dyads_states[i, RECIPROCAL_IDX]
+        if is_upper:
+            network[indices[0][i], indices[1][i]] = 1
+        if is_lower:
+            network[indices[1][i], indices[0][i]] = 1
+    return network
+
+
+def convert_dyads_state_indices_to_connectivity(dyads_states_indices):
+    num_edges = dyads_states_indices.shape[0]
+    num_nodes = np.round((1 + np.sqrt(1 + 4 * num_edges)) / 2).astype(int)
+    indices = np.triu_indices(num_nodes, k=1)
+    network = np.zeros((num_nodes, num_nodes))
+    for i in range(num_edges):
+        is_upper = dyads_states_indices[i] in [UPPER_IDX, RECIPROCAL_IDX]
+        is_lower = dyads_states_indices[i] in [LOWER_IDX, RECIPROCAL_IDX]
+        if is_upper:
+            network[indices[0][i], indices[1][i]] = 1
+        if is_lower:
+            network[indices[1][i], indices[0][i]] = 1
+    return network
+
+
+def sample_from_dyads_distribution(dyads_distributions, sample_size):
+    num_edges = dyads_distributions.shape[0]
+    # The solution for the equation n(n-1)=num_possible_edges
+    n_nodes = np.round((1 + np.sqrt(1 + 4 * num_edges)) / 2).astype(int)
+    dyads_states_indices_sample = np.zeros((num_edges, sample_size))
+    for i in range(num_edges):
+        dyads_states_indices_sample[i] = np.random.choice(np.arange(4), p=dyads_distributions[i], size=sample_size)
+
+    net_sample = np.zeros((n_nodes, n_nodes, sample_size))
+    for k in range(sample_size):
+        net_sample[:, :, k] = convert_dyads_state_indices_to_connectivity(dyads_states_indices_sample[:, k])
+    return net_sample

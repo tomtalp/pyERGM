@@ -1519,20 +1519,20 @@ class MetricsCollection:
         for i in range(self.n_nodes - 1):
             for j in range(i + 1, self.n_nodes):
                 if not observed_network[i, j] and not observed_network[j, i]:
-                    ys[idx, 0] = 1
+                    ys[idx, EMPTY_IDX] = 1
                 elif observed_network[i, j] and not observed_network[j, i]:
-                    ys[idx, 1] = 1
+                    ys[idx, UPPER_IDX] = 1
                 elif not observed_network[i, j] and observed_network[j, i]:
-                    ys[idx, 2] = 1
+                    ys[idx, LOWER_IDX] = 1
                 else:
-                    ys[idx, 3] = 1
+                    ys[idx, RECIPROCAL_IDX] = 1
 
                 change_score_i_j = self.calc_change_scores(zeros_net, {'edge': (i, j)})
                 net_with_i_j = zeros_net.copy()
                 net_with_i_j[i, j] = 1
-                Xs[idx, 1] = change_score_i_j
-                Xs[idx, 2] = self.calc_change_scores(zeros_net, {'edge': (j, i)})
-                Xs[idx, 3] = self.calc_change_scores(net_with_i_j, {'edge': (j, i)}) + change_score_i_j
+                Xs[idx, UPPER_IDX] = change_score_i_j
+                Xs[idx, LOWER_IDX] = self.calc_change_scores(zeros_net, {'edge': (j, i)})
+                Xs[idx, RECIPROCAL_IDX] = self.calc_change_scores(net_with_i_j, {'edge': (j, i)}) + change_score_i_j
 
                 idx += 1
         return Xs, ys
