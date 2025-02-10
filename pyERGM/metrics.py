@@ -1056,6 +1056,13 @@ class MetricsCollection:
         self.use_sparse_matrix = use_sparse_matrix
         self.requires_graph = any([x.requires_graph for x in self.metrics])
 
+        # Returns the number of features that are being calculated. Since a single metric might return more than one
+        # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
+        # on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count
+        # function
+        self.num_of_features = self.calc_num_of_features()
+        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
+
         self._fix_collinearity = fix_collinearity
         self.collinearity_fixer_sample_size = collinearity_fixer_sample_size
         if self._fix_collinearity:
@@ -1063,12 +1070,8 @@ class MetricsCollection:
                                     is_distributed=is_collinearity_distributed,
                                     num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5))
 
-        # Returns the number of features that are being calculated. Since a single metric might return more than one
-        # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
-        # on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count
-        # function
-        self.num_of_features = self.calc_num_of_features()
-        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
+        
+        
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
@@ -1185,6 +1188,9 @@ class MetricsCollection:
         
         self.num_of_features = self.calc_num_of_features()
 
+        # Re-calculate the number of features per metric after deleting a feature.
+        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])        
+
     def collinearity_fixer(self, sample_size=1000, nonzero_thr=10 ** -1, ratio_threshold=10 ** -6,
                            eigenvec_thr=10 ** -4, is_distributed=False, **kwargs):
         """
@@ -1195,8 +1201,6 @@ class MetricsCollection:
         """
         is_linearly_dependent = True
 
-        self.num_of_features = self.calc_num_of_features()
-
         # Sample networks from a maximum entropy distribution, for avoiding edge cases (such as a feature is 0 for
         # all networks in the sample).
         if not is_distributed:
@@ -1206,8 +1210,6 @@ class MetricsCollection:
                                                                                    num_samples_per_job=kwargs.get(
                                                                                        "num_samples_per_job", 5))
         while is_linearly_dependent:
-            self.num_of_features = self.calc_num_of_features()
-
             features_cov_mat = sample_features @ sample_features.T
 
             # Determine whether the matrix of features is invertible. If not - this means there is a non-trivial vector,
