@@ -540,3 +540,21 @@ class TestERGM(unittest.TestCase):
         expected_model_2_av_mat = 0.5 * np.ones((n_nodes, n_nodes))
         expected_model_2_av_mat[np.diag_indices(n_nodes)] = 0
         self.assertTrue(np.abs(model_2_av_mat - expected_model_2_av_mat).max() < 1e-10)
+    
+    def test_model_initialization_from_existing_params_(self):
+        np.random.seed(1234)
+        metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
+        n_nodes = sampson_matrix.shape[0]
+
+        mcmle_model = ERGM(n_nodes, metrics, is_directed=True)
+
+        model_params = mcmle_model.get_model_parameters()
+
+        new_model = ERGM(n_nodes, metrics, is_directed=True, initial_thetas=model_params)
+        
+        # If there's a problem with copying the parameters, this will throw an error.
+        new_model.generate_networks_for_sample(sample_size=10)
+
+
+
+
