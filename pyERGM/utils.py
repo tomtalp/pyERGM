@@ -1174,14 +1174,20 @@ def mple_reciprocity_logistic_regression_optimization(metrics_collection, observ
     pred = predict_multi_class_logistic_regression(Xs, thetas)
     return res.x, pred, res.success
 
+def num_dyads_to_num_nodes(num_dyads):
+    """
+    x = num_dyads
+    n(n-1) = 2*x
+    n^2-n-2x=0 --> n = \frac{1+\sqrt{1-4\cdot(-2x)}}{2}
+    """
+    return np.round((1 + np.sqrt(1 + 8 * num_dyads)) / 2).astype(int)
 
 def convert_dyads_states_to_connectivity(dyads_states):
-    num_edges = dyads_states.shape[0]
-    # The solution for the equation n(n-1)=num_possible_edges
-    num_nodes = np.round((1 + np.sqrt(1 + 4 * num_edges)) / 2).astype(int)
+    num_dyads = dyads_states.shape[0]
+    num_nodes = num_dyads_to_num_nodes(num_dyads)
     indices = np.triu_indices(num_nodes, k=1)
     network = np.zeros((num_nodes, num_nodes))
-    for i in range(num_edges):
+    for i in range(num_dyads):
         is_upper = dyads_states[i, UPPER_IDX] or dyads_states[i, RECIPROCAL_IDX]
         is_lower = dyads_states[i, LOWER_IDX] or dyads_states[i, RECIPROCAL_IDX]
         if is_upper:
@@ -1192,11 +1198,11 @@ def convert_dyads_states_to_connectivity(dyads_states):
 
 
 def convert_dyads_state_indices_to_connectivity(dyads_states_indices):
-    num_edges = dyads_states_indices.shape[0]
-    num_nodes = np.round((1 + np.sqrt(1 + 4 * num_edges)) / 2).astype(int)
+    num_dyads = dyads_states_indices.shape[0]
+    num_nodes = num_dyads_to_num_nodes(num_dyads)
     indices = np.triu_indices(num_nodes, k=1)
     network = np.zeros((num_nodes, num_nodes))
-    for i in range(num_edges):
+    for i in range(num_dyads):
         is_upper = dyads_states_indices[i] in [UPPER_IDX, RECIPROCAL_IDX]
         is_lower = dyads_states_indices[i] in [LOWER_IDX, RECIPROCAL_IDX]
         if is_upper:
@@ -1205,13 +1211,11 @@ def convert_dyads_state_indices_to_connectivity(dyads_states_indices):
             network[indices[1][i], indices[0][i]] = 1
     return network
 
-
 def sample_from_dyads_distribution(dyads_distributions, sample_size):
-    num_edges = dyads_distributions.shape[0]
-    # The solution for the equation n(n-1)=num_possible_edges
-    n_nodes = np.round((1 + np.sqrt(1 + 4 * num_edges)) / 2).astype(int)
-    dyads_states_indices_sample = np.zeros((num_edges, sample_size))
-    for i in range(num_edges):
+    num_dyads = dyads_distributions.shape[0]
+    n_nodes = num_dyads_to_num_nodes(num_dyads)
+    dyads_states_indices_sample = np.zeros((num_dyads, sample_size))
+    for i in range(num_dyads):
         dyads_states_indices_sample[i] = np.random.choice(np.arange(4), p=dyads_distributions[i], size=sample_size)
 
     net_sample = np.zeros((n_nodes, n_nodes, sample_size))
