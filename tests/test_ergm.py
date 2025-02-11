@@ -549,6 +549,7 @@ class TestERGM(unittest.TestCase):
 
     def test_sampson_MPLE_RECIPROCITY(self):
         np.random.seed(8765)
+    
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
         n_nodes = sampson_matrix.shape[0]
 
@@ -609,4 +610,13 @@ class TestERGM(unittest.TestCase):
         
         self.assertEqual(sampled_networks.shape, (n_nodes, n_nodes, sample_size))
         self.assertEqual(convergence_result["success"], True)
+
+    def test_model_initialization_from_existing_params_(self):
+        np.random.seed(1234)
+        model_params = mcmle_model.get_model_parameters()
+
+        new_model = ERGM(n_nodes, metrics, is_directed=True, initial_thetas=model_params)
+        
+        # If there's a problem with copying the parameters, this will throw an error.
+        new_model.generate_networks_for_sample(sample_size=10)
 
