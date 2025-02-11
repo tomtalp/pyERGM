@@ -1186,10 +1186,11 @@ class TestMetricsCollection(unittest.TestCase):
         n_nodes = W.shape[0]
 
         expected_statistics = [7, 2, 2, 2, 2, 1, 2, 3] # just a sanity check for the actual statistics
+
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
         statistics = collection.calculate_statistics(W)
         self.assertTrue(np.all(statistics == expected_statistics))
 
-        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
         X, y = collection.prepare_mple_reciprocity_data(W)
 
         # expected_X is an array of shape (6, 4, 8) - 6 dyads, 4 options per dyad, 8 p1 features after collinearity_fixer (10 before)
