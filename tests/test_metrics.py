@@ -1185,9 +1185,72 @@ class TestMetricsCollection(unittest.TestCase):
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
         n_nodes = W.shape[0]
 
+        expected_statistics = [7, 2, 2, 2, 2, 1, 2, 3] # just a sanity check for the actual statistics
+        statistics = collection.calculate_statistics(W)
+        self.assertTrue(np.all(statistics == expected_statistics))
+
         collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
         X, y = collection.prepare_mple_reciprocity_data(W)
-        print(1)
+
+        # expected_X is an array of shape (6, 4, 8) - 6 dyads, 4 options per dyad, 8 p1 features after collinearity_fixer (10 before)
+        # For each dyad we calculate its changescore for all 4 options, on all p1 features (i.e. a (4,8) matrix)
+        dyad_1_2_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 1, 0, 0, 0],
+            [1, 1, 0, 0, 0, 0, 0, 0],
+            [2, 1, 0, 0, 1, 0, 0, 1],
+        ])
+
+        dyad_1_3_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 1, 0, 0],
+            [1, 0, 1, 0, 0, 0, 0, 0],
+            [2, 0, 1, 0, 0, 1, 0, 1],
+        ])
+
+        dyad_1_4_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 1, 0],
+            [1, 0, 0, 1, 0, 0, 0, 0],
+            [2, 0, 0, 1, 0, 0, 1, 1],
+        ])
+
+        dyad_2_3_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 1, 0, 0, 0, 1, 0, 0],
+            [1, 0, 1, 0, 1, 0, 0, 0],
+            [2, 1, 1, 0, 1, 1, 0, 1],
+        ])
+
+        dyad_2_4_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 1, 0, 0, 0, 0, 1, 0],
+            [1, 0, 0, 1, 1, 0, 0, 0],
+            [2, 1, 0, 1, 1, 0, 1, 1],
+        ])
+
+        dyad_3_4_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 1, 0, 0, 0, 1, 0],
+            [1, 0, 0, 1, 0, 1, 0, 0],
+            [2, 0, 1, 1, 0, 1, 1, 1],
+        ])
+
+        expected_X = np.array([dyad_1_2_X, dyad_1_3_X, dyad_1_4_X, dyad_2_3_X, dyad_2_4_X, dyad_3_4_X])
+        self.assertTrue(np.all(X == expected_X))
+
+        # expected_dyads is an array of 4choose2 dyads, with a one-hot encoding of length 4.
+        # 0 = empty, 1 = i->j , 2 = j->i , 3=reciprocal
+        expected_dyads = np.array([
+            [0, 0, 0, 1],
+            [0, 0, 1, 0],
+            [1, 0, 0, 0],
+            [1, 0, 0, 0],
+            [0, 0, 0, 1],
+            [0, 0, 0, 1]
+        ])
+
+        self.assertTrue(np.all(y == expected_dyads))
 
 
     def test_get_parameter_names(self):
