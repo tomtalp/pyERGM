@@ -592,3 +592,21 @@ class TestERGM(unittest.TestCase):
             (expected_thetas - np.mean(expected_thetas)) ** 2)
         self.assertTrue(thetas_R_2 > 0.99)
         self.assertTrue(convergence_result["success"])
+    
+    def test_mple_reciprocity_sampling(self):
+        np.random.seed(8765)
+        metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
+        n_nodes = sampson_matrix.shape[0]
+
+        mcmle_model = ERGM(n_nodes, metrics, is_directed=True)
+
+        convergence_result = mcmle_model.fit(sampson_matrix,
+                                             optimization_scheme='MPLE_RECIPROCITY'
+                                             )
+
+        sample_size = 10
+        sampled_networks = mcmle_model.generate_networks_for_sample(sampling_method="exact", sample_size=sample_size)
+        
+        self.assertEqual(sampled_networks.shape, (n_nodes, n_nodes, sample_size))
+        self.assertEqual(convergence_result["success"], True)
+

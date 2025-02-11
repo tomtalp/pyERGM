@@ -5,6 +5,7 @@ import numpy as np
 
 from pyERGM.utils import *
 from pyERGM.metrics import *
+from pyERGM.datasets import sampson_matrix
 
 import networkx as nx
 import math
@@ -1173,6 +1174,21 @@ class TestMetricsCollection(unittest.TestCase):
         self.assertTrue(np.all(expected_mple_regressors[:expected_mple_regressors.shape[0] // 2] == Xs_half))
         self.assertTrue(np.all(expected_flattened_mat == ys_full))
         self.assertTrue(np.all(expected_flattened_mat[:expected_mple_regressors.shape[0] // 2] == ys_half))
+
+    def test_prepare_mple_reciprocity_data(self):
+        W = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [1, 0, 0, 1],
+            [0, 1, 1, 0]
+        ])
+        metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
+        n_nodes = W.shape[0]
+
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
+        X, y = collection.prepare_mple_reciprocity_data(W)
+        print(1)
+
 
     def test_get_parameter_names(self):
         n = 18
