@@ -5,7 +5,7 @@ from scipy.linalg import eigh
 
 from matplotlib import pyplot as plt
 import sys
-
+import math
 
 class GeneralUtilsTester(unittest.TestCase):
     def test_get_sorted_type_pairs(self):
@@ -29,6 +29,18 @@ class GeneralUtilsTester(unittest.TestCase):
 
         with self.assertRaises(IndexError):
             convert_flat_no_diag_idx_to_i_j([13], n)
+    
+    def test_num_dyads_to_num_nodes(self):
+        W = np.array([[0, 1, 0],
+                        [0, 0, 1],
+                        [1, 1, 0]])
+    
+        num_dyads = math.comb(W.shape[0], 2)
+
+        real_num_nodes = W.shape[0]
+        num_nodes = num_dyads_to_num_nodes(num_dyads)
+
+        self.assertEqual(real_num_nodes, num_nodes)
 
 
 class TestGreatestConvexMinorant(unittest.TestCase):
