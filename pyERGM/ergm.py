@@ -1,3 +1,4 @@
+import datetime
 import numpy as np
 from scipy.optimize import minimize, OptimizeResult
 from scipy.stats import f
@@ -61,6 +62,7 @@ class ERGM():
         self._n_nodes = n_nodes
         self._is_directed = is_directed
         self._is_distributed_optimization = is_distributed_optimization
+
         self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
                                                      use_sparse_matrix=use_sparse_matrix,
                                                      fix_collinearity=fix_collinearity and (initial_thetas is None),
@@ -68,6 +70,10 @@ class ERGM():
                                                      is_collinearity_distributed=self._is_distributed_optimization,
                                                      num_samples_per_job_collinearity_fixer=kwargs.get(
                                                          'num_samples_per_job_collinearity_fixer', 5))
+
+        self.n_node_features = self._metrics_collection.n_node_features
+        self.node_feature_names = self._metrics_collection.node_feature_names.copy()
+        self.node_features_n_categories = self._metrics_collection.node_features_n_categories.copy()
 
         if initial_thetas is not None:
             if type(initial_thetas) != dict:
@@ -106,6 +112,8 @@ class ERGM():
 
         self._exact_average_mat = None
 
+        self._exact_dyadic_distributions = None
+
         self.mh_sampler = NaiveMetropolisHastings(self._thetas, self._metrics_collection)
 
     def print_model_parameters(self):
@@ -118,7 +126,7 @@ class ERGM():
         print(f"Is directed: {self._is_directed}")
 
     def calculate_weight(self, W: np.ndarray):
-        if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] != self._n_nodes:
+        if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] < self._n_nodes:
             raise ValueError(f"The dimensions of the given adjacency matrix, {W.shape}, don't comply with the number of"
                              f" nodes in the network: {self._n_nodes}")
         features = self._metrics_collection.calculate_statistics(W)
@@ -139,16 +147,27 @@ class ERGM():
                                      burn_in=10000,
                                      mcmc_steps_per_sample=1000,
                                      sampling_method="metropolis_hastings",
-                                     edge_proposal_method='uniform'
+                                     edge_proposal_method='uniform',
+                                     edge_node_flip_ratio=None
                                      ):
         if sampling_method == "metropolis_hastings":
             if seed_network is None:
                 G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
-                seed_network = nx.to_numpy_array(G)
+                seed_connectivity_matrix = nx.to_numpy_array(G)
+                seed_neuron_features = np.zeros((self._n_nodes, self.n_node_features))
+                for feature_name, feature_indices in self.node_feature_names.items():
+                    for feature_index in feature_indices:
+                        seed_neuron_features[:, feature_index] = np.random.choice(
+                            self.node_features_n_categories[feature_name], size=self._n_nodes)
+                seed_network = np.concatenate((seed_connectivity_matrix, seed_neuron_features), axis=1)
+
             self.mh_sampler.set_thetas(self._thetas)
             return self.mh_sampler.sample(seed_network, sample_size, replace=replace, burn_in=burn_in,
                                           steps_per_sample=mcmc_steps_per_sample,
-                                          edge_proposal_method=edge_proposal_method)
+                                          edge_proposal_method=edge_proposal_method,
+                                          node_feature_names=self.node_feature_names,
+                                          node_features_n_categories=self.node_features_n_categories,
+                                          edge_node_flip_ratio=edge_node_flip_ratio)
         elif sampling_method == "exact":
             return self._generate_exact_sample(sample_size)
         else:
@@ -182,11 +201,11 @@ class ERGM():
         """
         print("MPLE")
         trained_thetas, prediction, success = mple_logistic_regression_optimization(self._metrics_collection,
-                                                                           observed_network,
-                                                                           is_distributed=self._is_distributed_optimization,
-                                                                           optimization_method=optimization_method,
-                                                                           num_edges_per_job=kwargs.get(
-                                                                               "num_edges_per_job", 100000))
+                                                                                    observed_network,
+                                                                                    is_distributed=self._is_distributed_optimization,
+                                                                                    optimization_method=optimization_method,
+                                                                                    num_edges_per_job=kwargs.get(
+                                                                                        "num_edges_per_job", 100000))
 
         self._exact_average_mat = self._rearrange_prediction_to_av_mat(prediction)
 
@@ -202,6 +221,17 @@ class ERGM():
             lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
             av_mat[lower_triangle_indices_aligned] = prediction
         return av_mat
+
+    def _mple_reciprocity_fit(self, observed_network, optimization_method: str = 'L-BFGS-B'):
+        print("MPLE_RECIPROCITY")
+        trained_thetas, prediction, success = mple_reciprocity_logistic_regression_optimization(
+            self._metrics_collection,
+            observed_network,
+            optimization_method=optimization_method)
+
+        self._exact_dyadic_distributions = prediction
+        return trained_thetas, success
+
 
     # TODO: decide how a getter for self._exact_average_mat fits in now - if the model is dyadic
     #  independent, the observed_network doesn't matter - predictions will be always the same, and this is the exact
@@ -232,13 +262,24 @@ class ERGM():
     def _generate_exact_sample(self, sample_size: int = 1):
         # TODO: support getting a flag of `replace` which will enable sampling with no replacements (generating samples
         #  of different networks).
-        if self._metrics_collection._has_dyadic_dependent_metrics:
-            raise ValueError("Cannot sample exactly from a model that is dyadic dependent!")
-        if self._exact_average_mat is None:
+        auto_optimization_scheme = self._metrics_collection.choose_optimization_scheme()
+        if auto_optimization_scheme == 'MCMLE':
+            # TODO: Actually we can sample for node metrics that are independent, but this is anyhow not implemented
+            #  right now, deal with that in the future.
+            raise ValueError("Cannot sample exactly from a model that has dependence that not comes from reciprocity or "
+                             "has node features!")
+        if self._exact_average_mat is None and self._exact_dyadic_distributions is None:
             raise ValueError("Cannot sample exactly from a model that is not trained! Call `model.fit()` and pass an "
                              "observed network!")
 
-        return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size)
+        if auto_optimization_scheme == 'MPLE':
+            return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size)
+        elif auto_optimization_scheme == 'MPLE_RECIPROCITY':
+            return sample_from_dyads_distribution(self._exact_dyadic_distributions, sample_size)
+        else:
+            raise ValueError(f"Received an unrecognized optimization scheme from "
+                             f"MetricsCollection.choose_optimization_scheme(): {auto_optimization_scheme}. "
+                             f"Options are supposed to be MPLE, MPLE_RECIPROCITY, MCMLE.")
 
     def fit(self, observed_network,
             lr=0.1,
@@ -251,17 +292,18 @@ class ERGM():
             max_nets_for_sample=1000,
             sample_pct_growth=0.02,
             optimization_method="newton_raphson",
-            convergence_criterion="hotelling",
+            convergence_criterion="model_bootstrap",
             cov_matrix_estimation_method="naive",
             cov_matrix_num_batches=25,
             hotelling_confidence=0.99,
             theta_init_method="mple",
-            no_mple=False,
             mcmc_burn_in=1000,
             mcmc_seed_network=None,
             mcmc_steps_per_sample=10,
             mcmc_sample_size=100,
             edge_proposal_method='uniform',
+            edge_node_flip_ratio=None,
+            observed_node_features=None,
             **kwargs
             ):
         """
@@ -270,8 +312,14 @@ class ERGM():
         Parameters
         ----------
         observed_network : np.ndarray
-            The adjacency matrix of the observed network. #TODO - how do we support nx.Graph?
-
+            The observed network connectivity matrix, with shape (n, n).
+        
+        observed_node_features: dict
+            Optional. A dictionary of node features. Each key is the name of the feature, and the value is a list of
+            `n` numbers representing the feature of every node. *Defaults to None*.
+            
+            e.g. - `observed_node_features = {"E_I": [[0, 1, 1, 1]]}`
+            
         lr : float
             Optional. The learning rate for the optimization. *Defaults to 0.1*
 
@@ -327,12 +375,9 @@ class ERGM():
             Optional. The confidence level for the Hotelling's T-squared test. *Defaults to 0.99*.
         
         theta_init_method : str
-            Optional. The method to initialize the theta values. Can be either "uniform" or "mple".
+            Optional. The method to initialize the theta values. Can be either "uniform", "mple" or "use_existing" (which uses the current thetas).
             The MPLE method can be used even for dyadic dependent models, since it serves as a good starting point for the MCMLE.
             *Defaults to "mple"*.
-
-        no_mple : bool
-            Optional. Whether to skip the MPLE step and go directly to MCMLE. *Defaults to False*.
         
         mcmc_burn_in : int
             Optional. The number of burn-in steps for the MCMC sampler. *Defaults to 1000*.
@@ -351,32 +396,72 @@ class ERGM():
             Optional. The method for the MCMC proposal distribution. This is defined as a distribution over the edges
             of the network, which implies how to choose a proposed graph out of all graphs that are 1-edge-away from the
             current graph. *Defaults to "uniform"*.
+
+        optimization_scheme: str
+            Optional. The optimization scheme to use. This can be:
+             "AUTO" - Automatically choose the scheme, according to the specification bellow of the conditions by which
+                each scheme holds.
+             "MPLE" - Maximum-Pseudo-Likelihood - formalizing the problem as a binary logistic regression.
+                This holds only when all edges are independent ("dyadic independent model").
+             "MPLE_RECIPROCITY" - Maximum-Pseudo-Likelihood w/ Reciprocity - formalizing the problem as a multy-class
+                logistic regression. This holds only when the only statistical dependence is between reciprocal pairs
+                of edges in a directed graph ((i,j) depends only on (j,i) for all 1<i<j<n).
+             "MCMLE" - Markov-Chain-Monte-Carlo-Maximum-Likelihood-Estimation - maximize the likelihood by estimating
+                the gradient and hessian using MCMC sampling algorithms. This always holds in theory.
         
         Returns 
         -------
         (grads, hotelling_statistics) : (np.ndarray, list)
         # TODO - what do we want to return?
         """
+        # Create the full observed network from adjacency matrix and node features:
+        if observed_node_features is not None:
+            ordered_observed_node_features = [observed_node_features[fname] for fname in self.node_feature_names.keys()]
+            ordered_observed_node_features = [one_d_f for f in ordered_observed_node_features for one_d_f in f]
+            ordered_observed_node_features = np.array(ordered_observed_node_features).T
+            observed_network = np.concatenate([observed_network, ordered_observed_node_features], axis=1)
+
         # This is because we assume the sample size is even when estimating the covariance matrix (in
         # calc_capital_gammas).
         if mcmc_sample_size % 2 != 0:
             mcmc_sample_size += 1
 
+        # TODO: this is ugly
+        is_theta_init = False
         if theta_init_method == "use_existing":
             print(f"Using existing thetas")
-            pass
-        elif not no_mple and self._do_MPLE(theta_init_method):
-            self._thetas, success = self._mple_fit(observed_network,
-                                          optimization_method=kwargs.get('mple_optimization_method', 'L-BFGS-B'),
-                                          num_edges_per_job=kwargs.get('num_edges_per_job', 100000))
-
-            if not self._metrics_collection._has_dyadic_dependent_metrics:
-                print(f"Model is dyadic independent - using only MPLE instead of MCMLE")
-                return {"success": success}
-
+            is_theta_init = True
         elif theta_init_method == "uniform":
             self._thetas = self._get_random_thetas(sampling_method="uniform")
-        else:
+            is_theta_init = True
+
+        optimization_scheme = kwargs.get("optimization_scheme", "AUTO")
+        if optimization_scheme == "AUTO":
+            optimization_scheme = self._metrics_collection.choose_optimization_scheme()
+        if optimization_scheme == "MPLE" or (theta_init_method == 'mple' and optimization_scheme == 'MCMLE'):
+            self._thetas, success = self._mple_fit(observed_network,
+                                                   optimization_method=kwargs.get('mple_optimization_method',
+                                                                                  'L-BFGS-B'),
+                                                   num_edges_per_job=kwargs.get('num_edges_per_job', 100000))
+            if optimization_scheme == "MPLE":
+                print(f"Done training model using MPLE")
+                return {"success": success}
+            is_theta_init = True
+        elif optimization_scheme == "MPLE_RECIPROCITY":
+            if not self._is_directed:
+                raise ValueError("There is not meaning for reciprocity in undirected graphs, "
+                                 "can't perform MPLE_RECIPROCITY optimization.")
+            self._thetas, success = self._mple_reciprocity_fit(observed_network,
+                                                               optimization_method=kwargs.get(
+                                                                   'mple_optimization_method',
+                                                                   'L-BFGS-B'))
+            print(f"Done training model using MPLE_RECIPROCITY")
+            return {"success": success}
+        elif optimization_scheme != "MCMLE":
+            raise ValueError(f"Optimization scheme not supported: {optimization_scheme}. "
+                             f"Options are: AUTO, MPLE, MPLE_RECIPROCITY, MCMLE")
+
+        if not is_theta_init:
             raise ValueError(f"Theta initialization method {theta_init_method} not supported")
 
         if optimization_method not in ["newton_raphson", "gradient_descent"]:
@@ -402,18 +487,14 @@ class ERGM():
             inv_observed_covariance = np.linalg.inv(observed_covariance)
 
         print(f"Initial thetas - {self._thetas}")
-        print("optimization started")
+        print(f"{datetime.datetime.now()} optimization started")
 
         self.optimization_start_time = time.time()
         num_of_features = self._metrics_collection.num_of_features
 
         grads = np.zeros((opt_steps, num_of_features))
 
-        if convergence_criterion == "hotelling":
-            hotelling_critical_value = f.ppf(1 - hotelling_confidence, num_of_features,
-                                             mcmc_sample_size - num_of_features)  # F(p, n-p) TODO - doc this better
-
-        if mcmc_seed_network is None:
+        if mcmc_seed_network is None and self._exact_average_mat is not None:
             probabilities_matrix = self.get_mple_prediction(observed_network)
             mcmc_seed_network = sample_from_independent_probabilities_matrix(probabilities_matrix, 1)
             mcmc_seed_network = mcmc_seed_network[:, :, 0]
@@ -424,7 +505,8 @@ class ERGM():
             networks_for_sample = self.generate_networks_for_sample(sample_size=mcmc_sample_size,
                                                                     seed_network=mcmc_seed_network, burn_in=burn_in,
                                                                     mcmc_steps_per_sample=mcmc_steps_per_sample,
-                                                                    edge_proposal_method=edge_proposal_method)
+                                                                    edge_proposal_method=edge_proposal_method,
+                                                                    edge_node_flip_ratio=edge_node_flip_ratio)
             mcmc_seed_network = networks_for_sample[:, :, -1]
 
             features_of_net_samples = self._metrics_collection.calculate_sample_statistics(networks_for_sample)
@@ -435,13 +517,14 @@ class ERGM():
             if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):
                 # This is for allowing numba to compile and pickle the large function
                 sys.setrecursionlimit(2000)
-                print(f"Started estimating cov matrix ")
+                print(f"{datetime.datetime.now()} Started estimating cov matrix ")
                 estimated_cov_matrix = covariance_matrix_estimation(features_of_net_samples,
                                                                     mean_features,
                                                                     method=cov_matrix_estimation_method,
                                                                     num_batches=cov_matrix_num_batches)
-                print(f"Done estimating cov matrix ")
+                print(f"{datetime.datetime.now()} Done estimating cov matrix ")
                 inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
+                print(f"{datetime.datetime.now()} Done inverting cov matrix ")
             if optimization_method == "newton_raphson":
                 self._thetas = self._thetas - lr * inv_estimated_cov_matrix @ grad
 
@@ -475,12 +558,16 @@ class ERGM():
                     sliding_grad_window_k = np.min(
                         [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
+            print(f"{datetime.datetime.now()} Starting to test for convergence")
             convergence_tester = ConvergenceTester()
 
             if convergence_criterion == "hotelling":
-                convergence_result = convergence_tester.hotelling(observed_features, mean_features, inv_estimated_cov_matrix, mcmc_sample_size, hotelling_confidence)
-
-                if convergence_result["success"]:
+                print(f"{datetime.datetime.now()} \t Starting a `hotelling` test")
+                convergence_results = convergence_tester.hotelling(observed_features, mean_features,
+                                                                   inv_estimated_cov_matrix, mcmc_sample_size,
+                                                                   hotelling_confidence)
+                print(f"{datetime.datetime.now()} \t DONE with `hotelling` test")
+                if convergence_results["success"]:
                     print(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE! ")
                     grads = grads[:i]
                     break
@@ -492,15 +579,14 @@ class ERGM():
 
                     # TODO - implement `convergence_results` for this kind of convergence
                     break
-                
+
             elif convergence_criterion == "observed_bootstrap":
                 confidence = kwargs.get("bootstrap_convergence_confidence", 0.95)
                 stds_away_thr = kwargs.get("bootstrap_convergence_stds_away_thr", 1)
 
                 convergence_results = convergence_tester.bootstrapped_mahalanobis_from_observed(
                     observed_features,
-                    networks_for_sample,
-                    self._metrics_collection,
+                    features_of_net_samples,
                     inv_observed_covariance,
                     num_subsamples=kwargs.get("num_model_sub_samples", 100),
                     subsample_size=kwargs.get("model_subsample_size", 1000),
@@ -514,25 +600,28 @@ class ERGM():
                           f"the data, according to the estimated data variability DONE! ")
                     grads = grads[:i]
                     break
-            elif convergence_criterion == "model_bootstrap":            
+            elif convergence_criterion == "model_bootstrap":
+                print(f"{datetime.datetime.now()} \t Starting a `model_bootstrap` test")
                 convergence_results = convergence_tester.bootstrapped_mahalanobis_from_model(
                     observed_features,
-                    networks_for_sample,
-                    self._metrics_collection,
+                    features_of_net_samples,
                     num_subsamples=kwargs.get("num_model_sub_samples", 100),
                     subsample_size=kwargs.get("model_subsample_size", 1000),
                     confidence=kwargs.get("bootstrap_convergence_confidence", 0.95),
                     stds_away_thr=kwargs.get("bootstrap_convergence_stds_away_thr", 1),
-                )     
-
+                )
+                print(f"{datetime.datetime.now()} \t DONE with `model_bootstrap` test")
                 if convergence_results["success"]:
-                    print(f"Reached a confidence of {kwargs.get('bootstrap_convergence_confidence', 0.95)} with the bootstrap convergence "
-                          f"test! The model is likely to be up to {kwargs.get('bootstrap_convergence_stds_away_thr', 1)} stds from "
-                          f"the data, according to the estimated data variability DONE! ")
+                    print(
+                        f"Reached a confidence of {kwargs.get('bootstrap_convergence_confidence', 0.95)} with the bootstrap convergence "
+                        f"test! The model is likely to be up to {kwargs.get('bootstrap_convergence_stds_away_thr', 1)} stds from "
+                        f"the data, according to the estimated data variability DONE! ")
                     grads = grads[:i]
                     break
             else:
                 raise ValueError(f"Convergence criterion {convergence_criterion} not defined")
+
+            sys.stdout.flush()
 
         self._last_mcmc_chain_features = features_of_net_samples
 
@@ -545,9 +634,9 @@ class ERGM():
         Parameters
         ----------
         sampled_networks : np.ndarray
-            Optional. A (n, n, k) tensor of sampled networks. If not provided, the last chain is used.
+            Optional. A (n, n+k, sample_size) tensor of sampled networks. If not provided, the last chain is used.
         observed_network : np.ndarray
-            Optional. The adjacency matrix of the observed network. If provided, the traces of the features across the
+            Optional. The network matrix of the observed network. If provided, the traces of the features across the
             chain are normalized based on the observed network features.
         """
         if sampled_networks is not None:
@@ -723,44 +812,42 @@ class BruteForceERGM(ERGM):
         return res
 
 
-class ConvergenceTester():
+class ConvergenceTester:
     def __init__(self):
         pass
-    
-    def _get_subsample_features(self, sampled_networks, num_subsamples, subsample_size, metrics_collection: MetricsCollection):
+
+    @staticmethod
+    def _get_subsample_features(sampled_networks_features, num_subsamples, subsample_size):
         """
         Receives a sample of networks, and subsample for `num_subsamples` times, each time with `subsample_size` networks.
         For each subsample, calculates the sample statistics and reshapes the result to a tensor of shape (num_of_features, num_subsamples, subsample_size).
 
         Parameters
         ----------
-        sampled_networks : np.ndarray
-            A sample of networks that will be used for subsampling
+        sampled_networks_features : np.ndarray
+            Features of a sample of networks that will be used for subsampling
         
         num_subsamples : int
             The number of subsamples to draw from the sample.
         
         subsample_size : int
             The size of each subsample.
-        
-        metrics_collection : MetricsCollection
-            The collection of metrics used for calculating the features.
     
         Returns
         -------
         sub_samples_features : np.ndarray
             A tensor of shape (num_of_features, num_subsamples, subsample_size) containing the features of all subsamples.
         """
-        sample_size = sampled_networks.shape[2]
+        sample_size = sampled_networks_features.shape[1]
 
         sub_sample_indices = np.random.choice(np.arange(sample_size), size=num_subsamples * subsample_size)
-        sub_samples = sampled_networks[:, :, sub_sample_indices]
-        sub_samples_features = metrics_collection.calculate_sample_statistics(sub_samples)
+        sub_samples_features = sampled_networks_features[:, sub_sample_indices]
         sub_samples_features = sub_samples_features.reshape(-1, num_subsamples, subsample_size)
 
         return sub_samples_features
 
-    def hotelling(self, observed_features, mean_features, inverted_sample_cov_matrix, sample_size, confidence=0.99):
+    @staticmethod
+    def hotelling(observed_features, mean_features, inverted_sample_cov_matrix, sample_size, confidence=0.99):
         """
         Run the Hotelling's T-squared test for convergence.
 
@@ -797,8 +884,8 @@ class ConvergenceTester():
         num_of_features = observed_features.shape[0]
 
         hotelling_as_f_statistic = ((sample_size - num_of_features) / (
-                        num_of_features * (sample_size - 1))) * hotelling_t_statistic
-    
+                num_of_features * (sample_size - 1))) * hotelling_t_statistic
+
         hotelling_critical_value = f.ppf(1 - confidence, num_of_features, sample_size - num_of_features)
 
         return {
@@ -806,16 +893,16 @@ class ConvergenceTester():
             "statistic": hotelling_as_f_statistic,
             "threshold": hotelling_critical_value
         }
-        
-    def bootstrapped_mahalanobis_from_observed(self,
-                                    observed_features, 
-                                    sampled_networks,
-                                    metrics_collection, 
-                                    inverted_observed_cov_matrix, 
-                                    num_subsamples=100,
-                                    subsample_size=1000,
-                                    confidence=0.95,
-                                    stds_away_thr=1):
+
+    @staticmethod
+    def bootstrapped_mahalanobis_from_observed(
+            observed_features,
+            sampled_networks_features,
+            inverted_observed_cov_matrix,
+            num_subsamples=100,
+            subsample_size=1000,
+            confidence=0.95,
+            stds_away_thr=1):
         """
         Repeatedly subsample from a sample of networks, and calculate the distance between the subsample mean
         and the observed features. The distance is calculated using the Mahalanobis distance, with the covariance matrix
@@ -824,13 +911,15 @@ class ConvergenceTester():
         """
         mahalanobis_dists = np.zeros(num_subsamples)
 
-        sub_samples_features = self._get_subsample_features(sampled_networks, num_subsamples, subsample_size, metrics_collection)
+        sub_samples_features = ConvergenceTester._get_subsample_features(sampled_networks_features, num_subsamples,
+                                                                         subsample_size)
         mean_per_subsample = sub_samples_features.mean(axis=2)
 
         for cur_subsam_idx in range(num_subsamples):
             cur_subsample_mean = mean_per_subsample[:, cur_subsam_idx]
-            mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, cur_subsample_mean, inverted_observed_cov_matrix)
-        
+            mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, cur_subsample_mean,
+                                                            inverted_observed_cov_matrix)
+
         empirical_threshold = np.quantile(mahalanobis_dists, confidence)
 
         return {
@@ -839,14 +928,14 @@ class ConvergenceTester():
             "threshold": stds_away_thr
         }
 
-    def bootstrapped_mahalanobis_from_model(self,
-                                    observed_features, 
-                                    sampled_networks,
-                                    metrics_collection, 
-                                    num_subsamples=100,
-                                    subsample_size=1000,
-                                    confidence=0.95,
-                                    stds_away_thr=1):
+    @staticmethod
+    def bootstrapped_mahalanobis_from_model(
+            observed_features,
+            sampled_networks_features,
+            num_subsamples=100,
+            subsample_size=1000,
+            confidence=0.95,
+            stds_away_thr=1):
         """
         Repeatedly subsample from a collection of networks sampled from the model (`sampled_networks`), and calculate the Mahalanobis distance 
         between each subsample mean and the observed network. This is equivalent to generating multiple estimations of the model mean & covariance.
@@ -858,11 +947,8 @@ class ConvergenceTester():
         observed_features : np.ndarray
             The observed features of the network.
         
-        sampled_networks : np.ndarray
-            The networks sampled from the model.
-        
-        metrics_collection : MetricsCollection
-            The collection of metrics used for calculating the features.
+        sampled_networks_features : np.ndarray
+            Features of networks sampled from the model.
         
         num_subsamples : int
             The number of subsamples to draw. *Defaults to 100*.
@@ -878,15 +964,18 @@ class ConvergenceTester():
         """
         mahalanobis_dists = np.zeros(num_subsamples)
 
-        sub_samples_features = self._get_subsample_features(sampled_networks, num_subsamples, subsample_size, metrics_collection)
+        sub_samples_features = ConvergenceTester._get_subsample_features(sampled_networks_features, num_subsamples,
+                                                                         subsample_size)
 
         for cur_subsam_idx in range(num_subsamples):
+            print(
+                f"{datetime.datetime.now()} [model_bootstrap] \t\t Working on subsample {cur_subsam_idx}/{num_subsamples}")
             sub_sample = sub_samples_features[:, cur_subsam_idx, :]
             sub_sample_mean = sub_sample.mean(axis=1)
             model_covariance_matrix = covariance_matrix_estimation(sub_sample, sub_sample_mean, method="naive")
             inv_model_cov_matrix = np.linalg.pinv(model_covariance_matrix)
             mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, sub_sample_mean, inv_model_cov_matrix)
-        
+
         empirical_threshold = np.quantile(mahalanobis_dists, confidence)
 
         return {

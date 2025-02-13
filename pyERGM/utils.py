@@ -6,6 +6,7 @@ import networkx as nx
 from numba import njit, objmode
 from scipy.spatial.distance import mahalanobis
 from scipy.optimize import minimize, OptimizeResult
+from scipy.special import softmax
 import torch
 import random
 import time
@@ -23,6 +24,12 @@ DONE_IDX = 5
 EXIT_IDX = 7
 
 LSF_ID_LIST_LEN_LIMIT = 100
+
+# Dyad states indexing convention
+EMPTY_IDX = 0
+UPPER_IDX = 1
+LOWER_IDX = 2
+RECIPROCAL_IDX = 3
 
 
 def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
@@ -174,6 +181,40 @@ def get_uniform_random_edges_to_flip(num_nodes, num_pairs):
     edges_to_flip[1, :] = (edges_to_flip[0, :] - diff) % num_nodes
 
     return edges_to_flip
+
+
+def get_uniform_random_nodes_to_flip(num_nodes, num_flips):
+    """
+    Create a vector of size num_flips, where each entry represents a node we wish to flip.
+    The nodes are sampled randomly.
+    """
+
+    nodes_to_flip = np.random.choice(num_nodes, size=num_flips)
+
+    return nodes_to_flip
+
+
+def get_uniform_random_new_node_feature_categories(node_features_to_flip, node_features_inds_to_n_categories):
+    """
+    Create a dictionary of all the possible category flips for the predetermined node features.
+    keys are node features indices, and values are dictionaries with the key being a category, and the value being
+    random new categories (excluding the current category) - a vector of size of the number of appearances of the
+    feature in the random feature flips array given as input. Each entry represents the new category to flip to.
+    Totally, we save num_flips x (mean_num_categories - 1) numbers.
+    The categories are sampled randomly.
+    """
+
+    new_node_features_categories = {}
+    for feature_ind, n_categories in node_features_inds_to_n_categories.items():
+        categories = np.arange(n_categories)
+        new_node_feature_categories = {}
+        for c in categories:
+            categories_without_c = np.delete(categories, c)
+            random_new_categories = np.random.choice(categories_without_c,
+                                                     size=(node_features_to_flip == feature_ind).sum())
+            new_node_feature_categories[c] = random_new_categories
+        new_node_features_categories[feature_ind] = new_node_feature_categories
+    return new_node_features_categories
 
 
 def convert_flat_no_diag_idx_to_i_j(flat_no_diag_idx: Collection[int], full_mat_size: int) -> np.ndarray[int]:
@@ -738,7 +779,9 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         Whether the optimization was successful
     """
 
-    def after_iteration_callback(intermediate_result: OptimizeResult):
+    # TODO: this code is duplicated, but the scoping of the nonlocal variables makes it not trivial to export out of
+    #  the scope of each function using it.
+    def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
         nonlocal iteration
         iteration += 1
         cur_time = time.time()
@@ -778,10 +821,11 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         if optimization_method == "Newton-CG":
             res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
                            jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
-                           callback=after_iteration_callback, method="Newton-CG")
+                           callback=_after_optim_iteration_callback, method="Newton-CG")
         elif optimization_method == "L-BFGS-B":
-            res = minimize(numerically_stable_minus_log_like_and_grad_local, thetas, args=(Xs, ys), jac=True,
-                           method="L-BFGS-B", callback=after_iteration_callback)
+            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
+                           jac=analytical_minus_log_like_grad_local, method="L-BFGS-B",
+                           callback=_after_optim_iteration_callback)
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
@@ -794,7 +838,7 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
             res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
                            jac=analytical_minus_log_like_grad_distributed,
                            hess=analytical_minus_log_likelihood_hessian_distributed,
-                           callback=after_iteration_callback, method="Newton-CG")
+                           callback=_after_optim_iteration_callback, method="Newton-CG")
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method} for distributed optimization. "
@@ -1042,11 +1086,11 @@ def _parse_sent_job_array_ids(process_stdout) -> list:
     return job_array_ids
 
 
-def generate_binomial_tensor(net_size, num_samples, p=0.5):
+def generate_binomial_tensor(net_size, node_features_size, num_samples, p=0.5):
     """
     Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
     """
-    return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)
+    return np.random.binomial(1, p, (net_size, net_size + node_features_size, num_samples)).astype(np.int8)
 
 
 def sample_from_independent_probabilities_matrix(probability_matrix, sample_size):
@@ -1079,3 +1123,102 @@ def split_network_for_bootstrapping(net_size: int, first_part_size: int, splitti
         (net_size - first_part_size, 1))
 
     return first_part_indices, second_part_indices
+
+
+def predict_multi_class_logistic_regression(Xs, thetas):
+    return softmax(Xs @ thetas, axis=1)
+
+
+def minus_log_likelihood_multi_class_logistic_regression(thetas, Xs, ys):
+    return -np.log(predict_multi_class_logistic_regression(Xs, thetas)[np.where(ys == 1)]).sum()
+
+
+def minus_log_likelihood_gradient_multi_class_logistic_regression(thetas, Xs, ys):
+    prediction = predict_multi_class_logistic_regression(Xs, thetas)
+    num_features = Xs.shape[-1]
+    return -(ys - prediction).flatten() @ Xs.reshape(-1, num_features)
+
+
+def mple_reciprocity_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
+                                                      initial_thetas: np.ndarray | None = None,
+                                                      optimization_method: str = 'L-BFGS-B'):
+    def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
+        nonlocal iteration
+        iteration += 1
+        cur_time = time.time()
+        print(f'iteration: {iteration}, time from start '
+              f'training: {cur_time - start_time} '
+              f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
+        sys.stdout.flush()
+
+    iteration = 0
+    start_time = time.time()
+    print("optimization started")
+    sys.stdout.flush()
+
+    Xs, ys = metrics_collection.prepare_mple_reciprocity_data(observed_network)
+
+    num_features = metrics_collection.calc_num_of_features()
+    if initial_thetas is None:
+        thetas = np.random.rand(num_features)
+    else:
+        thetas = initial_thetas.copy()
+
+    if optimization_method == "L-BFGS-B":
+        res = minimize(minus_log_likelihood_multi_class_logistic_regression, thetas, args=(Xs, ys),
+                       jac=minus_log_likelihood_gradient_multi_class_logistic_regression, method="L-BFGS-B",
+                       callback=_after_optim_iteration_callback)
+    else:
+        raise ValueError(
+            f"Unsupported optimization method: {optimization_method}. Options are: L-BFGS-B")
+    pred = predict_multi_class_logistic_regression(Xs, thetas)
+    return res.x, pred, res.success
+
+def num_dyads_to_num_nodes(num_dyads):
+    """
+    x = num_dyads
+    n(n-1) = 2*x
+    n^2-n-2x=0 --> n = \frac{1+\sqrt{1-4\cdot(-2x)}}{2}
+    """
+    return np.round((1 + np.sqrt(1 + 8 * num_dyads)) / 2).astype(int)
+
+def convert_dyads_states_to_connectivity(dyads_states):
+    num_dyads = dyads_states.shape[0]
+    num_nodes = num_dyads_to_num_nodes(num_dyads)
+    indices = np.triu_indices(num_nodes, k=1)
+    network = np.zeros((num_nodes, num_nodes))
+    for i in range(num_dyads):
+        is_upper = dyads_states[i, UPPER_IDX] or dyads_states[i, RECIPROCAL_IDX]
+        is_lower = dyads_states[i, LOWER_IDX] or dyads_states[i, RECIPROCAL_IDX]
+        if is_upper:
+            network[indices[0][i], indices[1][i]] = 1
+        if is_lower:
+            network[indices[1][i], indices[0][i]] = 1
+    return network
+
+
+def convert_dyads_state_indices_to_connectivity(dyads_states_indices):
+    num_dyads = dyads_states_indices.shape[0]
+    num_nodes = num_dyads_to_num_nodes(num_dyads)
+    indices = np.triu_indices(num_nodes, k=1)
+    network = np.zeros((num_nodes, num_nodes))
+    for i in range(num_dyads):
+        is_upper = dyads_states_indices[i] in [UPPER_IDX, RECIPROCAL_IDX]
+        is_lower = dyads_states_indices[i] in [LOWER_IDX, RECIPROCAL_IDX]
+        if is_upper:
+            network[indices[0][i], indices[1][i]] = 1
+        if is_lower:
+            network[indices[1][i], indices[0][i]] = 1
+    return network
+
+def sample_from_dyads_distribution(dyads_distributions, sample_size):
+    num_dyads = dyads_distributions.shape[0]
+    n_nodes = num_dyads_to_num_nodes(num_dyads)
+    dyads_states_indices_sample = np.zeros((num_dyads, sample_size))
+    for i in range(num_dyads):
+        dyads_states_indices_sample[i] = np.random.choice(np.arange(4), p=dyads_distributions[i], size=sample_size)
+
+    net_sample = np.zeros((n_nodes, n_nodes, sample_size))
+    for k in range(sample_size):
+        net_sample[:, :, k] = convert_dyads_state_indices_to_connectivity(dyads_states_indices_sample[:, k])
+    return net_sample

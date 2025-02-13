@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="pyERGM",
-    version="0.1.3",
+    version="0.2.1",
     description="Exponential Random Graph Models in Python",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",

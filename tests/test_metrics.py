@@ -5,6 +5,7 @@ import numpy as np
 
 from pyERGM.utils import *
 from pyERGM.metrics import *
+from pyERGM.datasets import sampson_matrix
 
 import networkx as nx
 import math
@@ -724,6 +725,71 @@ class TestSumDistancesConnectedNeurons(unittest.TestCase):
         self.assertTrue(np.all(metric_5.calculate_mple_regressors(W, indices_lims) == expected_regressors_5))
 
 
+class TestNumberOfNodesPerType(unittest.TestCase):
+    def test_calculate(self):
+        V = np.array([[1, 0],
+                      [2, 1],
+                      [1, 1],
+                      [0, 2]]) # n=4, k=2
+
+        expected_num_neurons_per_type = np.array([1, 2, 1])
+        metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
+        calculated_num_neurons_per_type = metric.calculate(V[:, [0]])
+        self.assertTrue(np.all(expected_num_neurons_per_type[:-1] == calculated_num_neurons_per_type))
+
+    def test_calculate_for_sample(self):
+        n = 4
+        sample_size = 2
+        V1 = np.array([[1, 0],
+                       [2, 1],
+                       [1, 1],
+                       [0, 2]])
+        V2 = np.array([[2, 0],
+                       [0, 1],
+                       [0, 1],
+                       [0, 1]])
+
+        expected_num_neurons_per_type = np.array([
+            [1, 2, 1],
+            [3, 0, 1]
+        ]).T
+
+        sample = np.zeros((n, 1, sample_size), dtype=int)
+        sample[:, :, 0] = V1[:, [0]]
+        sample[:, :, 1] = V2[:, [0]]
+        metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
+        calculated_num_neurons_per_type = metric.calculate_for_sample(sample)
+        self.assertTrue(np.all(expected_num_neurons_per_type[:-1] == calculated_num_neurons_per_type))
+
+    def test_calc_change_score(self):
+        V1 = np.array([[1, 0],
+                       [2, 1],
+                       [1, 1],
+                       [0, 2]])
+        V2 = np.array([[2, 0],
+                       [0, 1],
+                       [0, 1],
+                       [0, 1]])
+
+        metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
+
+        calculated_change_score = metric.calc_change_score(V1[:, [0]], idx=2, new_category=0)
+        expected_change_score = np.array([1, -1, 0])
+        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
+
+        calculated_change_score = metric.calc_change_score(V1[:, [1]], idx=0, new_category=2)
+        expected_change_score = np.array([-1, 0, 1])
+        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
+
+        calculated_change_score = metric.calc_change_score(V2[:, [0]], idx=1, new_category=1)
+        expected_change_score = np.array([-1, 1, 0])
+        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
+
+        calculated_change_score = metric.calc_change_score(V2[:, [1]], idx=0, new_category=1)
+        expected_change_score = np.array([-1, 1, 0])
+        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
+
+
 class TestMetricsCollection(unittest.TestCase):
 
     def test_get_effective_feature_count(self):
@@ -942,6 +1008,37 @@ class TestMetricsCollection(unittest.TestCase):
 
         np.testing.assert_array_equal(stats, expected_stats)
 
+    def test_calculate_statistics_with_node_features(self):
+        # Test undirected graphs
+        metrics = [NumberOfEdgesUndirected(), NumberOfTriangles()]
+        collection = MetricsCollection(metrics, is_directed=False, n_nodes=3)
+
+        # Now, W is an (n, n+k) with n=3, k=2. Result shouldn't change.
+        W = np.array([
+            [0, 1, 1, 1, 2],
+            [1, 0, 1, 0, 1],
+            [1, 1, 0, 1, 0]
+        ])
+
+        stats = collection.calculate_statistics(W)
+        expected_stats = np.array([3, 1])
+
+        np.testing.assert_array_equal(stats, expected_stats)
+
+        # Test directed graphs
+        metrics = [NumberOfEdgesDirected()]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=3)
+        W = np.array([
+            [0, 1, 0],
+            [1, 0, 1],
+            [1, 0, 0]
+        ])
+
+        stats = collection.calculate_statistics(W)
+        expected_stats = np.array([4])
+
+        np.testing.assert_array_equal(stats, expected_stats)
+
     def test_get_num_of_features(self):
         n = 4
         metrics = [NumberOfEdgesUndirected(), NumberOfTriangles()]
@@ -979,7 +1076,10 @@ class TestMetricsCollection(unittest.TestCase):
         ])
 
         flipped_indices = (2, 0)
-        result = collection.calc_change_scores(W1, indices=flipped_indices)
+        edge_flip_info = {
+            'edge': flipped_indices
+        }
+        result = collection.calc_change_scores(W1, edge_flip_info=edge_flip_info)
 
         # 1st is -1 because we lost an edge, and 3rd entry is -1 because node #2 lost it's reciprocity
         expected_result = [-1, 0, -1, 0]
@@ -1074,6 +1174,85 @@ class TestMetricsCollection(unittest.TestCase):
         self.assertTrue(np.all(expected_mple_regressors[:expected_mple_regressors.shape[0] // 2] == Xs_half))
         self.assertTrue(np.all(expected_flattened_mat == ys_full))
         self.assertTrue(np.all(expected_flattened_mat[:expected_mple_regressors.shape[0] // 2] == ys_half))
+
+    def test_prepare_mple_reciprocity_data(self):
+        W = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 1],
+            [1, 0, 0, 1],
+            [0, 1, 1, 0]
+        ])
+        metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
+        n_nodes = W.shape[0]
+
+        expected_statistics = [7, 2, 2, 2, 2, 1, 2, 3] # just a sanity check for the actual statistics
+
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
+        statistics = collection.calculate_statistics(W)
+        self.assertTrue(np.all(statistics == expected_statistics))
+
+        X, y = collection.prepare_mple_reciprocity_data(W)
+
+        # expected_X is an array of shape (6, 4, 8) - 6 dyads, 4 options per dyad, 8 p1 features after collinearity_fixer (10 before)
+        # For each dyad we calculate its changescore for all 4 options, on all p1 features (i.e. a (4,8) matrix)
+        dyad_1_2_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 1, 0, 0, 0],
+            [1, 1, 0, 0, 0, 0, 0, 0],
+            [2, 1, 0, 0, 1, 0, 0, 1],
+        ])
+
+        dyad_1_3_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 1, 0, 0],
+            [1, 0, 1, 0, 0, 0, 0, 0],
+            [2, 0, 1, 0, 0, 1, 0, 1],
+        ])
+
+        dyad_1_4_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 0, 0, 0, 0, 1, 0],
+            [1, 0, 0, 1, 0, 0, 0, 0],
+            [2, 0, 0, 1, 0, 0, 1, 1],
+        ])
+
+        dyad_2_3_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 1, 0, 0, 0, 1, 0, 0],
+            [1, 0, 1, 0, 1, 0, 0, 0],
+            [2, 1, 1, 0, 1, 1, 0, 1],
+        ])
+
+        dyad_2_4_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 1, 0, 0, 0, 0, 1, 0],
+            [1, 0, 0, 1, 1, 0, 0, 0],
+            [2, 1, 0, 1, 1, 0, 1, 1],
+        ])
+
+        dyad_3_4_X = np.array([
+            [0, 0, 0, 0, 0, 0, 0, 0],
+            [1, 0, 1, 0, 0, 0, 1, 0],
+            [1, 0, 0, 1, 0, 1, 0, 0],
+            [2, 0, 1, 1, 0, 1, 1, 1],
+        ])
+
+        expected_X = np.array([dyad_1_2_X, dyad_1_3_X, dyad_1_4_X, dyad_2_3_X, dyad_2_4_X, dyad_3_4_X])
+        self.assertTrue(np.all(X == expected_X))
+
+        # expected_dyads is an array of 4choose2 dyads, with a one-hot encoding of length 4.
+        # 0 = empty, 1 = i->j , 2 = j->i , 3=reciprocal
+        expected_dyads = np.array([
+            [0, 0, 0, 1],
+            [0, 0, 1, 0],
+            [1, 0, 0, 0],
+            [1, 0, 0, 0],
+            [0, 0, 0, 1],
+            [0, 0, 0, 1]
+        ])
+
+        self.assertTrue(np.all(y == expected_dyads))
+
 
     def test_get_parameter_names(self):
         n = 18
