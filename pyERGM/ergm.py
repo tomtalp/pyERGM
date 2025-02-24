@@ -69,7 +69,9 @@ class ERGM():
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size,
                                                      is_collinearity_distributed=self._is_distributed_optimization,
                                                      num_samples_per_job_collinearity_fixer=kwargs.get(
-                                                         'num_samples_per_job_collinearity_fixer', 5))
+                                                         'num_samples_per_job_collinearity_fixer', 5),
+                                                     ratio_threshold_collinearity_fixer = kwargs.get(
+                                                         'ratio_threshold_collinearity_fixer', 5e-6))
 
         self.n_node_features = self._metrics_collection.n_node_features
         self.node_feature_names = self._metrics_collection.node_feature_names.copy()
