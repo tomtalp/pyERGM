@@ -779,7 +779,7 @@ class NumberOfEdgesTypesDirected(Metric):
 
     def initialize_indices_to_ignore(self):
         super().initialize_indices_to_ignore()
-        self.update_indices_to_ignore(self._indices_to_ignore_up_to_idx)
+        self.update_indices_to_ignore(self._indices_to_ignore)
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         edge_type_pair = (self.exogenous_attr[indices[0]], self.exogenous_attr[indices[1]])
@@ -1196,8 +1196,6 @@ class MetricsCollection:
             print(f"Removing the {idx_to_delete_within_metric} feature of {str(metric_of_feat)}")
             sys.stdout.flush()
             metric_of_feat.update_indices_to_ignore([idx_to_delete_within_metric])
-        self.num_of_features = self.calc_num_of_features()
-
         self.num_of_features = self.calc_num_of_features()
 
         # Re-calculate the number of features per metric after deleting a feature.
