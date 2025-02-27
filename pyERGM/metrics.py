@@ -777,6 +777,10 @@ class NumberOfEdgesTypesDirected(Metric):
         self._effective_feature_count = self._get_effective_feature_count()
         self._indices_to_ignore_up_to_idx = np.cumsum(self._indices_to_ignore)
 
+    def initialize_indices_to_ignore(self):
+        super().initialize_indices_to_ignore()
+        self.update_indices_to_ignore(self._indices_to_ignore)
+
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         edge_type_pair = (self.exogenous_attr[indices[0]], self.exogenous_attr[indices[1]])
         idx_in_features_vec = self._sorted_type_pairs_indices[edge_type_pair]
@@ -1073,7 +1077,8 @@ class MetricsCollection:
         if self._fix_collinearity:
             self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
                                     is_distributed=is_collinearity_distributed,
-                                    num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5))
+                                    num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5),
+                                    ratio_threshold=kwargs.get('ratio_threshold_collinearity_fixer', 5e-6),)
 
         
         
@@ -1191,7 +1196,6 @@ class MetricsCollection:
             print(f"Removing the {idx_to_delete_within_metric} feature of {str(metric_of_feat)}")
             sys.stdout.flush()
             metric_of_feat.update_indices_to_ignore([idx_to_delete_within_metric])
-
         self.num_of_features = self.calc_num_of_features()
 
         # Re-calculate the number of features per metric after deleting a feature.
