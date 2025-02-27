@@ -226,7 +226,7 @@ class TestERGM(unittest.TestCase):
         ground_truth_e_nodes = 0.25
         ground_truth_theta_e = np.log(ground_truth_e_nodes / (1 - ground_truth_e_nodes))
 
-        W = adj_mat # np.concatenate([adj_mat, node_types], axis=1)
+        W = adj_mat  # np.concatenate([adj_mat, node_types], axis=1)
         print(f"Fitting matrix ({W.shape}) - ")
         print(W)
 
@@ -236,15 +236,15 @@ class TestERGM(unittest.TestCase):
                     seed_MCMC_proba=0.25
                     )
 
-        ergm.fit(W, observed_node_features=node_features, lr=0.1, opt_steps=500, sliding_grad_window_k=10, sample_pct_growth=0.05,
-                 steps_for_decay=20, lr_decay_pct=0.05, mcmc_sample_size=300, mcmc_steps_per_sample=10, no_mple=True,
+        ergm.fit(W, observed_node_features=node_features, lr=0.1, opt_steps=500, sliding_grad_window_k=10,
+                 sample_pct_growth=0.05,
+                 steps_for_decay=20, lr_decay_pct=0.05, mcmc_sample_size=300, mcmc_steps_per_sample=10,
                  theta_init_method='uniform')
 
         fit_theta = ergm._thetas[0]
         fit_theta_e = ergm._thetas[1]
         print(f"ground truth theta: {ground_truth_theta, ground_truth_theta_e}")
         print(f"fit theta: {fit_theta, fit_theta_e}")
-
 
         # ergm._thetas = np.array([ground_truth_theta, ground_truth_theta_e])
         sampled_networks = ergm.generate_networks_for_sample(sample_size=100)
@@ -302,7 +302,7 @@ class TestERGM(unittest.TestCase):
 
         for inferred_proba, real_density in zip(inferred_probas_per_type_pairs, real_densities_per_type):
             self.assertAlmostEqual(inferred_proba, real_density, places=4)
-    
+
     def test_sampson_MCMLE(self):
         np.random.seed(1234)
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
@@ -310,37 +310,42 @@ class TestERGM(unittest.TestCase):
 
         mcmle_model = ERGM(n_nodes, metrics, is_directed=True)
 
-        convergence_result = mcmle_model.fit(sampson_matrix, 
-                opt_steps=10, 
-                steps_for_decay=1, 
-                lr=1, 
-                mple_lr=0.5, 
-                convergence_criterion="model_bootstrap",
-                mcmc_burn_in=0,
-                mcmc_steps_per_sample=n_nodes**2,
-                mcmc_sample_size=1000,
-                num_model_sub_samples=10,
-                model_subsample_size=1000,
-                bootstrap_convergence_confidence=0.95,
-                bootstrap_convergence_num_stds_away_thr=1,
-            )
-    
+        convergence_result = mcmle_model.fit(sampson_matrix,
+                                             opt_steps=10,
+                                             steps_for_decay=1,
+                                             lr=1,
+                                             mple_lr=0.5,
+                                             convergence_criterion="model_bootstrap",
+                                             mcmc_burn_in=0,
+                                             mcmc_steps_per_sample=n_nodes ** 2,
+                                             mcmc_sample_size=1000,
+                                             num_model_sub_samples=10,
+                                             model_subsample_size=1000,
+                                             bootstrap_convergence_confidence=0.95,
+                                             bootstrap_convergence_num_stds_away_thr=1,
+                                             optimization_scheme='MCMLE'
+                                             )
+
         model_thethas = mcmle_model._thetas
 
-        expected_values = {"edges": -1.1761, "sender2": -0.2945, "sender3": 1.4141, "sender4": 0.3662, "sender5": 0.1315,
-               "sender6": 1.2148, "sender7": 0.6055,
-               "sender8": 1.3609, "sender9": 0.6402, "sender10": 2.0639, "sender11": 1.4355, "sender12": -0.1681,
-               "sender13": -0.2322, "sender14": 0.5841, "sender15": 1.8600,
-               "sender16": 1.4317, "sender17": 1.2211, "sender18": 1.8724, "receiver2": -0.1522, "receiver3": -3.0453,
-               "receiver4": -1.7596, "receiver5": -0.8198, "receiver6": -3.3922,
-               "receiver7": -1.6074, "receiver8": -2.2656, "receiver9": -2.2069, "receiver10": -3.9189,
-               "receiver11": -3.0257, "receiver12": -0.9457, "receiver13": -1.4749, "receiver14": -1.5950,
-               "receiver15": -3.3147, "receiver16": -3.0567, "receiver17": -3.4436, "receiver18": -3.3239,
-               "mutual": 3.6918
-               }
+        expected_values = {"edges": -1.1761, "sender2": -0.2945, "sender3": 1.4141, "sender4": 0.3662,
+                           "sender5": 0.1315,
+                           "sender6": 1.2148, "sender7": 0.6055,
+                           "sender8": 1.3609, "sender9": 0.6402, "sender10": 2.0639, "sender11": 1.4355,
+                           "sender12": -0.1681,
+                           "sender13": -0.2322, "sender14": 0.5841, "sender15": 1.8600,
+                           "sender16": 1.4317, "sender17": 1.2211, "sender18": 1.8724, "receiver2": -0.1522,
+                           "receiver3": -3.0453,
+                           "receiver4": -1.7596, "receiver5": -0.8198, "receiver6": -3.3922,
+                           "receiver7": -1.6074, "receiver8": -2.2656, "receiver9": -2.2069, "receiver10": -3.9189,
+                           "receiver11": -3.0257, "receiver12": -0.9457, "receiver13": -1.4749, "receiver14": -1.5950,
+                           "receiver15": -3.3147, "receiver16": -3.0567, "receiver17": -3.4436, "receiver18": -3.3239,
+                           "mutual": 3.6918
+                           }
         expected_thetas = np.array(list(expected_values.values()))
-        
-        thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas)**2) / np.sum((expected_thetas - np.mean(expected_thetas))**2)
+
+        thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas) ** 2) / np.sum(
+            (expected_thetas - np.mean(expected_thetas)) ** 2)
         self.assertTrue(thetas_R_2 > 0.99)
         self.assertTrue(convergence_result["success"])
 
@@ -366,6 +371,7 @@ class TestERGM(unittest.TestCase):
                                              model_subsample_size=1000,
                                              bootstrap_convergence_confidence=0.95,
                                              bootstrap_convergence_num_stds_away_thr=1,
+                                             optimization_scheme='MCMLE'
                                              )
 
         model_thethas = mcmle_model._thetas
@@ -540,3 +546,81 @@ class TestERGM(unittest.TestCase):
         expected_model_2_av_mat = 0.5 * np.ones((n_nodes, n_nodes))
         expected_model_2_av_mat[np.diag_indices(n_nodes)] = 0
         self.assertTrue(np.abs(model_2_av_mat - expected_model_2_av_mat).max() < 1e-10)
+
+    def test_sampson_MPLE_RECIPROCITY(self):
+        np.random.seed(8765)
+    
+        metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
+        n_nodes = sampson_matrix.shape[0]
+
+        mcmle_model = ERGM(n_nodes, metrics, is_directed=True)
+
+        convergence_result = mcmle_model.fit(sampson_matrix,
+                                             opt_steps=10,
+                                             steps_for_decay=1,
+                                             lr=1,
+                                             mple_lr=0.5,
+                                             convergence_criterion="model_bootstrap",
+                                             mcmc_burn_in=0,
+                                             mcmc_steps_per_sample=n_nodes ** 2,
+                                             mcmc_sample_size=1000,
+                                             num_model_sub_samples=10,
+                                             model_subsample_size=1000,
+                                             bootstrap_convergence_confidence=0.95,
+                                             bootstrap_convergence_num_stds_away_thr=1,
+                                             optimization_scheme='MPLE_RECIPROCITY'
+                                             )
+
+        model_thethas = mcmle_model._thetas
+
+        expected_values = {"edges": -1.1761, "sender2": -0.2945, "sender3": 1.4141, "sender4": 0.3662,
+                           "sender5": 0.1315,
+                           "sender6": 1.2148, "sender7": 0.6055,
+                           "sender8": 1.3609, "sender9": 0.6402, "sender10": 2.0639, "sender11": 1.4355,
+                           "sender12": -0.1681,
+                           "sender13": -0.2322, "sender14": 0.5841, "sender15": 1.8600,
+                           "sender16": 1.4317, "sender17": 1.2211, "sender18": 1.8724, "receiver2": -0.1522,
+                           "receiver3": -3.0453,
+                           "receiver4": -1.7596, "receiver5": -0.8198, "receiver6": -3.3922,
+                           "receiver7": -1.6074, "receiver8": -2.2656, "receiver9": -2.2069, "receiver10": -3.9189,
+                           "receiver11": -3.0257, "receiver12": -0.9457, "receiver13": -1.4749, "receiver14": -1.5950,
+                           "receiver15": -3.3147, "receiver16": -3.0567, "receiver17": -3.4436, "receiver18": -3.3239,
+                           "mutual": 3.6918
+                           }
+        expected_thetas = np.array(list(expected_values.values()))
+
+        thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas) ** 2) / np.sum(
+            (expected_thetas - np.mean(expected_thetas)) ** 2)
+        self.assertTrue(thetas_R_2 > 0.99)
+        self.assertTrue(convergence_result["success"])
+    
+    def test_mple_reciprocity_sampling(self):
+        np.random.seed(8765)
+        metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
+        n_nodes = sampson_matrix.shape[0]
+
+        mcmle_model = ERGM(n_nodes, metrics, is_directed=True)
+
+        convergence_result = mcmle_model.fit(sampson_matrix,
+                                             optimization_scheme='MPLE_RECIPROCITY'
+                                             )
+
+        sample_size = 10
+        sampled_networks = mcmle_model.generate_networks_for_sample(sampling_method="exact", sample_size=sample_size)
+        
+        self.assertEqual(sampled_networks.shape, (n_nodes, n_nodes, sample_size))
+        self.assertEqual(convergence_result["success"], True)
+
+    def test_model_initialization_from_existing_params_(self):
+        np.random.seed(1234)
+        metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
+        n_nodes = sampson_matrix.shape[0]
+
+        mcmle_model = ERGM(n_nodes, metrics, is_directed=True)
+
+        model_params = mcmle_model.get_model_parameters()
+
+        new_model = ERGM(n_nodes, metrics, is_directed=True, initial_thetas=model_params)
+
+        # If there's a problem with copying the parameters, this will throw an error.
+        new_model.generate_networks_for_sample(sample_size=10)
