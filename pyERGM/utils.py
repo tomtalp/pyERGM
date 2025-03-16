@@ -1174,6 +1174,7 @@ def mple_reciprocity_logistic_regression_optimization(metrics_collection, observ
     pred = predict_multi_class_logistic_regression(Xs, thetas)
     return res.x, pred, res.success
 
+
 def num_dyads_to_num_nodes(num_dyads):
     """
     x = num_dyads
@@ -1181,6 +1182,7 @@ def num_dyads_to_num_nodes(num_dyads):
     n^2-n-2x=0 --> n = \frac{1+\sqrt{1-4\cdot(-2x)}}{2}
     """
     return np.round((1 + np.sqrt(1 + 8 * num_dyads)) / 2).astype(int)
+
 
 def convert_dyads_states_to_connectivity(dyads_states):
     num_dyads = dyads_states.shape[0]
@@ -1211,6 +1213,7 @@ def convert_dyads_state_indices_to_connectivity(dyads_states_indices):
             network[indices[1][i], indices[0][i]] = 1
     return network
 
+
 def sample_from_dyads_distribution(dyads_distributions, sample_size):
     num_dyads = dyads_distributions.shape[0]
     n_nodes = num_dyads_to_num_nodes(num_dyads)
@@ -1222,3 +1225,16 @@ def sample_from_dyads_distribution(dyads_distributions, sample_size):
     for k in range(sample_size):
         net_sample[:, :, k] = convert_dyads_state_indices_to_connectivity(dyads_states_indices_sample[:, k])
     return net_sample
+
+
+def get_exact_marginals_from_dyads_distrubution(dyads_distributions):
+    num_dyads = dyads_distributions.shape[0]
+    num_nodes = num_dyads_to_num_nodes(num_dyads)
+    indices = np.triu_indices(num_nodes, k=1)
+    exact_marginals = np.zeros((num_nodes, num_nodes))
+    for i in range(num_dyads):
+        exact_marginals[indices[0][i], indices[1][i]] = dyads_distributions[i, RECIPROCAL_IDX] + dyads_distributions[
+            i, UPPER_IDX]
+        exact_marginals[indices[1][i], indices[0][i]] = dyads_distributions[i, RECIPROCAL_IDX] + dyads_distributions[
+            i, LOWER_IDX]
+    return exact_marginals
