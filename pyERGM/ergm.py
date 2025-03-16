@@ -69,7 +69,9 @@ class ERGM():
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size,
                                                      is_collinearity_distributed=self._is_distributed_optimization,
                                                      num_samples_per_job_collinearity_fixer=kwargs.get(
-                                                         'num_samples_per_job_collinearity_fixer', 5))
+                                                         'num_samples_per_job_collinearity_fixer', 5),
+                                                     ratio_threshold_collinearity_fixer = kwargs.get(
+                                                         'ratio_threshold_collinearity_fixer', 5e-6))
 
         self.n_node_features = self._metrics_collection.n_node_features
         self.node_feature_names = self._metrics_collection.node_feature_names.copy()
@@ -280,6 +282,15 @@ class ERGM():
             raise ValueError(f"Received an unrecognized optimization scheme from "
                              f"MetricsCollection.choose_optimization_scheme(): {auto_optimization_scheme}. "
                              f"Options are supposed to be MPLE, MPLE_RECIPROCITY, MCMLE.")
+
+    def get_mple_reciprocity_prediction(self, observed_network: np.ndarray):
+        if  self._metrics_collection.choose_optimization_scheme() == 'MPLE_RECIPROCITY':
+            Xs, _ = self._metrics_collection.prepare_mple_reciprocity_data(observed_network)
+            mple_reciprocity_prediction = predict_multi_class_logistic_regression(Xs, self._thetas)
+            return mple_reciprocity_prediction
+        else:
+            raise NotImplementedError(
+                "get_mple_reciprocity_prediction can only be used for models containing reciprocity, and are otherwise dyadic independent.")
 
     def fit(self, observed_network,
             lr=0.1,
@@ -706,17 +717,6 @@ class ERGM():
 
     def get_ignored_features(self):
         return self._metrics_collection.get_ignored_features()
-
-    def get_mple_prediction(self, input_graph):
-        Xs, ys = self._metrics_collection.prepare_mple_data(input_graph)
-
-        prediction = calc_logistic_regression_predictions(Xs, self._thetas)
-        exact_average_mat = np.zeros((self._n_nodes, self._n_nodes))
-
-        if self._is_directed:
-            exact_average_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
-
-        return exact_average_mat
 
 
 class BruteForceERGM(ERGM):

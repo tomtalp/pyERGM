@@ -1,11 +1,17 @@
 import unittest
+
+from scipy.stats import pearsonr
+
 from pyERGM.utils import *
-from pyERGM.metrics import MetricsCollection, NumberOfEdgesDirected, TotalReciprocity
+from pyERGM.metrics import MetricsCollection, NumberOfEdgesDirected, TotalReciprocity, OutDegree, InDegree
+from pyERGM.datasets import sampson_matrix
+from pyERGM.ergm import ERGM
 from scipy.linalg import eigh
 
 from matplotlib import pyplot as plt
 import sys
 import math
+
 
 class GeneralUtilsTester(unittest.TestCase):
     def test_get_sorted_type_pairs(self):
@@ -29,18 +35,40 @@ class GeneralUtilsTester(unittest.TestCase):
 
         with self.assertRaises(IndexError):
             convert_flat_no_diag_idx_to_i_j([13], n)
-    
+
     def test_num_dyads_to_num_nodes(self):
         W = np.array([[0, 1, 0],
-                        [0, 0, 1],
-                        [1, 1, 0]])
-    
+                      [0, 0, 1],
+                      [1, 1, 0]])
+
         num_dyads = math.comb(W.shape[0], 2)
 
         real_num_nodes = W.shape[0]
         num_nodes = num_dyads_to_num_nodes(num_dyads)
 
         self.assertEqual(real_num_nodes, num_nodes)
+
+    def test_exact_marginals_from_dyads_distributions(self):
+        np.random.seed(67987)
+        metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
+        n_nodes = sampson_matrix.shape[0]
+
+        p1_sampson_model = ERGM(n_nodes, metrics, is_directed=True)
+
+        convergence_result = p1_sampson_model.fit(sampson_matrix)
+
+        sample_size = 10000
+        sampled_networks = p1_sampson_model.generate_networks_for_sample(sampling_method="exact",
+                                                                         sample_size=sample_size)
+        sample_mean = sampled_networks.mean(axis=-1)
+        exact_marginals = get_exact_marginals_from_dyads_distrubution(p1_sampson_model._exact_dyadic_distributions)
+
+        self.assertEqual(sampled_networks.shape, (n_nodes, n_nodes, sample_size))
+        self.assertEqual(convergence_result["success"], True)
+        self.assertTrue(np.abs(exact_marginals - sample_mean).max() < 1e-2)
+        self.assertTrue(pearsonr(exact_marginals[~np.eye(n_nodes, dtype=bool)].flatten(),
+                                 sampled_networks.mean(axis=-1)[
+                                     ~np.eye(n_nodes, dtype=bool)].flatten()).statistic > 0.99)
 
 
 class TestGreatestConvexMinorant(unittest.TestCase):
