@@ -47,7 +47,7 @@ def main():
     if func_to_calc == 'predictions':
         func_chunk = chunk_prediction
     elif func_to_calc == 'log_likelihood':
-        func_chunk = calc_logistic_regression_predictions_log_likelihood(chunk_prediction, ys_chunk)
+        func_chunk = calc_logistic_regression_predictions_log_likelihood(chunk_prediction, ys_chunk)[0][0]
     elif func_to_calc == 'log_likelihood_gradient':
         func_chunk = calc_logistic_regression_log_likelihood_grad(Xs_chunk, chunk_prediction, ys_chunk)
     elif func_to_calc == 'log_likelihood_hessian':

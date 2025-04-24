@@ -1519,20 +1519,11 @@ class MetricsCollection:
 
     def prepare_mple_reciprocity_data(self, observed_network: np.ndarray):
         Xs = np.zeros(((self.n_nodes ** 2 - self.n_nodes) // 2, 4, self.calc_num_of_features()))
-        ys = np.zeros(((self.n_nodes ** 2 - self.n_nodes) // 2, 4))
+        ys = convert_connectivity_to_dyad_states(observed_network)
         idx = 0
         zeros_net = np.zeros((self.n_nodes, self.n_nodes))
         for i in range(self.n_nodes - 1):
             for j in range(i + 1, self.n_nodes):
-                if not observed_network[i, j] and not observed_network[j, i]:
-                    ys[idx, EMPTY_IDX] = 1
-                elif observed_network[i, j] and not observed_network[j, i]:
-                    ys[idx, UPPER_IDX] = 1
-                elif not observed_network[i, j] and observed_network[j, i]:
-                    ys[idx, LOWER_IDX] = 1
-                else:
-                    ys[idx, RECIPROCAL_IDX] = 1
-
                 change_score_i_j = self.calc_change_scores(zeros_net, {'edge': (i, j)})
                 net_with_i_j = zeros_net.copy()
                 net_with_i_j[i, j] = 1
