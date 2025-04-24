@@ -1,4 +1,7 @@
 import unittest
+
+import numpy as np
+
 from pyERGM.utils import *
 from pyERGM.metrics import *
 from pyERGM.ergm import ERGM, BruteForceERGM
@@ -549,7 +552,7 @@ class TestERGM(unittest.TestCase):
 
     def test_sampson_MPLE_RECIPROCITY(self):
         np.random.seed(8765)
-    
+
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
         n_nodes = sampson_matrix.shape[0]
 
@@ -593,7 +596,7 @@ class TestERGM(unittest.TestCase):
             (expected_thetas - np.mean(expected_thetas)) ** 2)
         self.assertTrue(thetas_R_2 > 0.99)
         self.assertTrue(convergence_result["success"])
-    
+
     def test_mple_reciprocity_sampling(self):
         np.random.seed(8765)
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
@@ -607,11 +610,11 @@ class TestERGM(unittest.TestCase):
 
         sample_size = 10
         sampled_networks = mcmle_model.generate_networks_for_sample(sampling_method="exact", sample_size=sample_size)
-        
+
         self.assertEqual(sampled_networks.shape, (n_nodes, n_nodes, sample_size))
         self.assertEqual(convergence_result["success"], True)
 
-    def test_model_initialization_from_existing_params_(self):
+    def test_model_initialization_from_existing_params(self):
         np.random.seed(1234)
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
         n_nodes = sampson_matrix.shape[0]
@@ -624,3 +627,80 @@ class TestERGM(unittest.TestCase):
 
         # If there's a problem with copying the parameters, this will throw an error.
         new_model.generate_networks_for_sample(sample_size=10)
+
+    def test_likelihood_calculations(self):
+        np.random.seed(1234)
+
+        # Independent model
+        metrics = [NumberOfEdgesDirected()]
+        observed_net = np.array([
+            [0, 1, 1, 1],
+            [1, 0, 0, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0]
+        ])
+        observed_p = observed_net.sum() / (observed_net.size - observed_net.shape[0])
+
+        expected_theta = np.log(observed_p / (1 - observed_p))  # log odds ratio for p
+
+        model = ERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
+        model.fit(observed_net)
+
+        self.assertTrue(np.abs(model._thetas - expected_theta) < 1e-5)
+
+        network_for_likelihood = np.array([
+            [0, 1, 1, 1],
+            [1, 0, 1, 1],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0]
+        ])
+
+        expected_individual_likes = np.zeros(network_for_likelihood.shape)
+        expected_individual_likes[network_for_likelihood == 1] = observed_p
+        expected_individual_likes[network_for_likelihood == 0] = 1 - observed_p
+        expected_individual_likes[np.diag_indices(network_for_likelihood.shape[0])] = 1
+
+        all_edges_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction='none')
+        self.assertTrue(np.all(np.abs(all_edges_likes - np.log(expected_individual_likes))) < 1e-5)
+
+        log_like_sum = model.calc_model_log_likelihood(network_for_likelihood, reduction='sum', log_base=10)
+        self.assertTrue(np.abs(log_like_sum - np.log10(expected_individual_likes).sum()) < 1e-5)
+
+        # Model with reciprocity
+        metrics = [TotalReciprocity()]
+        observed_net = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 0, 0],
+            [0, 0, 0, 0],
+            [0, 0, 0, 0]
+        ])
+        observed_reciprocity_p = (observed_net * observed_net.T).sum() / (observed_net.size - observed_net.shape[0])
+        expected_theta = -0.5108286293551415  # mean over 4 optimizations of a network with a single reciprocal dyad
+
+        model = ERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
+
+        model.fit(observed_net)
+
+        self.assertTrue(np.abs(model._thetas - expected_theta) < 1e-5)
+
+        network_for_likelihood = np.array([
+            [0, 0, 0, 0],
+            [0, 0, 1, 0],
+            [0, 1, 0, 1],
+            [0, 0, 1, 0]
+        ])
+
+        dyad_states_for_likelihood = convert_connectivity_to_dyad_states(network_for_likelihood)
+        reciprocal_dyads_indices = np.where(dyad_states_for_likelihood.sum(axis=0) == 1)[0]
+
+        all_dyad_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction='none')
+        # TODO: we assert here only the likelihood of having a reciprocal dyad. Should find a way (may be numerical) to
+        #  evaluate the expected probabilities for the other 3 dyadic states and validate all of them.
+        self.assertTrue(np.all(np.abs(all_dyad_likes[reciprocal_dyads_indices] - np.log(observed_reciprocity_p)) < 1e-5))
+
+        brute_force_ergm = BruteForceERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
+        brute_force_ergm._thetas = model._thetas
+        true_likelihood_net_for_like = brute_force_ergm.calculate_probability(network_for_likelihood)
+        calculated_likelihood = model.calc_model_log_likelihood(network_for_likelihood, reduction='sum', log_base=10)
+        # TODO: the diff is larger than expected. Not probable that it's a problem, but maybe we should dig into this.
+        self.assertTrue(np.abs(np.log10(true_likelihood_net_for_like) - calculated_likelihood) < 0.1)

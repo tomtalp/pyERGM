@@ -1283,3 +1283,17 @@ def get_exact_marginals_from_dyads_distrubution(dyads_distributions):
         exact_marginals[indices[1][i], indices[0][i]] = dyads_distributions[i, RECIPROCAL_IDX] + dyads_distributions[
             i, LOWER_IDX]
     return exact_marginals
+
+
+def remove_main_diagonal_flatten(square_mat):
+    # TODO: there are multiple places we can use that that currently duplicate this logic.
+    if square_mat.ndim != 2 or square_mat.shape[0] != square_mat.shape[1]:
+        raise ValueError("The input must be a square matrix")
+    return square_mat[~np.eye(square_mat.shape[0], dtype=bool)].flatten()
+
+
+def set_off_diagonal_elements_from_array(square_mat, values_to_set):
+    values_to_set = values_to_set.flatten()
+    if values_to_set.size != square_mat.size - square_mat.shape[0]:
+        raise ValueError("The size of the array must be compatible the size of the square matrix")
+    square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set
