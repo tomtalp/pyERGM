@@ -587,7 +587,8 @@ def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
 
 
 @njit
-def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray, eps=1e-10):
+def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray, eps=1e-10,
+                                                        reduction: str = 'sum', log_base: float = np.exp(1)):
     """
     Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
     Parameters
@@ -605,8 +606,17 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
     data_zero_indices = np.where(ys == 0)[0]
     trimmed_likelihoods[data_zero_indices] = np.ones((data_zero_indices.size, 1)) - trimmed_likelihoods[
         data_zero_indices]
-
-    return np.log(trimmed_likelihoods).sum()
+    log_likelihoods = np.log(trimmed_likelihoods) / np.log(log_base)
+    if reduction == 'none':
+        return log_likelihoods
+    # The wrapping into a numpy array and reshape to 2D is necessary for numba to compile the function properly
+    # (returned types must be unified).
+    elif reduction == 'sum':
+        return np.array([log_likelihoods.sum()]).reshape(1, 1)
+    elif reduction == 'mean':
+        return np.array([log_likelihoods.mean()]).reshape(1, 1)
+    else:
+        raise ValueError(f"{reduction} is an unsupported reduction method, options are 'none', 'sum', or 'mean'")
 
 
 @njit
@@ -671,7 +681,7 @@ def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas
 
 def analytical_minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10):
     pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
-    return -calc_logistic_regression_predictions_log_likelihood(pred, ys)
+    return -calc_logistic_regression_predictions_log_likelihood(pred, ys)[0][0]
 
 
 @njit
@@ -1129,8 +1139,24 @@ def predict_multi_class_logistic_regression(Xs, thetas):
     return softmax(Xs @ thetas, axis=1)
 
 
+def log_likelihood_multi_class_logistic_regression(true_labels, predictions, reduction='sum', log_base=np.exp(1)):
+    # TODO: trim predictions to avoid log(0)? If yes make sure the predictions over all dyad states sum up to 1 after
+    #  trimming? i.e., only the first row or also the last one?
+    #   predictions = np.clip(predictions, a_min=eps, a_max=1-eps)
+    #   predictions /= predictions.sum(axis=0)
+    individual_data_samples_likes = np.log(predictions[true_labels == 1]) / np.log(log_base)
+    if reduction == 'none':
+        return individual_data_samples_likes
+    elif reduction == 'sum':
+        return individual_data_samples_likes.sum()
+    elif reduction == 'mean':
+        return individual_data_samples_likes.mean()
+    else:
+        raise ValueError(f"reduction {reduction} not supported, options are 'none', 'sum', or 'mean'")
+
+
 def minus_log_likelihood_multi_class_logistic_regression(thetas, Xs, ys):
-    return -np.log(predict_multi_class_logistic_regression(Xs, thetas)[np.where(ys == 1)]).sum()
+    return -log_likelihood_multi_class_logistic_regression(ys, predict_multi_class_logistic_regression(Xs, thetas))
 
 
 def minus_log_likelihood_gradient_multi_class_logistic_regression(thetas, Xs, ys):
@@ -1182,6 +1208,25 @@ def num_dyads_to_num_nodes(num_dyads):
     n^2-n-2x=0 --> n = \frac{1+\sqrt{1-4\cdot(-2x)}}{2}
     """
     return np.round((1 + np.sqrt(1 + 8 * num_dyads)) / 2).astype(int)
+
+
+def convert_connectivity_to_dyad_states(connectivity: np.ndarray):
+    n_nodes = connectivity.shape[0]
+    dyads_states = np.zeros(((n_nodes ** 2 - n_nodes) // 2, 4))
+    idx = 0
+    for i in range(n_nodes - 1):
+        for j in range(i + 1, n_nodes):
+            if not connectivity[i, j] and not connectivity[j, i]:
+                dyads_states[idx, EMPTY_IDX] = 1
+            elif connectivity[i, j] and not connectivity[j, i]:
+                dyads_states[idx, UPPER_IDX] = 1
+            elif not connectivity[i, j] and connectivity[j, i]:
+                dyads_states[idx, LOWER_IDX] = 1
+            else:
+                dyads_states[idx, RECIPROCAL_IDX] = 1
+
+            idx += 1
+    return dyads_states
 
 
 def convert_dyads_states_to_connectivity(dyads_states):
@@ -1238,3 +1283,17 @@ def get_exact_marginals_from_dyads_distrubution(dyads_distributions):
         exact_marginals[indices[1][i], indices[0][i]] = dyads_distributions[i, RECIPROCAL_IDX] + dyads_distributions[
             i, LOWER_IDX]
     return exact_marginals
+
+
+def remove_main_diagonal_flatten(square_mat):
+    # TODO: there are multiple places we can use that that currently duplicate this logic.
+    if square_mat.ndim != 2 or square_mat.shape[0] != square_mat.shape[1]:
+        raise ValueError("The input must be a square matrix")
+    return square_mat[~np.eye(square_mat.shape[0], dtype=bool)].flatten()
+
+
+def set_off_diagonal_elements_from_array(square_mat, values_to_set):
+    values_to_set = values_to_set.flatten()
+    if values_to_set.size != square_mat.size - square_mat.shape[0]:
+        raise ValueError("The size of the array must be compatible the size of the square matrix")
+    square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set

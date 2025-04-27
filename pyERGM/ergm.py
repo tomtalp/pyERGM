@@ -70,7 +70,7 @@ class ERGM():
                                                      is_collinearity_distributed=self._is_distributed_optimization,
                                                      num_samples_per_job_collinearity_fixer=kwargs.get(
                                                          'num_samples_per_job_collinearity_fixer', 5),
-                                                     ratio_threshold_collinearity_fixer = kwargs.get(
+                                                     ratio_threshold_collinearity_fixer=kwargs.get(
                                                          'ratio_threshold_collinearity_fixer', 5e-6))
 
         self.n_node_features = self._metrics_collection.n_node_features
@@ -234,7 +234,6 @@ class ERGM():
         self._exact_dyadic_distributions = prediction
         return trained_thetas, success
 
-
     # TODO: decide how a getter for self._exact_average_mat fits in now - if the model is dyadic
     #  independent, the observed_network doesn't matter - predictions will be always the same, and this is the exact
     #  average matrix of the model, so should be computed once and stored. If the model is dyadic dependent, this is an
@@ -268,8 +267,9 @@ class ERGM():
         if auto_optimization_scheme == 'MCMLE':
             # TODO: Actually we can sample for node metrics that are independent, but this is anyhow not implemented
             #  right now, deal with that in the future.
-            raise ValueError("Cannot sample exactly from a model that has dependence that not comes from reciprocity or "
-                             "has node features!")
+            raise ValueError(
+                "Cannot sample exactly from a model that has dependence that not comes from reciprocity or "
+                "has node features!")
         if self._exact_average_mat is None and self._exact_dyadic_distributions is None:
             raise ValueError("Cannot sample exactly from a model that is not trained! Call `model.fit()` and pass an "
                              "observed network!")
@@ -284,13 +284,55 @@ class ERGM():
                              f"Options are supposed to be MPLE, MPLE_RECIPROCITY, MCMLE.")
 
     def get_mple_reciprocity_prediction(self, observed_network: np.ndarray):
-        if  self._metrics_collection.choose_optimization_scheme() == 'MPLE_RECIPROCITY':
+        if self._metrics_collection.choose_optimization_scheme() == 'MPLE_RECIPROCITY':
             Xs, _ = self._metrics_collection.prepare_mple_reciprocity_data(observed_network)
             mple_reciprocity_prediction = predict_multi_class_logistic_regression(Xs, self._thetas)
             return mple_reciprocity_prediction
         else:
             raise NotImplementedError(
                 "get_mple_reciprocity_prediction can only be used for models containing reciprocity, and are otherwise dyadic independent.")
+
+    def calc_model_log_likelihood(self, observed_network: np.ndarray, reduction: str = 'sum',
+                                  log_base: float = np.exp(1)):
+        if observed_network.ndim != 2 or observed_network.shape[0] != observed_network.shape[1] or \
+                observed_network.shape[0] != self._n_nodes:
+            raise ValueError(f"Got a connectivity data of dimensions {observed_network.shape}")
+        if not np.all(np.unique(observed_network) == np.array([0, 1])):
+            raise ValueError("Got a non binary connectivity data! Should contain only zeros or ones")
+        model_type = self._metrics_collection.choose_optimization_scheme()
+        if model_type == 'MPLE':
+            if self._exact_average_mat is None:
+                raise RuntimeError("Cannot calculate the likelihood of data before properly fitting the model. Call "
+                                   "`model.fit()` and try again.")
+            log_like = calc_logistic_regression_predictions_log_likelihood(
+                remove_main_diagonal_flatten(self._exact_average_mat).reshape(-1, 1),
+                remove_main_diagonal_flatten(observed_network).reshape(-1, 1),
+                reduction=reduction,
+                log_base=log_base)
+
+            # In case the user asks for individual likelihoods, return them in a format of a matrix.
+            # TODO: what should be the values on the main diagonal of the likelihoods matrix? 0's make sense only when
+            #  summing up, but the user could have set `reduction='sum'` in the first place... Maybe nans? Or return a
+            #  flattened array with out reshaping it into a matrix?
+            if reduction == 'none':
+                log_like_mat = np.zeros((self._n_nodes, self._n_nodes))
+                set_off_diagonal_elements_from_array(log_like_mat, log_like)
+                return log_like_mat
+
+            return log_like
+
+        elif model_type == 'MPLE_RECIPROCITY':
+            if self._exact_dyadic_distributions is None:
+                raise RuntimeError("Cannot calculate the likelihood of data before properly fitting the model. Call "
+                                   "`model.fit()` and try again.")
+            return log_likelihood_multi_class_logistic_regression(
+                convert_connectivity_to_dyad_states(observed_network),
+                self._exact_dyadic_distributions,
+                reduction=reduction,
+                log_base=log_base)
+        else:
+            raise NotImplementedError("Currently supporting likelihood calculations for models that are synaptic "
+                                      "independent or with reciprocal synapses dependent")
 
     def fit(self, observed_network,
             lr=0.1,
