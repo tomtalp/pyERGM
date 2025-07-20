@@ -1163,10 +1163,14 @@ class TestMetricsCollection(unittest.TestCase):
 
         idx_to_ignore = np.where(collection.metrics[1]._indices_to_ignore)[0][0]
 
-        Xs_full, ys_full = collection.prepare_mple_data(W1)
+        Xs_full = collection.prepare_mple_regressors(W1)
+        ys_full = collection.prepare_mple_labels(W1[..., np.newaxis])
 
-        Xs_half, ys_half = collection.prepare_mple_data(W1,
-                                                        edges_indices_lims=(0, expected_mple_regressors.shape[0] // 2))
+        Xs_half = collection.prepare_mple_regressors(W1, edges_indices_lims=(0, expected_mple_regressors.shape[0] // 2))
+        ys_half = collection.prepare_mple_labels(
+            W1[..., np.newaxis],
+            edges_indices_lims=(0, expected_mple_regressors.shape[0] // 2)
+        )
 
         # Deleting the 1+idx_to_ignore because the first entry is the NumberOfEdgesDirected metric
         expected_mple_regressors = np.delete(expected_mple_regressors, 1 + idx_to_ignore, axis=1)

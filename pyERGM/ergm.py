@@ -181,7 +181,7 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_network, optimization_method: str = 'L-BFGS-B', **kwargs):
+    def _mple_fit(self, observed_networks, optimization_method: str = 'L-BFGS-B', **kwargs):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -193,8 +193,8 @@ class ERGM():
 
         Parameters
         ----------
-        observed_network : np.ndarray
-            The adjacency matrix of the observed network.
+        observed_networks : np.ndarray
+            The adjacency matrix of the observed network, or an array of adjacency matrices.
         
         Returns
         -------
@@ -203,7 +203,7 @@ class ERGM():
         """
         print("MPLE")
         trained_thetas, prediction, success = mple_logistic_regression_optimization(self._metrics_collection,
-                                                                                    observed_network,
+                                                                                    observed_networks,
                                                                                     is_distributed=self._is_distributed_optimization,
                                                                                     optimization_method=optimization_method,
                                                                                     num_edges_per_job=kwargs.get(
@@ -239,7 +239,9 @@ class ERGM():
     #  average matrix of the model, so should be computed once and stored. If the model is dyadic dependent, this is an
     #  approximation, and the degree to which changes in the observed_network will change the prediction depend on the
     #  metrics and the specific networks, it can not be pre-determined.
-    def get_mple_prediction(self, observed_network: np.ndarray):
+    def get_mple_prediction(self, observed_networks: np.ndarray):
+        if observed_networks.ndim == 3:
+            observed_networks = observed_networks[..., 0]
         is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
         if is_dyadic_independent and self._exact_average_mat is not None:
             return self._exact_average_mat.copy()
@@ -248,7 +250,7 @@ class ERGM():
         if self._is_distributed_optimization:
             raise NotImplementedError(
                 "calculating mple predictions distributed without fitting is yet to be implemented")
-        Xs, _ = self._metrics_collection.prepare_mple_data(observed_network)
+        Xs = self._metrics_collection.prepare_mple_regressors(observed_networks)
         pred = calc_logistic_regression_predictions(Xs, self._thetas).flatten()
         if is_dyadic_independent:
             self._exact_average_mat = self._rearrange_prediction_to_av_mat(pred)
@@ -334,7 +336,8 @@ class ERGM():
             raise NotImplementedError("Currently supporting likelihood calculations for models that are synaptic "
                                       "independent or with reciprocal synapses dependent")
 
-    def fit(self, observed_network,
+    def fit(self,
+            observed_networks,
             lr=0.1,
             opt_steps=1000,
             steps_for_decay=100,
@@ -469,10 +472,12 @@ class ERGM():
         """
         # Create the full observed network from adjacency matrix and node features:
         if observed_node_features is not None:
+            if len(observed_networks.shape) != 2:
+                raise ValueError("Multiple networks are not supported with observed_node_features")
             ordered_observed_node_features = [observed_node_features[fname] for fname in self.node_feature_names.keys()]
             ordered_observed_node_features = [one_d_f for f in ordered_observed_node_features for one_d_f in f]
             ordered_observed_node_features = np.array(ordered_observed_node_features).T
-            observed_network = np.concatenate([observed_network, ordered_observed_node_features], axis=1)
+            observed_networks = np.concatenate([observed_networks, ordered_observed_node_features], axis=1)
 
         # This is because we assume the sample size is even when estimating the covariance matrix (in
         # calc_capital_gammas).
@@ -492,7 +497,7 @@ class ERGM():
         if optimization_scheme == "AUTO":
             optimization_scheme = self._metrics_collection.choose_optimization_scheme()
         if optimization_scheme == "MPLE" or (theta_init_method == 'mple' and optimization_scheme == 'MCMLE'):
-            self._thetas, success = self._mple_fit(observed_network,
+            self._thetas, success = self._mple_fit(observed_networks,
                                                    optimization_method=kwargs.get('mple_optimization_method',
                                                                                   'L-BFGS-B'),
                                                    num_edges_per_job=kwargs.get('num_edges_per_job', 100000))
@@ -504,7 +509,7 @@ class ERGM():
             if not self._is_directed:
                 raise ValueError("There is not meaning for reciprocity in undirected graphs, "
                                  "can't perform MPLE_RECIPROCITY optimization.")
-            self._thetas, success = self._mple_reciprocity_fit(observed_network,
+            self._thetas, success = self._mple_reciprocity_fit(observed_networks,
                                                                optimization_method=kwargs.get(
                                                                    'mple_optimization_method',
                                                                    'L-BFGS-B'))
@@ -548,7 +553,7 @@ class ERGM():
         grads = np.zeros((opt_steps, num_of_features))
 
         if mcmc_seed_network is None and self._exact_average_mat is not None:
-            probabilities_matrix = self.get_mple_prediction(observed_network)
+            probabilities_matrix = self.get_mple_prediction(observed_networks)
             mcmc_seed_network = sample_from_independent_probabilities_matrix(probabilities_matrix, 1)
             mcmc_seed_network = mcmc_seed_network[:, :, 0]
         burn_in = mcmc_burn_in
@@ -564,7 +569,9 @@ class ERGM():
 
             features_of_net_samples = self._metrics_collection.calculate_sample_statistics(networks_for_sample)
             mean_features = np.mean(features_of_net_samples, axis=1)
-            observed_features = self._metrics_collection.calculate_statistics(observed_network)
+            observed_features = self._metrics_collection.calculate_statistics(observed_networks)
+            if observed_features.ndim == 2:
+                observed_features = observed_features.mean(axis=1)
 
             grad = calc_nll_gradient(observed_features, mean_features)
             if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):

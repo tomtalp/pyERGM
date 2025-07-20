@@ -1477,19 +1477,13 @@ class MetricsCollection:
 
         return change_scores
 
-    def prepare_mple_data(self, observed_network: np.ndarray, edges_indices_lims: tuple[int] | None = None):
+    def prepare_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int, int] | None = None):
         if self.requires_graph:
             G1 = connectivity_matrix_to_G(observed_network[:self.n_nodes, :self.n_nodes], directed=self.is_directed)
 
         n_nodes = observed_network.shape[0]
-        if edges_indices_lims is None:
-            num_edges_to_take = n_nodes * n_nodes - n_nodes
-            if not self.is_directed:
-                num_edges_to_take = num_edges_to_take // 2
-            edges_indices_lims = (0, num_edges_to_take)
-        else:
-            num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
-        Xs = np.zeros((num_edges_to_take, self.num_of_features))
+        edges_indices_lims = get_edges_indices_lims(edges_indices_lims, n_nodes, self.is_directed)
+        Xs = np.zeros((edges_indices_lims[1] - edges_indices_lims[0], self.num_of_features))
 
         feature_idx = 0
         for metric in self.metrics:
@@ -1509,13 +1503,20 @@ class MetricsCollection:
             Xs[:, feature_idx:feature_idx + n_features_from_metric] = cur_regressors
 
             feature_idx += n_features_from_metric
+        return Xs
 
-        if self.is_directed:
-            ys = input[~np.eye(n_nodes, dtype=bool)].flatten()[
-                 edges_indices_lims[0]:edges_indices_lims[1], None]
-        else:
-            ys = input[np.triu_indices(n_nodes, 1)][edges_indices_lims[0]:edges_indices_lims[1], None]
-        return Xs, ys
+    def prepare_mple_labels(self, observed_networks: np.ndarray, edges_indices_lims: tuple[int, int] | None = None):
+        n_nodes = observed_networks.shape[0]
+        edges_indices_lims = get_edges_indices_lims(edges_indices_lims, n_nodes, self.is_directed)
+        ys = np.zeros((edges_indices_lims[1] - edges_indices_lims[0], 1))
+        for net_idx in range(observed_networks.shape[-1]):
+            net = observed_networks[..., net_idx]
+            if self.is_directed:
+                ys += net[~np.eye(n_nodes, dtype=bool)].flatten()[
+                     edges_indices_lims[0]:edges_indices_lims[1], None]
+            else:
+                ys += net[np.triu_indices(n_nodes, 1)][edges_indices_lims[0]:edges_indices_lims[1], None]
+        return ys / observed_networks.shape[-1]
 
     def prepare_mple_reciprocity_data(self, observed_network: np.ndarray):
         Xs = np.zeros(((self.n_nodes ** 2 - self.n_nodes) // 2, 4, self.calc_num_of_features()))

@@ -17,6 +17,8 @@ import shutil
 import subprocess
 import sys
 
+from torch.nn.functional import binary_cross_entropy
+
 # Indices of columns in the output of bjobs -A
 JOB_ARRAY_ID_IDX = 0
 ARRAY_SPEC_IDX = 1
@@ -597,24 +599,24 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
         The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
         labeled 1). Of shape (num_samples X 1)
     ys
-        The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+        The labeled data (probability for each feature vector). The values are floats between 0 and 1 (and are
+        calculated as the fraction of networks in the observed ensemble where an edge exists. If training on a single
+        network, labels are binary). Of shape (num_samples X 1)
     Returns
     -------
     The probability to observe the vector `ys` under the distribution induced by `predictions`.
     """
-    trimmed_likelihoods = np.clip(predictions, eps, 1 - eps)
-    data_zero_indices = np.where(ys == 0)[0]
-    trimmed_likelihoods[data_zero_indices] = np.ones((data_zero_indices.size, 1)) - trimmed_likelihoods[
-        data_zero_indices]
-    log_likelihoods = np.log(trimmed_likelihoods) / np.log(log_base)
+    trimmed_predictions = np.clip(predictions, eps, 1 - eps)
+    minus_binary_cross_entropy_per_edge = (ys * np.log(trimmed_predictions) + (1 - ys) * np.log(
+        1 - trimmed_predictions)) / np.log(log_base)
     if reduction == 'none':
-        return log_likelihoods
+        return minus_binary_cross_entropy_per_edge
     # The wrapping into a numpy array and reshape to 2D is necessary for numba to compile the function properly
     # (returned types must be unified).
     elif reduction == 'sum':
-        return np.array([log_likelihoods.sum()]).reshape(1, 1)
+        return np.array([minus_binary_cross_entropy_per_edge.sum()]).reshape(1, 1)
     elif reduction == 'mean':
-        return np.array([log_likelihoods.mean()]).reshape(1, 1)
+        return np.array([minus_binary_cross_entropy_per_edge.mean()]).reshape(1, 1)
     else:
         raise ValueError(f"{reduction} is an unsupported reduction method, options are 'none', 'sum', or 'mean'")
 
@@ -755,7 +757,7 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
                                                               num_edges_per_job)
 
 
-def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
+def mple_logistic_regression_optimization(metrics_collection, observed_networks: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
                                           **kwargs):
@@ -767,8 +769,8 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         The `MetricsCollection` with relation to which the optimization is carried out.
         # TODO: we can't add a type hint for this, due to circular import (utils can't import from metrics, as metrics
             already imports from utils). This might suggest that this isn't the right place for this function.
-    observed_network
-        The observed network used as data for the optimization.
+    observed_networks
+        The observed network used as data for the optimization, or an array of observed networks.
     initial_thetas
         The initial vector of parameters. If `None`, the initial state is randomly sampled from (0,1)
     is_distributed
@@ -805,8 +807,12 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
     print("optimization started")
     sys.stdout.flush()
 
+    if len(observed_networks.shape) == 2:
+        # a single network
+        observed_networks = observed_networks[..., np.newaxis]
     if not is_distributed:
-        Xs, ys = metrics_collection.prepare_mple_data(observed_network)
+        Xs = metrics_collection.prepare_mple_regressors(observed_networks[..., 0])
+        ys = metrics_collection.prepare_mple_labels(observed_networks)
     else:
         out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
         data_path = (out_dir_path / "data").resolve()
@@ -817,9 +823,9 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
         with open(metric_collection_path, 'wb') as f:
             pickle.dump(metrics_collection, f)
-        observed_net_path = os.path.join(data_path, 'observed_network.pkl')
-        with open(observed_net_path, 'wb') as f:
-            pickle.dump(observed_network, f)
+        observed_nets_path = os.path.join(data_path, 'observed_networks.pkl')
+        with open(observed_nets_path, 'wb') as f:
+            pickle.dump(observed_networks, f)
 
     num_features = metrics_collection.calc_num_of_features()
     if initial_thetas is None:
@@ -950,10 +956,10 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, fu
     cmd_line_single_batch = _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas,
                                                                                  func_to_calculate, num_edges_per_job)
 
-    with open(os.path.join(data_path, "observed_network.pkl"), 'rb') as f:
-        observed_network = pickle.load(f)
+    with open(os.path.join(data_path, "observed_networks.pkl"), 'rb') as f:
+        observed_networks = pickle.load(f)
 
-    num_nodes = observed_network.shape[0]
+    num_nodes = observed_networks.shape[0]
     num_data_points = num_nodes * num_nodes - num_nodes
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
 
@@ -1297,3 +1303,12 @@ def set_off_diagonal_elements_from_array(square_mat, values_to_set):
     if values_to_set.size != square_mat.size - square_mat.shape[0]:
         raise ValueError("The size of the array must be compatible the size of the square matrix")
     square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set
+
+
+def get_edges_indices_lims(edges_indices_lims: tuple[int] | None, n_nodes: int, is_directed: bool):
+    if edges_indices_lims is None:
+        num_edges_to_take = n_nodes * n_nodes - n_nodes
+        if not is_directed:
+            num_edges_to_take = num_edges_to_take // 2
+        edges_indices_lims = (0, num_edges_to_take)
+    return edges_indices_lims
