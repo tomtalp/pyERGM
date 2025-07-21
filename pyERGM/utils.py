@@ -756,7 +756,6 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
                                                               'log_likelihood_hessian',
                                                               num_edges_per_job)
 
-
 def mple_logistic_regression_optimization(metrics_collection, observed_networks: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
@@ -807,9 +806,7 @@ def mple_logistic_regression_optimization(metrics_collection, observed_networks:
     print("optimization started")
     sys.stdout.flush()
 
-    if len(observed_networks.shape) == 2:
-        # a single network
-        observed_networks = observed_networks[..., np.newaxis]
+    observed_networks = expand_net_dims(observed_networks)
     if not is_distributed:
         Xs = metrics_collection.prepare_mple_regressors(observed_networks[..., 0])
         ys = metrics_collection.prepare_mple_labels(observed_networks)
@@ -1150,13 +1147,13 @@ def log_likelihood_multi_class_logistic_regression(true_labels, predictions, red
     #  trimming? i.e., only the first row or also the last one?
     #   predictions = np.clip(predictions, a_min=eps, a_max=1-eps)
     #   predictions /= predictions.sum(axis=0)
-    individual_data_samples_likes = np.log(predictions[true_labels == 1]) / np.log(log_base)
+    individual_data_samples_minus_cross_ent = ((np.log(predictions) / np.log(log_base)) * true_labels).sum(axis=0)
     if reduction == 'none':
-        return individual_data_samples_likes
+        return individual_data_samples_minus_cross_ent
     elif reduction == 'sum':
-        return individual_data_samples_likes.sum()
+        return individual_data_samples_minus_cross_ent.sum()
     elif reduction == 'mean':
-        return individual_data_samples_likes.mean()
+        return individual_data_samples_minus_cross_ent.mean()
     else:
         raise ValueError(f"reduction {reduction} not supported, options are 'none', 'sum', or 'mean'")
 
@@ -1171,7 +1168,7 @@ def minus_log_likelihood_gradient_multi_class_logistic_regression(thetas, Xs, ys
     return -(ys - prediction).flatten() @ Xs.reshape(-1, num_features)
 
 
-def mple_reciprocity_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
+def mple_reciprocity_logistic_regression_optimization(metrics_collection, observed_networks: np.ndarray,
                                                       initial_thetas: np.ndarray | None = None,
                                                       optimization_method: str = 'L-BFGS-B'):
     def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
@@ -1188,7 +1185,9 @@ def mple_reciprocity_logistic_regression_optimization(metrics_collection, observ
     print("optimization started")
     sys.stdout.flush()
 
-    Xs, ys = metrics_collection.prepare_mple_reciprocity_data(observed_network)
+    observed_networks = expand_net_dims(observed_networks)
+    Xs = metrics_collection.prepare_mple_reciprocity_regressors()
+    ys = metrics_collection.prepare_mple_reciprocity_labels(observed_networks)
 
     num_features = metrics_collection.calc_num_of_features()
     if initial_thetas is None:
@@ -1312,3 +1311,11 @@ def get_edges_indices_lims(edges_indices_lims: tuple[int] | None, n_nodes: int, 
             num_edges_to_take = num_edges_to_take // 2
         edges_indices_lims = (0, num_edges_to_take)
     return edges_indices_lims
+
+def expand_net_dims(net: np.ndarray) -> np.ndarray:
+    if net.ndim == 2:
+        # a single network
+        return net[..., np.newaxis]
+    elif net.ndim != 3:
+        raise ValueError("Cannot expand dims to an array that is not 2 or 3 dimensional")
+    return net

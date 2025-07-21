@@ -721,3 +721,17 @@ class TestERGM(unittest.TestCase):
         tested_model.fit(sample)
 
         self.assertTrue(np.all(np.abs(tested_model._thetas - reference_brute_force_model._thetas) < 1e-5))
+
+    def test_mple_reciprocity_multiple_observed_networks(self):
+        np.random.seed(347865)
+        metrics = [NumberOfEdgesDirected(), TotalReciprocity()]
+        n_nodes = 4
+        sample_size = 100
+        base_brute_force_model = BruteForceERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        sample = base_brute_force_model.generate_networks_for_sample(sample_size=sample_size)
+        reference_brute_force_model = BruteForceERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        reference_brute_force_model.fit(sample)
+        tested_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        tested_model.fit(sample)
+
+        self.assertTrue(np.all(np.abs(tested_model._thetas - reference_brute_force_model._thetas) < 1e-5))

@@ -1195,7 +1195,8 @@ class TestMetricsCollection(unittest.TestCase):
         statistics = collection.calculate_statistics(W)
         self.assertTrue(np.all(statistics == expected_statistics))
 
-        X, y = collection.prepare_mple_reciprocity_data(W)
+        X = collection.prepare_mple_reciprocity_regressors()
+        y = collection.prepare_mple_reciprocity_labels(expand_net_dims(W))
 
         # expected_X is an array of shape (6, 4, 8) - 6 dyads, 4 options per dyad, 8 p1 features after collinearity_fixer (10 before)
         # For each dyad we calculate its changescore for all 4 options, on all p1 features (i.e. a (4,8) matrix)

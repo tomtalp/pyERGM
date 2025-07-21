@@ -224,11 +224,11 @@ class ERGM():
             av_mat[lower_triangle_indices_aligned] = prediction
         return av_mat
 
-    def _mple_reciprocity_fit(self, observed_network, optimization_method: str = 'L-BFGS-B'):
+    def _mple_reciprocity_fit(self, observed_networks, optimization_method: str = 'L-BFGS-B'):
         print("MPLE_RECIPROCITY")
         trained_thetas, prediction, success = mple_reciprocity_logistic_regression_optimization(
             self._metrics_collection,
-            observed_network,
+            observed_networks,
             optimization_method=optimization_method)
 
         self._exact_dyadic_distributions = prediction

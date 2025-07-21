@@ -1509,18 +1509,18 @@ class MetricsCollection:
         n_nodes = observed_networks.shape[0]
         edges_indices_lims = get_edges_indices_lims(edges_indices_lims, n_nodes, self.is_directed)
         ys = np.zeros((edges_indices_lims[1] - edges_indices_lims[0], 1))
-        for net_idx in range(observed_networks.shape[-1]):
+        num_nets = observed_networks.shape[-1]
+        for net_idx in range(num_nets):
             net = observed_networks[..., net_idx]
             if self.is_directed:
                 ys += net[~np.eye(n_nodes, dtype=bool)].flatten()[
                      edges_indices_lims[0]:edges_indices_lims[1], None]
             else:
                 ys += net[np.triu_indices(n_nodes, 1)][edges_indices_lims[0]:edges_indices_lims[1], None]
-        return ys / observed_networks.shape[-1]
+        return ys / num_nets
 
-    def prepare_mple_reciprocity_data(self, observed_network: np.ndarray):
+    def prepare_mple_reciprocity_regressors(self):
         Xs = np.zeros(((self.n_nodes ** 2 - self.n_nodes) // 2, 4, self.calc_num_of_features()))
-        ys = convert_connectivity_to_dyad_states(observed_network)
         idx = 0
         zeros_net = np.zeros((self.n_nodes, self.n_nodes))
         for i in range(self.n_nodes - 1):
@@ -1533,7 +1533,15 @@ class MetricsCollection:
                 Xs[idx, RECIPROCAL_IDX] = self.calc_change_scores(net_with_i_j, {'edge': (j, i)}) + change_score_i_j
 
                 idx += 1
-        return Xs, ys
+        return Xs
+
+    @staticmethod
+    def prepare_mple_reciprocity_labels(observed_networks: np.ndarray):
+        ys = convert_connectivity_to_dyad_states(observed_networks[..., 0])
+        num_nets = observed_networks.shape[-1]
+        for i in range(1, num_nets):
+            ys += convert_connectivity_to_dyad_states(observed_networks[..., i])
+        return ys / num_nets
 
     def choose_optimization_scheme(self):
         if self.n_node_features > 0:
