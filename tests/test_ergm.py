@@ -705,3 +705,19 @@ class TestERGM(unittest.TestCase):
         calculated_likelihood = model.calc_model_log_likelihood(network_for_likelihood, reduction='sum', log_base=10)
         # TODO: the diff is larger than expected. Not probable that it's a problem, but maybe we should dig into this.
         self.assertTrue(np.abs(np.log10(true_likelihood_net_for_like) - calculated_likelihood) < 0.1)
+
+
+    def test_mple_multiple_observed_networks(self):
+        np.random.seed(9876)
+        metrics = [NumberOfEdgesDirected(), OutDegree()]
+        n_nodes = 4
+        base_brute_force_model = BruteForceERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        sample_size = 100
+        sample = base_brute_force_model.generate_networks_for_sample(sample_size=sample_size)
+        reference_brute_force_model = BruteForceERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        reference_brute_force_model.fit(sample)
+
+        tested_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        tested_model.fit(sample)
+
+        self.assertTrue(np.all(np.abs(tested_model._thetas - reference_brute_force_model._thetas) < 1e-5))

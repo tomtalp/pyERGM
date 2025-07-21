@@ -803,9 +803,12 @@ class BruteForceERGM(ERGM):
             all_networks[:, :, i] = construct_adj_mat_from_int(i, self._n_nodes, is_directed=is_directed)
 
         self.all_features_by_all_nets = self._metrics_collection.calculate_sample_statistics(all_networks)
+        self._all_weights, self._normalization_factor = self._calc_all_weights()
 
-        self._all_weights = np.exp(np.sum(self._thetas[:, None] * self.all_features_by_all_nets, axis=0))
-        self._normalization_factor = self._all_weights.sum()
+    def _calc_all_weights(self):
+        all_weights = np.exp(np.sum(self._thetas[:, None] * self.all_features_by_all_nets, axis=0))
+        normalization_factor = all_weights.sum()
+        return all_weights, normalization_factor
 
     def _validate_net_size(self):
         return (
@@ -818,32 +821,40 @@ class BruteForceERGM(ERGM):
         adj_mat_idx = construct_int_from_adj_mat(W, self._is_directed)
         return self._all_weights[adj_mat_idx]
 
-    def sample_network(self, sampling_method="Exact", seed_network=None, steps=0):
+    def generate_networks_for_sample(self, sample_size, sampling_method="Exact"):
         if sampling_method != "Exact":
             raise ValueError("BruteForceERGM supports only exact sampling (this is its whole purpose)")
 
         all_nets_probs = self._all_weights / self._normalization_factor
-        sampled_idx = np.random.choice(all_nets_probs.size, p=all_nets_probs)
-        return construct_adj_mat_from_int(sampled_idx, self._n_nodes, self._is_directed)
+        sampled_idx = np.random.choice(all_nets_probs.size, p=all_nets_probs, size=sample_size)
+        return np.stack([construct_adj_mat_from_int(i, self._n_nodes, self._is_directed) for i in sampled_idx], axis=-1)
 
-    def fit(self, observed_network):
-        def nll(thetas):
+    def calc_expected_features(self):
+        all_probs = self._all_weights / self._normalization_factor
+
+        expected_features = self.all_features_by_all_nets @ all_probs
+        return expected_features
+
+    def fit(self, observed_networks):
+        def nll(thetas, observed_networks):
             model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
                                    initial_thetas={feat_name: thetas[i] for i, feat_name in
                                                    enumerate(self._metrics_collection.get_parameter_names())},
                                    is_directed=self._is_directed)
-            return np.log(model._normalization_factor) - np.log(model.calculate_weight(observed_network))
+            log_z = np.log(model._normalization_factor)
+            observed_networks_log_weights = np.log(np.array(
+                [model.calculate_weight(observed_networks[..., i]) for i in range(observed_networks.shape[2])]))
+            return (log_z - observed_networks_log_weights).sum()
 
-        def nll_grad(thetas):
+        def nll_grad(thetas, observed_networks):
             model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
                                    initial_thetas={feat_name: thetas[i] for i, feat_name in
                                                    enumerate(self._metrics_collection.get_parameter_names())},
                                    is_directed=self._is_directed)
-            observed_features = model._metrics_collection.calculate_statistics(observed_network)
-            all_probs = model._all_weights / model._normalization_factor
-
-            expected_features = self.all_features_by_all_nets @ all_probs
-            return expected_features - observed_features
+            mean_observed_features = model._metrics_collection.calculate_sample_statistics(observed_networks).mean(
+                axis=1)
+            expected_features = model.calc_expected_features()
+            return expected_features - mean_observed_features
 
         def after_iteration_callback(intermediate_result: OptimizeResult):
             self.optimization_iter += 1
@@ -852,11 +863,15 @@ class BruteForceERGM(ERGM):
                   f'training: {cur_time - self.optimization_start_time} '
                   f'log likelihood: {-intermediate_result.fun}')
 
+        if observed_networks.ndim == 2:
+            observed_networks = observed_networks[..., np.newaxis]
+
         self.optimization_iter = 0
         print("optimization started")
         self.optimization_start_time = time.time()
-        res = minimize(nll, self._thetas, jac=nll_grad, callback=after_iteration_callback)
+        res = minimize(nll, self._thetas, args=(observed_networks,), jac=nll_grad, callback=after_iteration_callback)
         self._thetas = res.x
+        self._all_weights, self._normalization_factor = self._calc_all_weights()
         return res
 
 
