@@ -697,7 +697,8 @@ class TestERGM(unittest.TestCase):
         all_dyad_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction='none')
         # TODO: we assert here only the likelihood of having a reciprocal dyad. Should find a way (may be numerical) to
         #  evaluate the expected probabilities for the other 3 dyadic states and validate all of them.
-        self.assertTrue(np.all(np.abs(all_dyad_likes[reciprocal_dyads_indices] - np.log(observed_reciprocity_p)) < 1e-5))
+        self.assertTrue(
+            np.all(np.abs(all_dyad_likes[reciprocal_dyads_indices] - np.log(observed_reciprocity_p)) < 1e-5))
 
         brute_force_ergm = BruteForceERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
         brute_force_ergm._thetas = model._thetas
@@ -705,7 +706,6 @@ class TestERGM(unittest.TestCase):
         calculated_likelihood = model.calc_model_log_likelihood(network_for_likelihood, reduction='sum', log_base=10)
         # TODO: the diff is larger than expected. Not probable that it's a problem, but maybe we should dig into this.
         self.assertTrue(np.abs(np.log10(true_likelihood_net_for_like) - calculated_likelihood) < 0.1)
-
 
     def test_mple_multiple_observed_networks(self):
         np.random.seed(9876)
@@ -735,3 +735,15 @@ class TestERGM(unittest.TestCase):
         tested_model.fit(sample)
 
         self.assertTrue(np.all(np.abs(tested_model._thetas - reference_brute_force_model._thetas) < 1e-5))
+
+    def test_get_mple_reciprocity_prediction(self):
+        np.random.seed(348976)
+        metrics = [NumberOfEdgesDirected(), TotalReciprocity()]
+        n_nodes = 15
+        net = generate_binomial_tensor(net_size=n_nodes, node_features_size=0, num_samples=1)
+        train_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        train_model.fit(net)
+        test_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True,
+                          initial_thetas=train_model.get_model_parameters())
+        self.assertTrue(np.all(
+            np.abs(test_model.get_mple_reciprocity_prediction() - train_model._exact_dyadic_distributions) < 1e-10))

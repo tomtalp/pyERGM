@@ -1202,7 +1202,7 @@ def mple_reciprocity_logistic_regression_optimization(metrics_collection, observ
     else:
         raise ValueError(
             f"Unsupported optimization method: {optimization_method}. Options are: L-BFGS-B")
-    pred = predict_multi_class_logistic_regression(Xs, thetas)
+    pred = predict_multi_class_logistic_regression(Xs, res.x)
     return res.x, pred, res.success
 
 

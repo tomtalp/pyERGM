@@ -285,9 +285,9 @@ class ERGM():
                              f"MetricsCollection.choose_optimization_scheme(): {auto_optimization_scheme}. "
                              f"Options are supposed to be MPLE, MPLE_RECIPROCITY, MCMLE.")
 
-    def get_mple_reciprocity_prediction(self, observed_network: np.ndarray):
+    def get_mple_reciprocity_prediction(self):
         if self._metrics_collection.choose_optimization_scheme() == 'MPLE_RECIPROCITY':
-            Xs, _ = self._metrics_collection.prepare_mple_reciprocity_data(observed_network)
+            Xs = self._metrics_collection.prepare_mple_reciprocity_regressors()
             mple_reciprocity_prediction = predict_multi_class_logistic_regression(Xs, self._thetas)
             return mple_reciprocity_prediction
         else:
