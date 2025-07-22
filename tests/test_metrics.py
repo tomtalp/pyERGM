@@ -138,7 +138,7 @@ class TestNumberOfTriangles(unittest.TestCase):
         self.assertEqual(result, 2)
 
     def test_calculate_for_sample(self):
-        np.random.seed(678)
+        set_seed(678)
         sample_size = 50
         n = 10
         networks_sample = np.zeros((n, n, sample_size))

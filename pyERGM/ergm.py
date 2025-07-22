@@ -530,6 +530,8 @@ class ERGM():
             max_nets_for_sample += 1
 
         if convergence_criterion == "observed_bootstrap":
+            if observed_networks.ndim == 3 and observed_networks.shape[-1] > 1:
+                raise ValueError("observed_bootstrap doesn't support multiple networks!")
             for metric in self._metrics_collection.metrics:
                 if not hasattr(metric, "calculate_bootstrapped_features"):
                     raise ValueError(
@@ -537,7 +539,7 @@ class ERGM():
                         f"model doesn't support observed_bootstrap as a convergence criterion.")
             num_subsamples_data = kwargs.get("num_subsamples_data", 1000)
             data_splitting_method = kwargs.get("data_splitting_method", "uniform")
-            bootstrapped_features = self._metrics_collection.bootstrap_observed_features(observed_network,
+            bootstrapped_features = self._metrics_collection.bootstrap_observed_features(observed_networks,
                                                                                          num_subsamples=num_subsamples_data,
                                                                                          splitting_method=data_splitting_method)
             observed_covariance = covariance_matrix_estimation(bootstrapped_features,
@@ -569,9 +571,8 @@ class ERGM():
 
             features_of_net_samples = self._metrics_collection.calculate_sample_statistics(networks_for_sample)
             mean_features = np.mean(features_of_net_samples, axis=1)
-            observed_features = self._metrics_collection.calculate_statistics(observed_networks)
-            if observed_features.ndim == 2:
-                observed_features = observed_features.mean(axis=1)
+            observed_features = self._metrics_collection.calculate_sample_statistics(
+                expand_net_dims(observed_networks)).mean(axis=-1)
 
             grad = calc_nll_gradient(observed_features, mean_features)
             if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):
@@ -1031,8 +1032,8 @@ class ConvergenceTester:
                                                                          subsample_size)
 
         for cur_subsam_idx in range(num_subsamples):
-            print(
-                f"{datetime.datetime.now()} [model_bootstrap] \t\t Working on subsample {cur_subsam_idx}/{num_subsamples}")
+            # print(
+            #     f"{datetime.datetime.now()} [model_bootstrap] \t\t Working on subsample {cur_subsam_idx}/{num_subsamples}")
             sub_sample = sub_samples_features[:, cur_subsam_idx, :]
             sub_sample_mean = sub_sample.mean(axis=1)
             model_covariance_matrix = covariance_matrix_estimation(sub_sample, sub_sample_mean, method="naive")

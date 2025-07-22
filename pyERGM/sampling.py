@@ -240,7 +240,7 @@ class NaiveMetropolisHastings(Sampler):
                                                node_flip_info['feature'],
                                                node_flip_info['new_category'])
 
-            if (mcmc_iter_count - burn_in) % steps_per_sample == 0:
+            if mcmc_iter_count >= burn_in and (mcmc_iter_count - burn_in) % steps_per_sample == 0:
                 sampled_networks[:, :, networks_count] = current_network
 
                 if not replace:

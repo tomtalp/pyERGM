@@ -17,8 +17,6 @@ import shutil
 import subprocess
 import sys
 
-from torch.nn.functional import binary_cross_entropy
-
 # Indices of columns in the output of bjobs -A
 JOB_ARRAY_ID_IDX = 0
 ARRAY_SPEC_IDX = 1
@@ -32,6 +30,19 @@ EMPTY_IDX = 0
 UPPER_IDX = 1
 LOWER_IDX = 2
 RECIPROCAL_IDX = 3
+
+
+@njit
+def _numba_seed(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+
+
+def set_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    random.seed(seed)
+    _numba_seed(seed)
 
 
 def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
@@ -173,16 +184,13 @@ def get_uniform_random_edges_to_flip(num_nodes, num_pairs):
     These nodes represent the edge we wish to flip.
     The pairs are sampled randomly.
     """
-
-    edges_to_flip = np.zeros((2, num_pairs), dtype=np.int32)
-
-    edges_to_flip[0, :] = np.random.choice(num_nodes, size=num_pairs)
+    pre_edges_to_flip = np.random.choice(num_nodes, size=num_pairs)
 
     diff = np.random.choice(num_nodes - 1, size=num_pairs) + 1
 
-    edges_to_flip[1, :] = (edges_to_flip[0, :] - diff) % num_nodes
+    post_edges_to_flip = (pre_edges_to_flip - diff) % num_nodes
 
-    return edges_to_flip
+    return np.stack((pre_edges_to_flip, post_edges_to_flip))
 
 
 def get_uniform_random_nodes_to_flip(num_nodes, num_flips):
@@ -756,6 +764,7 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
                                                               'log_likelihood_hessian',
                                                               num_edges_per_job)
 
+
 def mple_logistic_regression_optimization(metrics_collection, observed_networks: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
@@ -1311,6 +1320,7 @@ def get_edges_indices_lims(edges_indices_lims: tuple[int] | None, n_nodes: int, 
             num_edges_to_take = num_edges_to_take // 2
         edges_indices_lims = (0, num_edges_to_take)
     return edges_indices_lims
+
 
 def expand_net_dims(net: np.ndarray) -> np.ndarray:
     if net.ndim == 2:

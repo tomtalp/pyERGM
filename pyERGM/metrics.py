@@ -1575,6 +1575,8 @@ class MetricsCollection:
 
     def bootstrap_observed_features(self, observed_network: np.ndarray, num_subsamples: int = 1000,
                                     splitting_method: str = 'uniform'):
+        if observed_network.ndim == 3:
+            observed_network = observed_network[..., 0]
         observed_connectivity_matrix = observed_network[:self.n_nodes, :self.n_nodes]
         observed_net_size = observed_connectivity_matrix.shape[0]
         second_half_size = observed_net_size // 2

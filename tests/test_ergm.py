@@ -101,7 +101,7 @@ class TestERGM(unittest.TestCase):
         self.assertEqual(probability, expected_probability)
 
     def test_benchmark_er_convergence(self, n=5, p=0.1, is_directed=False):
-        np.random.seed(9873645)
+        set_seed(9873645)
         print(f"Running an ERGM bruteforce fit with {n} nodes, p={p}, directed={is_directed}")
         num_pos_connect = n * (n - 1)
 
@@ -307,7 +307,7 @@ class TestERGM(unittest.TestCase):
             self.assertAlmostEqual(inferred_proba, real_density, places=4)
 
     def test_sampson_MCMLE(self):
-        np.random.seed(1234)
+        set_seed(1234)
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
         n_nodes = sampson_matrix.shape[0]
 
@@ -353,7 +353,7 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(convergence_result["success"])
 
     # def test_sampson_MCMLE_with_node_features(self):
-    #     np.random.seed(1234)
+    #     set_seed(1234)
     #     metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
     #     n_nodes = sampson_matrix.shape[0]
     #
@@ -404,7 +404,7 @@ class TestERGM(unittest.TestCase):
     def test_MPLE_regressors_of_different_scales(self):
         # TODO: currently this is a smoke test - we validate nothing: neither convergence nor the thetas/predictions.
         #  Somehow sklearn still finds a slightly better solution than ours.
-        np.random.seed(42)
+        set_seed(42)
 
         W = np.random.randint(0, 2, size=(10, 10))
         W[np.diag_indices(10)] = 0
@@ -512,7 +512,7 @@ class TestERGM(unittest.TestCase):
 
     def test_assigning_model_initial_thetas(self):
         # TODO: seems like convergence of the model in this test depends on the seed...
-        np.random.seed(8765)
+        set_seed(8765)
         n_nodes = 5
         W = np.array([[0, 0, 1, 1, 0],
                       [1, 0, 0, 0, 1],
@@ -552,7 +552,7 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(np.abs(model_2_av_mat - expected_model_2_av_mat).max() < 1e-10)
 
     def test_sampson_MPLE_RECIPROCITY(self):
-        np.random.seed(8765)
+        set_seed(8765)
 
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
         n_nodes = sampson_matrix.shape[0]
@@ -599,7 +599,7 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(convergence_result["success"])
 
     def test_mple_reciprocity_sampling(self):
-        np.random.seed(8765)
+        set_seed(8765)
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
         n_nodes = sampson_matrix.shape[0]
 
@@ -616,7 +616,7 @@ class TestERGM(unittest.TestCase):
         self.assertEqual(convergence_result["success"], True)
 
     def test_model_initialization_from_existing_params(self):
-        np.random.seed(1234)
+        set_seed(1234)
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
         n_nodes = sampson_matrix.shape[0]
 
@@ -630,7 +630,7 @@ class TestERGM(unittest.TestCase):
         new_model.generate_networks_for_sample(sample_size=10)
 
     def test_likelihood_calculations(self):
-        np.random.seed(1234)
+        set_seed(1234)
 
         # Independent model
         metrics = [NumberOfEdgesDirected()]
@@ -708,7 +708,7 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(np.abs(np.log10(true_likelihood_net_for_like) - calculated_likelihood) < 0.1)
 
     def test_mple_multiple_observed_networks(self):
-        np.random.seed(9876)
+        set_seed(9876)
         metrics = [NumberOfEdgesDirected(), OutDegree()]
         n_nodes = 4
         base_brute_force_model = BruteForceERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
@@ -723,7 +723,7 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(np.all(np.abs(tested_model._thetas - reference_brute_force_model._thetas) < 1e-5))
 
     def test_mple_reciprocity_multiple_observed_networks(self):
-        np.random.seed(347865)
+        set_seed(347865)
         metrics = [NumberOfEdgesDirected(), TotalReciprocity()]
         n_nodes = 4
         sample_size = 100
@@ -737,7 +737,7 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(np.all(np.abs(tested_model._thetas - reference_brute_force_model._thetas) < 1e-5))
 
     def test_get_mple_reciprocity_prediction(self):
-        np.random.seed(348976)
+        set_seed(348976)
         metrics = [NumberOfEdgesDirected(), TotalReciprocity()]
         n_nodes = 15
         net = generate_binomial_tensor(net_size=n_nodes, node_features_size=0, num_samples=1)
@@ -747,3 +747,26 @@ class TestERGM(unittest.TestCase):
                           initial_thetas=train_model.get_model_parameters())
         self.assertTrue(np.all(
             np.abs(test_model.get_mple_reciprocity_prediction() - train_model._exact_dyadic_distributions) < 1e-10))
+
+    def test_mcmle_multiple_observed_networks(self):
+        set_seed(7653467)
+        metrics = [NumberOfEdgesDirected(), InDegree(), TotalReciprocity()]
+        n_nodes = 10
+        sample_size = 1000
+        base_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        sample = base_model.generate_networks_for_sample(sample_size=sample_size, burn_in=10000)
+        tested_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+        tested_model.fit(
+            sample,
+            optimization_scheme='MCMLE',
+            theta_init_method='uniform',
+            lr=0.1,
+            mcmc_sample_size=n_nodes ** 3,
+            mcmc_steps_per_sample=n_nodes ** 2,
+            bootstrap_convergence_confidence=0.99,
+            bootstrap_convergence_stds_away_thr=0.75,
+        )
+
+        thetas_R_2 = 1 - np.sum((base_model._thetas - tested_model._thetas) ** 2) / np.sum(
+            (base_model._thetas - np.mean(base_model._thetas)) ** 2)
+        self.assertTrue(thetas_R_2 > 0.96)
