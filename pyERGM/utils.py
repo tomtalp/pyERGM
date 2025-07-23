@@ -1313,7 +1313,7 @@ def set_off_diagonal_elements_from_array(square_mat, values_to_set):
     square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set
 
 
-def get_edges_indices_lims(edges_indices_lims: tuple[int] | None, n_nodes: int, is_directed: bool):
+def get_edges_indices_lims(edges_indices_lims: tuple[int, int] | None, n_nodes: int, is_directed: bool):
     if edges_indices_lims is None:
         num_edges_to_take = n_nodes * n_nodes - n_nodes
         if not is_directed:
