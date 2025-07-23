@@ -155,7 +155,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         self.assertEqual(total_change_score, expected_change_score)
 
     def test__calc_edge_influence_on_features(self):
-        np.random.seed(5678234)
+        set_seed(5678234)
         n = 10
         graph = nx.fast_gnp_random_graph(n, 0.5, seed=np.random)
         adj_mat = nx.to_numpy_array(graph)
@@ -170,7 +170,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         self.assertTrue(np.all(expected_total_influence == total_influence))
 
     def test_sample_non_uniform_proposals_smoke_test(self):
-        np.random.seed(5678234)
+        set_seed(5678234)
         n = 10
         graph = nx.fast_gnp_random_graph(n, 0.5, seed=np.random)
         adj_mat = nx.to_numpy_array(graph)

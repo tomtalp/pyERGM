@@ -32,6 +32,19 @@ LOWER_IDX = 2
 RECIPROCAL_IDX = 3
 
 
+@njit
+def _numba_seed(seed):
+    np.random.seed(seed)
+    random.seed(seed)
+
+
+def set_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    random.seed(seed)
+    _numba_seed(seed)
+
+
 def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
     perturbed_net = network.copy()
     perturbed_net[i, j] = value
@@ -171,16 +184,13 @@ def get_uniform_random_edges_to_flip(num_nodes, num_pairs):
     These nodes represent the edge we wish to flip.
     The pairs are sampled randomly.
     """
-
-    edges_to_flip = np.zeros((2, num_pairs), dtype=np.int32)
-
-    edges_to_flip[0, :] = np.random.choice(num_nodes, size=num_pairs)
+    pre_edges_to_flip = np.random.choice(num_nodes, size=num_pairs)
 
     diff = np.random.choice(num_nodes - 1, size=num_pairs) + 1
 
-    edges_to_flip[1, :] = (edges_to_flip[0, :] - diff) % num_nodes
+    post_edges_to_flip = (pre_edges_to_flip - diff) % num_nodes
 
-    return edges_to_flip
+    return np.stack((pre_edges_to_flip, post_edges_to_flip))
 
 
 def get_uniform_random_nodes_to_flip(num_nodes, num_flips):
@@ -597,24 +607,24 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
         The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
         labeled 1). Of shape (num_samples X 1)
     ys
-        The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+        The labeled data (probability for each feature vector). The values are floats between 0 and 1 (and are
+        calculated as the fraction of networks in the observed ensemble where an edge exists. If training on a single
+        network, labels are binary). Of shape (num_samples X 1)
     Returns
     -------
     The probability to observe the vector `ys` under the distribution induced by `predictions`.
     """
-    trimmed_likelihoods = np.clip(predictions, eps, 1 - eps)
-    data_zero_indices = np.where(ys == 0)[0]
-    trimmed_likelihoods[data_zero_indices] = np.ones((data_zero_indices.size, 1)) - trimmed_likelihoods[
-        data_zero_indices]
-    log_likelihoods = np.log(trimmed_likelihoods) / np.log(log_base)
+    trimmed_predictions = np.clip(predictions, eps, 1 - eps)
+    minus_binary_cross_entropy_per_edge = (ys * np.log(trimmed_predictions) + (1 - ys) * np.log(
+        1 - trimmed_predictions)) / np.log(log_base)
     if reduction == 'none':
-        return log_likelihoods
+        return minus_binary_cross_entropy_per_edge
     # The wrapping into a numpy array and reshape to 2D is necessary for numba to compile the function properly
     # (returned types must be unified).
     elif reduction == 'sum':
-        return np.array([log_likelihoods.sum()]).reshape(1, 1)
+        return np.array([minus_binary_cross_entropy_per_edge.sum()]).reshape(1, 1)
     elif reduction == 'mean':
-        return np.array([log_likelihoods.mean()]).reshape(1, 1)
+        return np.array([minus_binary_cross_entropy_per_edge.mean()]).reshape(1, 1)
     else:
         raise ValueError(f"{reduction} is an unsupported reduction method, options are 'none', 'sum', or 'mean'")
 
@@ -755,7 +765,7 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
                                                               num_edges_per_job)
 
 
-def mple_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
+def mple_logistic_regression_optimization(metrics_collection, observed_networks: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
                                           **kwargs):
@@ -767,8 +777,8 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         The `MetricsCollection` with relation to which the optimization is carried out.
         # TODO: we can't add a type hint for this, due to circular import (utils can't import from metrics, as metrics
             already imports from utils). This might suggest that this isn't the right place for this function.
-    observed_network
-        The observed network used as data for the optimization.
+    observed_networks
+        The observed network used as data for the optimization, or an array of observed networks.
     initial_thetas
         The initial vector of parameters. If `None`, the initial state is randomly sampled from (0,1)
     is_distributed
@@ -805,8 +815,10 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
     print("optimization started")
     sys.stdout.flush()
 
+    observed_networks = expand_net_dims(observed_networks)
     if not is_distributed:
-        Xs, ys = metrics_collection.prepare_mple_data(observed_network)
+        Xs = metrics_collection.prepare_mple_regressors(observed_networks[..., 0])
+        ys = metrics_collection.prepare_mple_labels(observed_networks)
     else:
         out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
         data_path = (out_dir_path / "data").resolve()
@@ -817,9 +829,9 @@ def mple_logistic_regression_optimization(metrics_collection, observed_network: 
         metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
         with open(metric_collection_path, 'wb') as f:
             pickle.dump(metrics_collection, f)
-        observed_net_path = os.path.join(data_path, 'observed_network.pkl')
-        with open(observed_net_path, 'wb') as f:
-            pickle.dump(observed_network, f)
+        observed_nets_path = os.path.join(data_path, 'observed_networks.pkl')
+        with open(observed_nets_path, 'wb') as f:
+            pickle.dump(observed_networks, f)
 
     num_features = metrics_collection.calc_num_of_features()
     if initial_thetas is None:
@@ -950,10 +962,10 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, fu
     cmd_line_single_batch = _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas,
                                                                                  func_to_calculate, num_edges_per_job)
 
-    with open(os.path.join(data_path, "observed_network.pkl"), 'rb') as f:
-        observed_network = pickle.load(f)
+    with open(os.path.join(data_path, "observed_networks.pkl"), 'rb') as f:
+        observed_networks = pickle.load(f)
 
-    num_nodes = observed_network.shape[0]
+    num_nodes = observed_networks.shape[0]
     num_data_points = num_nodes * num_nodes - num_nodes
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
 
@@ -1144,13 +1156,13 @@ def log_likelihood_multi_class_logistic_regression(true_labels, predictions, red
     #  trimming? i.e., only the first row or also the last one?
     #   predictions = np.clip(predictions, a_min=eps, a_max=1-eps)
     #   predictions /= predictions.sum(axis=0)
-    individual_data_samples_likes = np.log(predictions[true_labels == 1]) / np.log(log_base)
+    individual_data_samples_minus_cross_ent = ((np.log(predictions) / np.log(log_base)) * true_labels).sum(axis=0)
     if reduction == 'none':
-        return individual_data_samples_likes
+        return individual_data_samples_minus_cross_ent
     elif reduction == 'sum':
-        return individual_data_samples_likes.sum()
+        return individual_data_samples_minus_cross_ent.sum()
     elif reduction == 'mean':
-        return individual_data_samples_likes.mean()
+        return individual_data_samples_minus_cross_ent.mean()
     else:
         raise ValueError(f"reduction {reduction} not supported, options are 'none', 'sum', or 'mean'")
 
@@ -1165,7 +1177,7 @@ def minus_log_likelihood_gradient_multi_class_logistic_regression(thetas, Xs, ys
     return -(ys - prediction).flatten() @ Xs.reshape(-1, num_features)
 
 
-def mple_reciprocity_logistic_regression_optimization(metrics_collection, observed_network: np.ndarray,
+def mple_reciprocity_logistic_regression_optimization(metrics_collection, observed_networks: np.ndarray,
                                                       initial_thetas: np.ndarray | None = None,
                                                       optimization_method: str = 'L-BFGS-B'):
     def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
@@ -1182,7 +1194,9 @@ def mple_reciprocity_logistic_regression_optimization(metrics_collection, observ
     print("optimization started")
     sys.stdout.flush()
 
-    Xs, ys = metrics_collection.prepare_mple_reciprocity_data(observed_network)
+    observed_networks = expand_net_dims(observed_networks)
+    Xs = metrics_collection.prepare_mple_reciprocity_regressors()
+    ys = metrics_collection.prepare_mple_reciprocity_labels(observed_networks)
 
     num_features = metrics_collection.calc_num_of_features()
     if initial_thetas is None:
@@ -1197,7 +1211,7 @@ def mple_reciprocity_logistic_regression_optimization(metrics_collection, observ
     else:
         raise ValueError(
             f"Unsupported optimization method: {optimization_method}. Options are: L-BFGS-B")
-    pred = predict_multi_class_logistic_regression(Xs, thetas)
+    pred = predict_multi_class_logistic_regression(Xs, res.x)
     return res.x, pred, res.success
 
 
@@ -1297,3 +1311,21 @@ def set_off_diagonal_elements_from_array(square_mat, values_to_set):
     if values_to_set.size != square_mat.size - square_mat.shape[0]:
         raise ValueError("The size of the array must be compatible the size of the square matrix")
     square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set
+
+
+def get_edges_indices_lims(edges_indices_lims: tuple[int] | None, n_nodes: int, is_directed: bool):
+    if edges_indices_lims is None:
+        num_edges_to_take = n_nodes * n_nodes - n_nodes
+        if not is_directed:
+            num_edges_to_take = num_edges_to_take // 2
+        edges_indices_lims = (0, num_edges_to_take)
+    return edges_indices_lims
+
+
+def expand_net_dims(net: np.ndarray) -> np.ndarray:
+    if net.ndim == 2:
+        # a single network
+        return net[..., np.newaxis]
+    elif net.ndim != 3:
+        raise ValueError("Cannot expand dims to an array that is not 2 or 3 dimensional")
+    return net

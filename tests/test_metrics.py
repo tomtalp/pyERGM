@@ -138,7 +138,7 @@ class TestNumberOfTriangles(unittest.TestCase):
         self.assertEqual(result, 2)
 
     def test_calculate_for_sample(self):
-        np.random.seed(678)
+        set_seed(678)
         sample_size = 50
         n = 10
         networks_sample = np.zeros((n, n, sample_size))
@@ -1163,10 +1163,14 @@ class TestMetricsCollection(unittest.TestCase):
 
         idx_to_ignore = np.where(collection.metrics[1]._indices_to_ignore)[0][0]
 
-        Xs_full, ys_full = collection.prepare_mple_data(W1)
+        Xs_full = collection.prepare_mple_regressors(W1)
+        ys_full = collection.prepare_mple_labels(W1[..., np.newaxis])
 
-        Xs_half, ys_half = collection.prepare_mple_data(W1,
-                                                        edges_indices_lims=(0, expected_mple_regressors.shape[0] // 2))
+        Xs_half = collection.prepare_mple_regressors(W1, edges_indices_lims=(0, expected_mple_regressors.shape[0] // 2))
+        ys_half = collection.prepare_mple_labels(
+            W1[..., np.newaxis],
+            edges_indices_lims=(0, expected_mple_regressors.shape[0] // 2)
+        )
 
         # Deleting the 1+idx_to_ignore because the first entry is the NumberOfEdgesDirected metric
         expected_mple_regressors = np.delete(expected_mple_regressors, 1 + idx_to_ignore, axis=1)
@@ -1191,7 +1195,8 @@ class TestMetricsCollection(unittest.TestCase):
         statistics = collection.calculate_statistics(W)
         self.assertTrue(np.all(statistics == expected_statistics))
 
-        X, y = collection.prepare_mple_reciprocity_data(W)
+        X = collection.prepare_mple_reciprocity_regressors()
+        y = collection.prepare_mple_reciprocity_labels(expand_net_dims(W))
 
         # expected_X is an array of shape (6, 4, 8) - 6 dyads, 4 options per dyad, 8 p1 features after collinearity_fixer (10 before)
         # For each dyad we calculate its changescore for all 4 options, on all p1 features (i.e. a (4,8) matrix)

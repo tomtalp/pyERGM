@@ -181,7 +181,7 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_network, optimization_method: str = 'L-BFGS-B', **kwargs):
+    def _mple_fit(self, observed_networks, optimization_method: str = 'L-BFGS-B', **kwargs):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -193,8 +193,8 @@ class ERGM():
 
         Parameters
         ----------
-        observed_network : np.ndarray
-            The adjacency matrix of the observed network.
+        observed_networks : np.ndarray
+            The adjacency matrix of the observed network, or an array of adjacency matrices.
         
         Returns
         -------
@@ -203,7 +203,7 @@ class ERGM():
         """
         print("MPLE")
         trained_thetas, prediction, success = mple_logistic_regression_optimization(self._metrics_collection,
-                                                                                    observed_network,
+                                                                                    observed_networks,
                                                                                     is_distributed=self._is_distributed_optimization,
                                                                                     optimization_method=optimization_method,
                                                                                     num_edges_per_job=kwargs.get(
@@ -224,11 +224,11 @@ class ERGM():
             av_mat[lower_triangle_indices_aligned] = prediction
         return av_mat
 
-    def _mple_reciprocity_fit(self, observed_network, optimization_method: str = 'L-BFGS-B'):
+    def _mple_reciprocity_fit(self, observed_networks, optimization_method: str = 'L-BFGS-B'):
         print("MPLE_RECIPROCITY")
         trained_thetas, prediction, success = mple_reciprocity_logistic_regression_optimization(
             self._metrics_collection,
-            observed_network,
+            observed_networks,
             optimization_method=optimization_method)
 
         self._exact_dyadic_distributions = prediction
@@ -239,7 +239,9 @@ class ERGM():
     #  average matrix of the model, so should be computed once and stored. If the model is dyadic dependent, this is an
     #  approximation, and the degree to which changes in the observed_network will change the prediction depend on the
     #  metrics and the specific networks, it can not be pre-determined.
-    def get_mple_prediction(self, observed_network: np.ndarray):
+    def get_mple_prediction(self, observed_networks: np.ndarray):
+        if observed_networks.ndim == 3:
+            observed_networks = observed_networks[..., 0]
         is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
         if is_dyadic_independent and self._exact_average_mat is not None:
             return self._exact_average_mat.copy()
@@ -248,7 +250,7 @@ class ERGM():
         if self._is_distributed_optimization:
             raise NotImplementedError(
                 "calculating mple predictions distributed without fitting is yet to be implemented")
-        Xs, _ = self._metrics_collection.prepare_mple_data(observed_network)
+        Xs = self._metrics_collection.prepare_mple_regressors(observed_networks)
         pred = calc_logistic_regression_predictions(Xs, self._thetas).flatten()
         if is_dyadic_independent:
             self._exact_average_mat = self._rearrange_prediction_to_av_mat(pred)
@@ -283,9 +285,9 @@ class ERGM():
                              f"MetricsCollection.choose_optimization_scheme(): {auto_optimization_scheme}. "
                              f"Options are supposed to be MPLE, MPLE_RECIPROCITY, MCMLE.")
 
-    def get_mple_reciprocity_prediction(self, observed_network: np.ndarray):
+    def get_mple_reciprocity_prediction(self):
         if self._metrics_collection.choose_optimization_scheme() == 'MPLE_RECIPROCITY':
-            Xs, _ = self._metrics_collection.prepare_mple_reciprocity_data(observed_network)
+            Xs = self._metrics_collection.prepare_mple_reciprocity_regressors()
             mple_reciprocity_prediction = predict_multi_class_logistic_regression(Xs, self._thetas)
             return mple_reciprocity_prediction
         else:
@@ -334,7 +336,8 @@ class ERGM():
             raise NotImplementedError("Currently supporting likelihood calculations for models that are synaptic "
                                       "independent or with reciprocal synapses dependent")
 
-    def fit(self, observed_network,
+    def fit(self,
+            observed_networks,
             lr=0.1,
             opt_steps=1000,
             steps_for_decay=100,
@@ -469,10 +472,12 @@ class ERGM():
         """
         # Create the full observed network from adjacency matrix and node features:
         if observed_node_features is not None:
+            if len(observed_networks.shape) != 2:
+                raise ValueError("Multiple networks are not supported with observed_node_features")
             ordered_observed_node_features = [observed_node_features[fname] for fname in self.node_feature_names.keys()]
             ordered_observed_node_features = [one_d_f for f in ordered_observed_node_features for one_d_f in f]
             ordered_observed_node_features = np.array(ordered_observed_node_features).T
-            observed_network = np.concatenate([observed_network, ordered_observed_node_features], axis=1)
+            observed_networks = np.concatenate([observed_networks, ordered_observed_node_features], axis=1)
 
         # This is because we assume the sample size is even when estimating the covariance matrix (in
         # calc_capital_gammas).
@@ -492,7 +497,7 @@ class ERGM():
         if optimization_scheme == "AUTO":
             optimization_scheme = self._metrics_collection.choose_optimization_scheme()
         if optimization_scheme == "MPLE" or (theta_init_method == 'mple' and optimization_scheme == 'MCMLE'):
-            self._thetas, success = self._mple_fit(observed_network,
+            self._thetas, success = self._mple_fit(observed_networks,
                                                    optimization_method=kwargs.get('mple_optimization_method',
                                                                                   'L-BFGS-B'),
                                                    num_edges_per_job=kwargs.get('num_edges_per_job', 100000))
@@ -504,7 +509,7 @@ class ERGM():
             if not self._is_directed:
                 raise ValueError("There is not meaning for reciprocity in undirected graphs, "
                                  "can't perform MPLE_RECIPROCITY optimization.")
-            self._thetas, success = self._mple_reciprocity_fit(observed_network,
+            self._thetas, success = self._mple_reciprocity_fit(observed_networks,
                                                                optimization_method=kwargs.get(
                                                                    'mple_optimization_method',
                                                                    'L-BFGS-B'))
@@ -525,6 +530,8 @@ class ERGM():
             max_nets_for_sample += 1
 
         if convergence_criterion == "observed_bootstrap":
+            if observed_networks.ndim == 3 and observed_networks.shape[-1] > 1:
+                raise ValueError("observed_bootstrap doesn't support multiple networks!")
             for metric in self._metrics_collection.metrics:
                 if not hasattr(metric, "calculate_bootstrapped_features"):
                     raise ValueError(
@@ -532,7 +539,7 @@ class ERGM():
                         f"model doesn't support observed_bootstrap as a convergence criterion.")
             num_subsamples_data = kwargs.get("num_subsamples_data", 1000)
             data_splitting_method = kwargs.get("data_splitting_method", "uniform")
-            bootstrapped_features = self._metrics_collection.bootstrap_observed_features(observed_network,
+            bootstrapped_features = self._metrics_collection.bootstrap_observed_features(observed_networks,
                                                                                          num_subsamples=num_subsamples_data,
                                                                                          splitting_method=data_splitting_method)
             observed_covariance = covariance_matrix_estimation(bootstrapped_features,
@@ -548,7 +555,7 @@ class ERGM():
         grads = np.zeros((opt_steps, num_of_features))
 
         if mcmc_seed_network is None and self._exact_average_mat is not None:
-            probabilities_matrix = self.get_mple_prediction(observed_network)
+            probabilities_matrix = self.get_mple_prediction(observed_networks)
             mcmc_seed_network = sample_from_independent_probabilities_matrix(probabilities_matrix, 1)
             mcmc_seed_network = mcmc_seed_network[:, :, 0]
         burn_in = mcmc_burn_in
@@ -564,7 +571,8 @@ class ERGM():
 
             features_of_net_samples = self._metrics_collection.calculate_sample_statistics(networks_for_sample)
             mean_features = np.mean(features_of_net_samples, axis=1)
-            observed_features = self._metrics_collection.calculate_statistics(observed_network)
+            observed_features = self._metrics_collection.calculate_sample_statistics(
+                expand_net_dims(observed_networks)).mean(axis=-1)
 
             grad = calc_nll_gradient(observed_features, mean_features)
             if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):
@@ -796,9 +804,12 @@ class BruteForceERGM(ERGM):
             all_networks[:, :, i] = construct_adj_mat_from_int(i, self._n_nodes, is_directed=is_directed)
 
         self.all_features_by_all_nets = self._metrics_collection.calculate_sample_statistics(all_networks)
+        self._all_weights, self._normalization_factor = self._calc_all_weights()
 
-        self._all_weights = np.exp(np.sum(self._thetas[:, None] * self.all_features_by_all_nets, axis=0))
-        self._normalization_factor = self._all_weights.sum()
+    def _calc_all_weights(self):
+        all_weights = np.exp(np.sum(self._thetas[:, None] * self.all_features_by_all_nets, axis=0))
+        normalization_factor = all_weights.sum()
+        return all_weights, normalization_factor
 
     def _validate_net_size(self):
         return (
@@ -811,32 +822,40 @@ class BruteForceERGM(ERGM):
         adj_mat_idx = construct_int_from_adj_mat(W, self._is_directed)
         return self._all_weights[adj_mat_idx]
 
-    def sample_network(self, sampling_method="Exact", seed_network=None, steps=0):
+    def generate_networks_for_sample(self, sample_size, sampling_method="Exact"):
         if sampling_method != "Exact":
             raise ValueError("BruteForceERGM supports only exact sampling (this is its whole purpose)")
 
         all_nets_probs = self._all_weights / self._normalization_factor
-        sampled_idx = np.random.choice(all_nets_probs.size, p=all_nets_probs)
-        return construct_adj_mat_from_int(sampled_idx, self._n_nodes, self._is_directed)
+        sampled_idx = np.random.choice(all_nets_probs.size, p=all_nets_probs, size=sample_size)
+        return np.stack([construct_adj_mat_from_int(i, self._n_nodes, self._is_directed) for i in sampled_idx], axis=-1)
 
-    def fit(self, observed_network):
-        def nll(thetas):
+    def calc_expected_features(self):
+        all_probs = self._all_weights / self._normalization_factor
+
+        expected_features = self.all_features_by_all_nets @ all_probs
+        return expected_features
+
+    def fit(self, observed_networks):
+        def nll(thetas, observed_networks):
             model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
                                    initial_thetas={feat_name: thetas[i] for i, feat_name in
                                                    enumerate(self._metrics_collection.get_parameter_names())},
                                    is_directed=self._is_directed)
-            return np.log(model._normalization_factor) - np.log(model.calculate_weight(observed_network))
+            log_z = np.log(model._normalization_factor)
+            observed_networks_log_weights = np.log(np.array(
+                [model.calculate_weight(observed_networks[..., i]) for i in range(observed_networks.shape[2])]))
+            return (log_z - observed_networks_log_weights).sum()
 
-        def nll_grad(thetas):
+        def nll_grad(thetas, observed_networks):
             model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
                                    initial_thetas={feat_name: thetas[i] for i, feat_name in
                                                    enumerate(self._metrics_collection.get_parameter_names())},
                                    is_directed=self._is_directed)
-            observed_features = model._metrics_collection.calculate_statistics(observed_network)
-            all_probs = model._all_weights / model._normalization_factor
-
-            expected_features = self.all_features_by_all_nets @ all_probs
-            return expected_features - observed_features
+            mean_observed_features = model._metrics_collection.calculate_sample_statistics(observed_networks).mean(
+                axis=1)
+            expected_features = model.calc_expected_features()
+            return expected_features - mean_observed_features
 
         def after_iteration_callback(intermediate_result: OptimizeResult):
             self.optimization_iter += 1
@@ -845,11 +864,15 @@ class BruteForceERGM(ERGM):
                   f'training: {cur_time - self.optimization_start_time} '
                   f'log likelihood: {-intermediate_result.fun}')
 
+        if observed_networks.ndim == 2:
+            observed_networks = observed_networks[..., np.newaxis]
+
         self.optimization_iter = 0
         print("optimization started")
         self.optimization_start_time = time.time()
-        res = minimize(nll, self._thetas, jac=nll_grad, callback=after_iteration_callback)
+        res = minimize(nll, self._thetas, args=(observed_networks,), jac=nll_grad, callback=after_iteration_callback)
         self._thetas = res.x
+        self._all_weights, self._normalization_factor = self._calc_all_weights()
         return res
 
 
@@ -1009,8 +1032,8 @@ class ConvergenceTester:
                                                                          subsample_size)
 
         for cur_subsam_idx in range(num_subsamples):
-            print(
-                f"{datetime.datetime.now()} [model_bootstrap] \t\t Working on subsample {cur_subsam_idx}/{num_subsamples}")
+            # print(
+            #     f"{datetime.datetime.now()} [model_bootstrap] \t\t Working on subsample {cur_subsam_idx}/{num_subsamples}")
             sub_sample = sub_samples_features[:, cur_subsam_idx, :]
             sub_sample_mean = sub_sample.mean(axis=1)
             model_covariance_matrix = covariance_matrix_estimation(sub_sample, sub_sample_mean, method="naive")

@@ -49,7 +49,7 @@ class GeneralUtilsTester(unittest.TestCase):
         self.assertEqual(real_num_nodes, num_nodes)
 
     def test_exact_marginals_from_dyads_distributions(self):
-        np.random.seed(67987)
+        set_seed(9873645)
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
         n_nodes = sampson_matrix.shape[0]
 
@@ -57,7 +57,7 @@ class GeneralUtilsTester(unittest.TestCase):
 
         convergence_result = p1_sampson_model.fit(sampson_matrix)
 
-        sample_size = 10000
+        sample_size = 50000
         sampled_networks = p1_sampson_model.generate_networks_for_sample(sampling_method="exact",
                                                                          sample_size=sample_size)
         sample_mean = sampled_networks.mean(axis=-1)
@@ -132,7 +132,7 @@ class TestGreatestConvexMinorant(unittest.TestCase):
                 self.assertAlmostEqual(minorant_vals[j], expected_values[i, j], places=8)
 
     def test_random_points(self):
-        np.random.seed(8972634)
+        set_seed(8972634)
         num_points = 100
         xs = np.arange(num_points) + 1
         values = 10 * np.random.rand(100)

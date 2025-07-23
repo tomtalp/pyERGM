@@ -29,14 +29,15 @@ def main():
     func_id = int(os.environ['LSB_JOBINDEX']) - 1
     with open(os.path.join(out_dir_path, 'data', 'metric_collection.pkl'), 'rb') as f:
         metric_collection = pickle.load(f)
-    with open(os.path.join(out_dir_path, 'data', 'observed_network.pkl'), 'rb') as f:
-        observed_network = pickle.load(f)
+    with open(os.path.join(out_dir_path, 'data', 'observed_networks.pkl'), 'rb') as f:
+        observed_networks = pickle.load(f)
 
     # Get data chunk and predictions
-    num_nodes = observed_network.shape[0]
+    num_nodes = observed_networks.shape[0]
     edge_indices = (func_id * num_edges_per_job,
                     min((func_id + 1) * num_edges_per_job, num_nodes * num_nodes - num_nodes))
-    Xs_chunk, ys_chunk = metric_collection.prepare_mple_data(observed_network, edge_indices)
+    Xs_chunk = metric_collection.prepare_mple_regressors(observed_networks[..., 0], edge_indices)
+    ys_chunk = metric_collection.prepare_mple_labels(observed_networks, edge_indices)
     chunk_prediction = calc_logistic_regression_predictions(Xs_chunk, thetas)
 
     # Create outputs directory to store the calculated chunks

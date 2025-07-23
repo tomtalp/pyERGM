@@ -84,7 +84,7 @@ class NaiveMetropolisHastings(Sampler):
         -------
         A n(n-1) vector with the sum of influences of each edge over all features (total influence of each edge).
         """
-        change_scores, _ = self.metrics_collection.prepare_mple_data(net_for_change_scores)
+        change_scores = self.metrics_collection.prepare_mple_regressors(net_for_change_scores)
         mean_importance_per_feature = change_scores.mean(axis=0)
         change_scores[:, mean_importance_per_feature != 0] /= mean_importance_per_feature[
             None, mean_importance_per_feature != 0]
@@ -240,7 +240,7 @@ class NaiveMetropolisHastings(Sampler):
                                                node_flip_info['feature'],
                                                node_flip_info['new_category'])
 
-            if (mcmc_iter_count - burn_in) % steps_per_sample == 0:
+            if mcmc_iter_count >= burn_in and (mcmc_iter_count - burn_in) % steps_per_sample == 0:
                 sampled_networks[:, :, networks_count] = current_network
 
                 if not replace:
