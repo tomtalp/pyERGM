@@ -906,14 +906,14 @@ def _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, f
     # Construct a string with the current thetas, to pass using the command line to children jobs.
     thetas_str = ''
     for t in cur_thetas:
-        thetas_str += f'{t[0]} '
+        thetas_str += f'{t[0]},'
     thetas_str = thetas_str[:-1]
 
     cmd_line_for_bsub = (f'python ./logistic_regression_distributed_calcs.py '
-                         f'--out_dir_path {out_path} '
-                         f'--num_edges_per_job {num_edges_per_job} '
-                         f'--function {func_to_calculate} '
-                         f'--thetas {thetas_str}')
+                         f'--out_dir_path={out_path} '
+                         f'--num_edges_per_job={num_edges_per_job} '
+                         f'--function={func_to_calculate} '
+                         f'--thetas={thetas_str}')
     return cmd_line_for_bsub
 
 
