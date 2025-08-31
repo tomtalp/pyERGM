@@ -1031,7 +1031,8 @@ class MetricsCollection:
                  # TODO: For tests only, find a better solution
                  do_copy_metrics=True,
                  **kwargs):
-
+        print("in MetricsCollection constructor")
+        sys.stdout.flush()
         if not do_copy_metrics:
             self.metrics = tuple([metric for metric in metrics])
         else:
@@ -1075,6 +1076,7 @@ class MetricsCollection:
         self._fix_collinearity = fix_collinearity
         self.collinearity_fixer_sample_size = collinearity_fixer_sample_size
         if self._fix_collinearity:
+            print("before collinearity fix")
             self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
                                     is_distributed=is_collinearity_distributed,
                                     num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5),
@@ -1164,14 +1166,15 @@ class MetricsCollection:
                              f'--p {p}')
 
         num_jobs = int(np.ceil(tensor_size / num_samples_per_job))
+        print(f"sending children job array for collinearity fixer {num_jobs} jobs")
         job_array_ids = run_distributed_children_jobs(out_dir_path, cmd_line_for_bsub,
                                                       "distributed_binomial_tensor_statistics.sh",
                                                       num_jobs, "sample_stats")
 
-        # Wait for all jobs to finish. Check the hessian path because it is the last to be computed for each data chunk.
+        # Wait for all jobs to finish.
         sample_stats_path = (out_dir_path / "sample_statistics").resolve()
         os.makedirs(sample_stats_path, exist_ok=True)
-        wait_for_distributed_children_outputs(num_jobs, sample_stats_path, job_array_ids, "sample_stats")
+        wait_for_distributed_children_outputs(num_jobs, [sample_stats_path], job_array_ids, "sample_stats")
 
         # Clean current scripts and data
         shutil.rmtree(data_path)
@@ -1216,6 +1219,7 @@ class MetricsCollection:
         if not is_distributed:
             sample_features = self.calc_statistics_for_binomial_tensor_local(sample_size)
         else:
+            print("starting distributed collinearity fixing")
             sample_features = self.calc_statistics_for_binomial_tensor_distributed(sample_size,
                                                                                    num_samples_per_job=kwargs.get(
                                                                                        "num_samples_per_job", 5))

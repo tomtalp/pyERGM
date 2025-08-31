@@ -1,6 +1,6 @@
 import itertools
 from collections import Counter
-from typing import Collection
+from typing import Collection, Sequence
 import numpy as np
 import networkx as nx
 from numba import njit, objmode
@@ -734,24 +734,23 @@ def numerically_stable_minus_log_like_and_grad_local(thetas, Xs, ys):
 
 
 def analytical_minus_log_likelihood_distributed(thetas, data_path, num_edges_per_job):
-    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                              'log_likelihood', num_edges_per_job)
+    log_like, grad = distributed_logistic_regression_optimization_step(
+        data_path,
+        thetas.reshape(thetas.size, 1),
+        ('log_likelihood', 'log_likelihood_gradient'),
+        num_edges_per_job,
+    )
+    return -log_like, -grad.reshape(thetas.size, )
 
 
 def analytical_logistic_regression_predictions_distributed(thetas, data_path, num_edges_per_job):
     return distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                             'predictions', num_edges_per_job)
+                                                             ('predictions',), num_edges_per_job)[0]
 
 
 def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10):
     pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
     return -calc_logistic_regression_log_likelihood_grad(Xs, pred, ys).reshape(thetas.size, )
-
-
-def analytical_minus_log_like_grad_distributed(thetas, data_path, num_edges_per_job):
-    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                              'log_likelihood_gradient',
-                                                              num_edges_per_job).reshape(thetas.size, )
 
 
 def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10):
@@ -761,8 +760,8 @@ def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10):
 
 def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_edges_per_job):
     return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                              'log_likelihood_hessian',
-                                                              num_edges_per_job)
+                                                              ('log_likelihood_hessian',),
+                                                              num_edges_per_job)[0]
 
 
 def mple_logistic_regression_optimization(metrics_collection, observed_networks: np.ndarray,
@@ -809,6 +808,14 @@ def mple_logistic_regression_optimization(metrics_collection, observed_networks:
               f'training: {cur_time - start_time} '
               f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
         sys.stdout.flush()
+        if is_distributed:
+            checkpoint_path_getter = lambda idx: (
+                    Path.cwd().parent / "OptimizationIntermediateCalculations" / f"checkpoint_iter_{idx}.pkl"
+            ).resolve()
+            with open(checkpoint_path_getter(iteration), 'wb') as f:
+                pickle.dump({'metrics_collection': metrics_collection, 'thetas': intermediate_result.x,}, f)
+            if iteration > 1:
+                os.unlink(checkpoint_path_getter(iteration - 1))
 
     iteration = 0
     start_time = time.time()
@@ -843,28 +850,29 @@ def mple_logistic_regression_optimization(metrics_collection, observed_networks:
         if optimization_method == "Newton-CG":
             res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
                            jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
-                           callback=_after_optim_iteration_callback, method="Newton-CG")
+                           callback=_after_optim_iteration_callback, method=optimization_method)
         elif optimization_method == "L-BFGS-B":
             res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
-                           jac=analytical_minus_log_like_grad_local, method="L-BFGS-B",
+                           jac=analytical_minus_log_like_grad_local, method=optimization_method,
                            callback=_after_optim_iteration_callback)
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
         pred = calc_logistic_regression_predictions(Xs, res.x.reshape(-1, 1)).flatten()
     else:
-        # TODO: support L-BFGS-B as an optimization method, and implement a numerically stable version for distributed
-        #  calculations as well.
         num_edges_per_job = kwargs.get('num_edges_per_job', 100000)
-        if optimization_method == "Newton-CG":
+        if optimization_method == "L-BFGS-B":
             res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
-                           jac=analytical_minus_log_like_grad_distributed,
+                           jac=True, callback=_after_optim_iteration_callback, method=optimization_method)
+        elif optimization_method == "Newton-CG":
+            res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
+                           jac=True,
                            hess=analytical_minus_log_likelihood_hessian_distributed,
-                           callback=_after_optim_iteration_callback, method="Newton-CG")
+                           callback=_after_optim_iteration_callback, method=optimization_method)
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method} for distributed optimization. "
-                f"Options are: Newton-CG")
+                f"Options are: Newton-CG, L-BFGS-B")
         pred = analytical_logistic_regression_predictions_distributed(res.x.reshape(-1, 1), data_path,
                                                                       num_edges_per_job).flatten()
 
@@ -873,46 +881,48 @@ def mple_logistic_regression_optimization(metrics_collection, observed_networks:
     return res.x, pred, res.success
 
 
-def distributed_logistic_regression_optimization_step(data_path, thetas, func_to_calc, num_edges_per_job=5000):
-    # TODO: support calculating multiple functions in a single job array, maybe by getting an array of function
-    #  names rather than a single function as func_to_calc. This will enable passing jac=True to scipy.optimize.minimize
-    #  when the optimization method is L-BFGS-B, and calculating both log-likelihood and gradient in a single job array,
-    #  reducing the number of sent jobs significantly.
-
+def distributed_logistic_regression_optimization_step(data_path, thetas, funcs_to_calc, num_edges_per_job=5000):
     # Arrange files and send the children jobs
     num_jobs, out_path, job_array_ids = _run_distributed_logistic_regression_children_jobs(data_path, thetas,
-                                                                                           func_to_calc,
+                                                                                           funcs_to_calc,
                                                                                            num_edges_per_job)
 
     # Wait for all jobs to finish.
-    chunks_path = (out_path / func_to_calc).resolve()
-    os.makedirs(chunks_path, exist_ok=True)
-    wait_for_distributed_children_outputs(num_jobs, chunks_path, job_array_ids, func_to_calc)
+    chunks_paths = [(out_path / func_to_calc).resolve() for func_to_calc in funcs_to_calc]
+    for chunks_path in chunks_paths:
+        os.makedirs(chunks_path, exist_ok=True)
+
+    wait_for_distributed_children_outputs(num_jobs, chunks_paths, job_array_ids, "__".join(funcs_to_calc))
+
+    aggregated_funcs = []
+    for func_to_calc in funcs_to_calc:
+        # Aggregate results
+        if func_to_calc == "predictions":
+            aggregated_funcs.append(cat_children_jobs_outputs(num_jobs, (out_path / func_to_calc).resolve()))
+        else:
+            aggregated_funcs.append(_sum_children_jobs_outputs(num_jobs, (out_path / func_to_calc).resolve()))
+
+        # Clean current outputs
+        shutil.rmtree((out_path / func_to_calc).resolve())
+
     # Clean current scripts
     shutil.rmtree((out_path / "scripts").resolve())
-
-    # Aggregate results
-    if func_to_calc == "predictions":
-        aggregated_func = cat_children_jobs_outputs(num_jobs, (out_path / func_to_calc).resolve())
-    else:
-        aggregated_func = _sum_children_jobs_outputs(num_jobs, (out_path / func_to_calc).resolve())
-
-    # Clean current outputs
-    shutil.rmtree((out_path / func_to_calc).resolve())
-    return aggregated_func
+    return tuple(aggregated_funcs)
 
 
-def _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, func_to_calculate, num_edges_per_job):
+def _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, funcs_to_calculate, num_edges_per_job):
     # Construct a string with the current thetas, to pass using the command line to children jobs.
     thetas_str = ''
     for t in cur_thetas:
         thetas_str += f'{t[0]},'
     thetas_str = thetas_str[:-1]
 
+    fns_str = ",".join(funcs_to_calculate)
+
     cmd_line_for_bsub = (f'python ./logistic_regression_distributed_calcs.py '
                          f'--out_dir_path={out_path} '
                          f'--num_edges_per_job={num_edges_per_job} '
-                         f'--function={func_to_calculate} '
+                         f'--functions={fns_str} '
                          f'--thetas={thetas_str}')
     return cmd_line_for_bsub
 
@@ -951,16 +961,22 @@ def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_
     send_jobs_command = f'bash {multiple_batches_bash_path} {single_batch_bash_path}'
     jobs_sending_res = subprocess.run(send_jobs_command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+    print(f"sent children jobs")
+    sys.stdout.flush()
+
     job_array_ids = _parse_sent_job_array_ids(jobs_sending_res.stdout)
+
+    print(f"parsed children job array ids: {job_array_ids}")
+    sys.stdout.flush()
 
     return job_array_ids
 
 
-def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, func_to_calculate, num_edges_per_job):
+def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, funcs_to_calculate, num_edges_per_job):
     out_path = data_path.parent
 
     cmd_line_single_batch = _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas,
-                                                                                 func_to_calculate, num_edges_per_job)
+                                                                                 funcs_to_calculate, num_edges_per_job)
 
     with open(os.path.join(data_path, "observed_networks.pkl"), 'rb') as f:
         observed_networks = pickle.load(f)
@@ -970,13 +986,14 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, fu
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
 
     job_array_ids = run_distributed_children_jobs(out_path, cmd_line_single_batch, "distributed_logistic_regression.sh",
-                                                  num_jobs, func_to_calculate)
+                                                  num_jobs, "__".join(funcs_to_calculate))
     return num_jobs, out_path, job_array_ids
 
 
-def wait_for_distributed_children_outputs(num_jobs: int, out_path: Path, job_array_ids: list, array_name: str):
+def wait_for_distributed_children_outputs(num_jobs: int, out_paths: Sequence[Path], job_array_ids: list, array_name: str):
     is_all_done = False
-    time_of_last_job_status_check = time.time()
+    start_time = time.time()
+    time_of_last_job_status_check = start_time
     num_jobs_to_listen_to = num_jobs
     are_there_missing_jobs = True
     # Wait that all output files will be there (all jobs finished successfully).
@@ -994,11 +1011,13 @@ def wait_for_distributed_children_outputs(num_jobs: int, out_path: Path, job_arr
         num_jobs_to_listen_to = 0
 
         # Identify missing output files
-        out_dir_files_list = os.listdir(out_path)
-        missing_jobs = [i for i in range(num_jobs) if f'{i}.pkl' not in out_dir_files_list]
+        missing_jobs = []
+        for out_path in out_paths:
+            out_dir_files_list = os.listdir(out_path)
+            missing_jobs += [i for i in range(num_jobs) if f'{i}.pkl' not in out_dir_files_list and i not in missing_jobs]
         are_there_missing_jobs = (len(missing_jobs) > 0)
         if are_there_missing_jobs:
-            resent_job_array_ids = _resend_failed_jobs(out_path.parent, missing_jobs, array_name)
+            resent_job_array_ids = _resend_failed_jobs(out_paths[0].parent, missing_jobs, array_name)
             print(f"sent missing jobs: {missing_jobs}")
             sys.stdout.flush()
             job_array_ids += resent_job_array_ids
@@ -1060,12 +1079,12 @@ def _check_if_all_done(job_array_ids: list, num_sent_jobs: int) -> bool:
         try:
             relevant_line_idx_in_output = array_ids_from_output.index(job_arr_id)
         except ValueError:
-            # There is no line matching this array id in the output of bjobs -A, so it probably hasn't been sent
-            # yet.
+            # There is no line matching this array id in the output of bjobs -A, so it's already done (disappeared from
+            # the output).
             print(f"job array {job_arr_id} is not found in bjobs -A output, found ids: {array_ids_from_output}."
                   f"returning False from _check_if_all_done")
             sys.stdout.flush()
-            return False
+            return True
         num_done = int(lines[relevant_line_idx_in_output][DONE_IDX])
         num_exit = int(lines[relevant_line_idx_in_output][EXIT_IDX])
         num_finished_jobs += num_done
