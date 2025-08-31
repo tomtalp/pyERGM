@@ -1,8 +1,7 @@
 import argparse
-import sys
-
-from pyERGM.utils import *
-
+import os
+import pickle
+from pyERGM.metrics import MetricsCollection
 
 def parse_cmd_args():
     parser = argparse.ArgumentParser()

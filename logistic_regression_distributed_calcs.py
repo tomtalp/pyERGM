@@ -1,5 +1,5 @@
 import argparse
-from pyERGM.utils import *
+from pyERGM.mple_optimizaiton import *
 
 def parse_cmd_args():
     parser = argparse.ArgumentParser()

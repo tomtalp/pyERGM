@@ -1,13 +1,12 @@
-import shutil
 from abc import ABC, abstractmethod
 from typing import Collection, Callable
 from copy import deepcopy
-
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
 
 from pyERGM.utils import *
+from pyERGM.cluster_utils import *
 
 
 class Metric(ABC):

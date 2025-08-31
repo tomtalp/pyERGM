@@ -1,10 +1,9 @@
 import datetime
 import numpy as np
-from scipy.optimize import minimize, OptimizeResult
 from scipy.stats import f
 from pyERGM.sampling import NaiveMetropolisHastings
 
-from pyERGM.metrics import *
+from pyERGM.mple_optimizaiton import *
 
 
 class ERGM():
