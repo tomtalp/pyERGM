@@ -98,7 +98,7 @@ def resend_failed_jobs(out_path: Path, job_indices: list, array_name: str) -> li
     for i in range(num_failed_jobs // LSF_ID_LIST_LEN_LIMIT + 1):
         cur_job_indices_str = ''
         for j_idx_in_list in range(i * LSF_ID_LIST_LEN_LIMIT, min((i + 1) * LSF_ID_LIST_LEN_LIMIT, num_failed_jobs)):
-            cur_job_indices_str += f'{job_indices[j_idx_in_list] + 1},'
+            cur_job_indices_str += f'{job_indices[j_idx_in_list]},'
         cur_job_indices_str = cur_job_indices_str[:-1]
         single_batch_bash_path = os.path.join(out_path, "scripts", "single_batch.sh")
         resend_job_command = f'bsub -J {array_name}[{cur_job_indices_str}]'
