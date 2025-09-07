@@ -193,89 +193,34 @@ class Metric(ABC):
             first_halves_to_use) * max_feature_in_observed / max_feature_in_first_half
 
 
-class NumberOfEdgesUndirected(Metric):
+class NumberOfEdges(Metric):
     def __str__(self):
-        return "num_edges_undirected"
+        raise NotImplementedError
 
     def __init__(self):
         super().__init__(requires_graph=False)
-        self._is_directed = False
         self._is_dyadic_independent = True
 
-    def calculate(self, W: np.ndarray):
-        return np.sum(W) // 2
-
-    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
-        return -1 if current_network[indices[0], indices[1]] else 1
-
-    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
+    @staticmethod
+    def _get_num_edges_in_mat_factor() -> int:
         """
-        Sum each matrix over all matrices in sample
+        A getter to normalize calculations for directed/undirected graphs in children classes
         """
-        return networks_sample.sum(axis=(0, 1)) // 2
-
-    def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
-                                        second_halves_to_use: np.ndarray,
-                                        first_halves_indices: np.ndarray[int], second_halves_indices: np.ndarray[int]):
-        """
-        Calculates the bootstrapped number of edges, by counting edges in the sampled subnetworks, and normalizing by
-        network size (i.e., calculating the fraction of existing edges out of all possible ones in sampled subnetworks,
-        and multiplying by the number of possible edges in the full observed network).
-        Parameters
-        ----------
-        first_halves_to_use
-            Multiple samples of subnetworks of an observed network, representing the connectivity between half of the
-            nodes in the large network.
-        second_halves_to_use
-            The subnetworks formed by the complementary set of nodes of the large network for each sample.
-        first_halves_indices
-            The indices of the nodes in the first half of the large network for each sample, according to the ordering
-            of the nodes in the large network.
-        second_halves_indices
-            The indices of the nodes in the second half of the large network for each sample, according to the ordering
-
-        Returns
-        -------
-        Properly normalized statistics of subnetworks of an observed network.
-        """
-        return self._calc_bootstrapped_scalar_feature(first_halves_to_use, first_halves_indices, second_halves_indices,
-                                                      lambda n: n * (n - 1) / 2)
-
-
-class NumberOfEdgesDirected(Metric):
-    def __str__(self):
-        return "num_edges_directed"
-
-    def __init__(self):
-        super().__init__(requires_graph=False)
-        self._is_directed = True
-        self._is_dyadic_independent = True
+        raise NotImplementedError
 
     def calculate(self, W: np.ndarray):
-        return np.sum(W)
+        return np.sum(W) // self._get_num_edges_in_mat_factor()
 
     @staticmethod
     @njit
     def calc_change_score(current_network: np.ndarray, indices: tuple):
         return -1 if current_network[indices[0], indices[1]] else 1
 
-    @staticmethod
-    @calc_for_sample_njit()
-    def calculate_for_sample(networks_sample: np.ndarray | torch.Tensor):
+    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
         """
         Sum each matrix over all matrices in sample
         """
-        return networks_sample.sum(axis=0).sum(axis=0)
-
-    @staticmethod
-    # TODO: understand how to properly use numba here (the dtype=bool makes some trouble).
-    # @njit
-    def calculate_change_score_full_network(current_network: np.ndarray):
-        sign_matrix = np.where(current_network == 1, -1,
-                               1)  # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
-        nondiag_signs = sign_matrix[~np.eye(sign_matrix.shape[0], dtype=bool)].flatten()
-
-        return nondiag_signs[:, np.newaxis]
+        return networks_sample.sum(axis=(0, 1)) // self._get_num_edges_in_mat_factor()
 
     @staticmethod
     @njit
@@ -307,7 +252,33 @@ class NumberOfEdgesDirected(Metric):
         Properly normalized statistics of subnetworks of an observed network.
         """
         return self._calc_bootstrapped_scalar_feature(first_halves_to_use, first_halves_indices, second_halves_indices,
-                                                      lambda n: n * (n - 1))
+                                                      lambda n: n * (n - 1) / self._get_num_edges_in_mat_factor())
+
+
+class NumberOfEdgesUndirected(NumberOfEdges):
+    def __str__(self):
+        return "num_edges_undirected"
+
+    def __init__(self):
+        super().__init__()
+        self._is_directed = False
+
+    @staticmethod
+    def _get_num_edges_in_mat_factor() -> int:
+        return 2
+
+
+class NumberOfEdgesDirected(NumberOfEdges):
+    def __str__(self):
+        return "num_edges_directed"
+
+    def __init__(self):
+        super().__init__()
+        self._is_directed = True
+
+    @staticmethod
+    def _get_num_edges_in_mat_factor() -> int:
+        return 1
 
 
 # TODO: change the name of this one to undirected and implement also a directed version?
@@ -1078,10 +1049,7 @@ class MetricsCollection:
             self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
                                     is_distributed=is_collinearity_distributed,
                                     num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5),
-                                    ratio_threshold=kwargs.get('ratio_threshold_collinearity_fixer', 5e-6),)
-
-        
-        
+                                    ratio_threshold=kwargs.get('ratio_threshold_collinearity_fixer', 5e-6), )
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
@@ -1199,7 +1167,7 @@ class MetricsCollection:
         self.num_of_features = self.calc_num_of_features()
 
         # Re-calculate the number of features per metric after deleting a feature.
-        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])        
+        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
 
     def collinearity_fixer(self, sample_size=1000, nonzero_thr=10 ** -1, ratio_threshold=10 ** -6,
                            eigenvec_thr=10 ** -4, is_distributed=False, **kwargs):
@@ -1550,7 +1518,8 @@ class MetricsCollection:
             return 'MPLE'
         # The only edge dependence comes from reciprocal egdes
         if not any(
-            [not x._is_dyadic_independent for x in self.metrics if str(x) not in ['total_reciprocity', 'reciprocity']]):
+                [not x._is_dyadic_independent for x in self.metrics if
+                 str(x) not in ['total_reciprocity', 'reciprocity']]):
             return 'MPLE_RECIPROCITY'
         return 'MCMLE'
 
