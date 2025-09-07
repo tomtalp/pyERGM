@@ -206,7 +206,9 @@ class NumberOfEdges(Metric):
         """
         A getter to normalize calculations for directed/undirected graphs in children classes
         """
-        raise NotImplementedError
+        raise NotImplementedError(
+            "This class is abstract by nature, please use either NumberOfEdgesUndirected or NumberOfEdgesDirected"
+        )
 
     def calculate(self, W: np.ndarray):
         return np.sum(W) // self._get_num_edges_in_mat_factor()
