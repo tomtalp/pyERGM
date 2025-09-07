@@ -1115,7 +1115,7 @@ def generate_binomial_tensor(net_size, node_features_size, num_samples, p=0.5):
     return np.random.binomial(1, p, (net_size, net_size + node_features_size, num_samples)).astype(np.int8)
 
 
-def sample_from_independent_probabilities_matrix(probability_matrix, sample_size):
+def sample_from_independent_probabilities_matrix(probability_matrix, sample_size, is_directed):
     """
     Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j)
     """
@@ -1126,7 +1126,11 @@ def sample_from_independent_probabilities_matrix(probability_matrix, sample_size
         for j in range(n_nodes):
             if i == j:
                 continue
-            sample[i, j, :] = np.random.binomial(1, probability_matrix[i, j], size=sample_size)
+            elif not is_directed and i > j:
+                sample[i, j, :] = sample[j, i, :]
+                continue
+            else:
+                sample[i, j, :] = np.random.binomial(1, probability_matrix[i, j], size=sample_size)
 
     return sample
 
