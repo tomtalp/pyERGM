@@ -772,6 +772,7 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(thetas_R_2 > 0.96)
     
     def test_directed_undirected_sample_from_probas(self):
+        set_seed(123)
         probability_matrix = np.array([
             [0, 0.5, 0.5, 0.5],
             [0.5, 0, 0.5, 0.5],
@@ -784,6 +785,7 @@ class TestERGM(unittest.TestCase):
         is_directed = True
         sample = sample_from_independent_probabilities_matrix(probability_matrix, sample_size, is_directed)
         self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))
+        self.assertTrue(np.all(np.diagonal(sample, axis1=0, axis2=1) == 0))
 
         sample_size = 1
         is_directed = False
@@ -791,3 +793,4 @@ class TestERGM(unittest.TestCase):
 
         W = sample[:, :, 0]
         self.assertTrue(np.all(W == W.T))
+        self.assertTrue(np.all(W[np.diag_indices(n_nodes)] == 0))

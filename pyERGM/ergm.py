@@ -1049,7 +1049,7 @@ class ConvergenceTester:
         empirical_threshold = np.quantile(mahalanobis_dists, confidence)
 
         return {
-            "success": ~np.isnan(empirical_threshold) and (empirical_threshold < stds_away_thr),
+            "success": empirical_threshold < stds_away_thr,
             "statistic": empirical_threshold,
             "threshold": stds_away_thr
         }

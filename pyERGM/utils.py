@@ -1126,11 +1126,11 @@ def sample_from_independent_probabilities_matrix(probability_matrix, sample_size
         for j in range(n_nodes):
             if i == j:
                 continue
-            if not is_directed and i > j:
+            elif not is_directed and i > j:
                 sample[i, j, :] = sample[j, i, :]
                 continue
-
-            sample[i, j, :] = np.random.binomial(1, probability_matrix[i, j], size=sample_size)
+            else:
+                sample[i, j, :] = np.random.binomial(1, probability_matrix[i, j], size=sample_size)
 
     return sample
 
