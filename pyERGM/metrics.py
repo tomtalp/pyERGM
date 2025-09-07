@@ -3,6 +3,7 @@ from typing import Collection, Callable
 from copy import deepcopy
 import numpy as np
 import pandas as pd
+import sys
 from scipy.spatial.distance import pdist, squareform
 
 from pyERGM.utils import *
