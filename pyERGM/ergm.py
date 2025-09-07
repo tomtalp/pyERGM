@@ -277,7 +277,7 @@ class ERGM():
                              "observed network!")
 
         if auto_optimization_scheme == 'MPLE':
-            return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size)
+            return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size, self._is_directed)
         elif auto_optimization_scheme == 'MPLE_RECIPROCITY':
             return sample_from_dyads_distribution(self._exact_dyadic_distributions, sample_size)
         else:
@@ -556,7 +556,7 @@ class ERGM():
 
         if mcmc_seed_network is None and self._exact_average_mat is not None:
             probabilities_matrix = self.get_mple_prediction(observed_networks)
-            mcmc_seed_network = sample_from_independent_probabilities_matrix(probabilities_matrix, 1)
+            mcmc_seed_network = sample_from_independent_probabilities_matrix(probabilities_matrix, 1, self._is_directed)
             mcmc_seed_network = mcmc_seed_network[:, :, 0]
         burn_in = mcmc_burn_in
         for i in range(opt_steps):
