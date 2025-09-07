@@ -1037,13 +1037,19 @@ class ConvergenceTester:
             sub_sample = sub_samples_features[:, cur_subsam_idx, :]
             sub_sample_mean = sub_sample.mean(axis=1)
             model_covariance_matrix = covariance_matrix_estimation(sub_sample, sub_sample_mean, method="naive")
+
+            if np.all(model_covariance_matrix == 0):
+                mahalanobis_dists[cur_subsam_idx] = np.inf
+                continue
+
             inv_model_cov_matrix = np.linalg.pinv(model_covariance_matrix)
+
             mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, sub_sample_mean, inv_model_cov_matrix)
 
         empirical_threshold = np.quantile(mahalanobis_dists, confidence)
 
         return {
-            "success": empirical_threshold < stds_away_thr,
+            "success": ~np.isnan(empirical_threshold) and (empirical_threshold < stds_away_thr),
             "statistic": empirical_threshold,
             "threshold": stds_away_thr
         }
