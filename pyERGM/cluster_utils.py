@@ -22,7 +22,7 @@ def construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, fu
 
     fns_str = ",".join(funcs_to_calculate)
 
-    cmd_line_for_bsub = (f'python ./logistic_regression_distributed_calcs.py '
+    cmd_line_for_bsub = (f'python -m memory_profiler ./logistic_regression_distributed_calcs.py '
                          f'--out_dir_path={out_path} '
                          f'--num_edges_per_job={num_edges_per_job} '
                          f'--functions={fns_str} '

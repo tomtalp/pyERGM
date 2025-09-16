@@ -5,8 +5,10 @@ from pyERGM.sampling import NaiveMetropolisHastings
 
 from pyERGM.mple_optimizaiton import *
 
+from memory_profiler import profile
 
 class ERGM():
+    @profile
     def __init__(self,
                  n_nodes,
                  metrics_collection: Collection[Metric],
@@ -180,6 +182,7 @@ class ERGM():
             return True
         return False
 
+    @profile
     def _mple_fit(self, observed_networks, optimization_method: str = 'L-BFGS-B', **kwargs):
         """
         Perform MPLE estimation of the ERGM parameters.

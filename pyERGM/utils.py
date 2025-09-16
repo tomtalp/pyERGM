@@ -8,6 +8,9 @@ from scipy.spatial.distance import mahalanobis
 import torch
 import random
 
+import pickle
+from memory_profiler import profile
+
 # Dyad states indexing convention
 EMPTY_IDX = 0
 UPPER_IDX = 1
@@ -557,6 +560,7 @@ def calc_hotelling_statistic_for_sample(observed_features: np.ndarray, sample_fe
     return hotelling_t_as_f
 
 
+@profile
 def generate_binomial_tensor(net_size, node_features_size, num_samples, p=0.5):
     """
     Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
@@ -710,3 +714,9 @@ def expand_net_dims(net: np.ndarray) -> np.ndarray:
     elif net.ndim != 3:
         raise ValueError("Cannot expand dims to an array that is not 2 or 3 dimensional")
     return net
+
+
+@profile
+def profiled_pickle_dump(out_path: str, obj):
+    with open(out_path, "wb") as f:
+        pickle.dump(obj, f)

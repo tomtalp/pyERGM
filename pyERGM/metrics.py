@@ -9,6 +9,8 @@ from scipy.spatial.distance import pdist, squareform
 from pyERGM.utils import *
 from pyERGM.cluster_utils import *
 
+from memory_profiler import profile
+
 
 class Metric(ABC):
     def __init__(self, requires_graph=False, metric_type='binary_edge', metric_node_feature=None):
@@ -246,6 +248,7 @@ class NumberOfEdgesDirected(Metric):
     def __str__(self):
         return "num_edges_directed"
 
+    @profile
     def __init__(self):
         super().__init__(requires_graph=False)
         self._is_directed = True
@@ -697,6 +700,7 @@ class NumberOfEdgesTypesDirected(Metric):
     def __str__(self):
         return "num_edges_between_types_directed"
 
+    @profile
     def __init__(self, exogenous_attr: Collection, indices_from_user=None):
         self.exogenous_attr = exogenous_attr
 
@@ -1080,10 +1084,7 @@ class MetricsCollection:
             self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
                                     is_distributed=is_collinearity_distributed,
                                     num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5),
-                                    ratio_threshold=kwargs.get('ratio_threshold_collinearity_fixer', 5e-6),)
-
-        
-        
+                                    ratio_threshold=kwargs.get('ratio_threshold_collinearity_fixer', 5e-6), )
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
@@ -1134,6 +1135,7 @@ class MetricsCollection:
             else:
                 cum_sum_num_feats += next_met_num_feats
 
+    @profile
     def calc_statistics_for_binomial_tensor_local(self, tensor_size, p=0.5):
         sample = generate_binomial_tensor(self.n_nodes, self.n_node_features, tensor_size, p=p)
 
@@ -1160,21 +1162,22 @@ class MetricsCollection:
         with open((data_path / 'metric_collection.pkl').resolve(), 'wb') as f:
             pickle.dump(self, f)
 
-        cmd_line_for_bsub = (f'python ./sample_statistics_distributed_calcs.py '
+        cmd_line_for_bsub = (f'python -m memory_profiler ./sample_statistics_distributed_calcs.py '
                              f'--out_dir_path {out_dir_path} '
                              f'--num_samples_per_job {num_samples_per_job} '
                              f'--p {p}')
 
         num_jobs = int(np.ceil(tensor_size / num_samples_per_job))
         print(f"sending children job array for collinearity fixer {num_jobs} jobs")
-        job_array_ids = run_distributed_children_jobs(out_dir_path, cmd_line_for_bsub,
-                                                      "distributed_binomial_tensor_statistics.sh",
-                                                      num_jobs, "sample_stats")
+        job_array_ids, children_logs_dir = run_distributed_children_jobs(out_dir_path, cmd_line_for_bsub,
+                                                                         "distributed_binomial_tensor_statistics.sh",
+                                                                         num_jobs, "sample_stats")
 
         # Wait for all jobs to finish.
         sample_stats_path = (out_dir_path / "sample_statistics").resolve()
         os.makedirs(sample_stats_path, exist_ok=True)
-        wait_for_distributed_children_outputs(num_jobs, [sample_stats_path], job_array_ids, "sample_stats")
+        wait_for_distributed_children_outputs(num_jobs, [sample_stats_path], job_array_ids, "sample_stats",
+                                              children_logs_dir)
 
         # Clean current scripts and data
         shutil.rmtree(data_path)
@@ -1202,7 +1205,7 @@ class MetricsCollection:
         self.num_of_features = self.calc_num_of_features()
 
         # Re-calculate the number of features per metric after deleting a feature.
-        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])        
+        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
 
     def collinearity_fixer(self, sample_size=1000, nonzero_thr=10 ** -1, ratio_threshold=10 ** -6,
                            eigenvec_thr=10 ** -4, is_distributed=False, **kwargs):
@@ -1481,6 +1484,7 @@ class MetricsCollection:
 
         return change_scores
 
+    @profile
     def prepare_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int, int] | None = None):
         if self.requires_graph:
             G1 = connectivity_matrix_to_G(observed_network[:self.n_nodes, :self.n_nodes], directed=self.is_directed)
@@ -1518,7 +1522,7 @@ class MetricsCollection:
             net = observed_networks[..., net_idx]
             if self.is_directed:
                 ys += net[~np.eye(n_nodes, dtype=bool)].flatten()[
-                     edges_indices_lims[0]:edges_indices_lims[1], None]
+                      edges_indices_lims[0]:edges_indices_lims[1], None]
             else:
                 ys += net[np.triu_indices(n_nodes, 1)][edges_indices_lims[0]:edges_indices_lims[1], None]
         return ys / num_nets
@@ -1554,7 +1558,8 @@ class MetricsCollection:
             return 'MPLE'
         # The only edge dependence comes from reciprocal egdes
         if not any(
-            [not x._is_dyadic_independent for x in self.metrics if str(x) not in ['total_reciprocity', 'reciprocity']]):
+                [not x._is_dyadic_independent for x in self.metrics if
+                 str(x) not in ['total_reciprocity', 'reciprocity']]):
             return 'MPLE_RECIPROCITY'
         return 'MCMLE'
 

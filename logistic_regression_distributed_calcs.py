@@ -1,6 +1,7 @@
 import argparse
 from pyERGM.mple_optimizaiton import *
 
+
 def parse_cmd_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--out_dir_path', type=str)
