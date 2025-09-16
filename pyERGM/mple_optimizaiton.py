@@ -275,16 +275,25 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
 
 def distributed_logistic_regression_optimization_step(data_path, thetas, funcs_to_calc, num_edges_per_job=5000):
     # Arrange files and send the children jobs
-    num_jobs, out_path, job_array_ids = _run_distributed_logistic_regression_children_jobs(data_path, thetas,
-                                                                                           funcs_to_calc,
-                                                                                           num_edges_per_job)
+    num_jobs, out_path, job_array_ids, children_logs_dir = _run_distributed_logistic_regression_children_jobs(
+        data_path,
+        thetas,
+        funcs_to_calc,
+        num_edges_per_job,
+    )
 
     # Wait for all jobs to finish.
     chunks_paths = [(out_path / func_to_calc).resolve() for func_to_calc in funcs_to_calc]
     for chunks_path in chunks_paths:
         os.makedirs(chunks_path, exist_ok=True)
 
-    wait_for_distributed_children_outputs(num_jobs, chunks_paths, job_array_ids, "__".join(funcs_to_calc))
+    print("start waiting for children jobs in MPLE optimization")
+    sys.stdout.flush()
+    wait_for_distributed_children_outputs(num_jobs, chunks_paths, job_array_ids, "__".join(funcs_to_calc),
+                                          children_logs_dir)
+    print("done waiting for children jobs in MPLE optimization")
+    sys.stdout.flush()
+
 
     aggregated_funcs = []
     for func_to_calc in funcs_to_calc:
@@ -316,9 +325,12 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, fu
     num_data_points = num_nodes * num_nodes - num_nodes
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
 
-    job_array_ids = run_distributed_children_jobs(out_path, cmd_line_single_batch, "distributed_logistic_regression.sh",
-                                                  num_jobs, "__".join(funcs_to_calculate))
-    return num_jobs, out_path, job_array_ids
+    print("sending children jobs to calculate MPLE likelihood grad")
+    sys.stdout.flush()
+    job_array_ids, children_logs_dir = run_distributed_children_jobs(out_path, cmd_line_single_batch,
+                                                                     "distributed_logistic_regression.sh",
+                                                                     num_jobs, "__".join(funcs_to_calculate))
+    return num_jobs, out_path, job_array_ids, children_logs_dir
 
 
 def predict_multi_class_logistic_regression(Xs, thetas):

@@ -1,15 +1,17 @@
 import os
 import numpy as np
 from pathlib import Path
-from typing import Sequence
+from typing import Sequence, Callable
 import pickle
 import subprocess
 import numpy.typing as npt
 import shutil
 import time
-
+import re
+import sys
 
 LSF_ID_LIST_LEN_LIMIT = 100
+
 
 def construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, funcs_to_calculate, num_edges_per_job):
     # Construct a string with the current thetas, to pass using the command line to children jobs.
@@ -28,10 +30,95 @@ def construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, fu
     return cmd_line_for_bsub
 
 
+def _get_out_file_regex_pattern(
+        child_job_idx: int
+) -> re.Pattern[str]:
+    return re.compile(rf"^outs\..*\.{re.escape(str(child_job_idx))}\.log$")
+
+
+def _get_error_file_regex_pattern(
+        child_job_idx: int
+) -> re.Pattern[str]:
+    return re.compile(rf"^errors\..*\.{re.escape(str(child_job_idx))}\.error\.log$")
+
+
+def _find_log_file_path_of_child_job(
+        children_logs_dir: str | Path,
+        child_job_idx: int,
+        regex_pattern_getter: Callable[[int], re.Pattern[str]]
+):
+    child_log_pattern = regex_pattern_getter(child_job_idx)
+    matches = [f for f in os.listdir(children_logs_dir) if child_log_pattern.match(f)]
+    if len(matches) == 0:
+        raise FileNotFoundError(f"No out file found for job index {child_job_idx} in directory {children_logs_dir}")
+    elif len(matches) > 1:
+        raise RuntimeError(
+            f"Multiple out files found for job index {child_job_idx} in directory {children_logs_dir}: {matches}"
+        )
+    return os.path.join(children_logs_dir, matches[0])
+
+
+def _find_out_log_file_path_of_child_job(
+        children_logs_dir: str | Path,
+        child_job_idx: int,
+) -> str:
+    return _find_log_file_path_of_child_job(
+        children_logs_dir,
+        child_job_idx,
+        _get_out_file_regex_pattern,
+    )
+
+
+def _find_error_log_file_path_of_child_job(
+        children_logs_dir: str | Path,
+        child_job_idx: int,
+) -> str:
+    return _find_log_file_path_of_child_job(
+        children_logs_dir,
+        child_job_idx,
+        _get_error_file_regex_pattern,
+    )
+
+
+def _check_if_child_died_on_oom(
+        children_logs_dir: str | Path,
+        child_job_idx: int,
+):
+    child_out_log_path = _find_out_log_file_path_of_child_job(
+        children_logs_dir,
+        child_job_idx,
+    )
+
+    with open(child_out_log_path, "r") as f:
+        content = f.read()
+    if "TERM_MEMLIMIT" in content:
+        sys.exit(
+            f"Detected a child job (idx {child_job_idx}, see out file in {children_logs_dir})"
+            f" which was terminated on oom, stopping master job.")
+
+
+def _remove_logs_of_child_job(
+        children_logs_dir: str | Path,
+        child_job_idx: int,
+):
+    out_log_path = _find_out_log_file_path_of_child_job(
+        children_logs_dir,
+        child_job_idx,
+    )
+    error_log_path = _find_error_log_file_path_of_child_job(
+        children_logs_dir,
+        child_job_idx,
+    )
+    os.unlink(out_log_path)
+    os.unlink(error_log_path)
+
+
 def wait_for_distributed_children_outputs(num_jobs: int, out_paths: Sequence[Path], job_array_ids: list,
-                                          array_name: str):
+                                          array_name: str, children_logs_dir: str | Path):
     children_statuses = np.zeros(num_jobs, dtype=bool)
+    iteration = 0
     while not children_statuses.all():
+        prev_children_statuses = children_statuses.copy()
         should_check_out_files = should_check_output_files(job_array_ids, num_jobs)
         children_to_resend = []
         for i in np.where(should_check_out_files)[0]:
@@ -44,8 +131,26 @@ def wait_for_distributed_children_outputs(num_jobs: int, out_paths: Sequence[Pat
             if not is_done:
                 children_to_resend.append(i + 1)
         if children_to_resend:
+            print("found children jobs to resend: {}".format(children_to_resend))
+            sys.stdout.flush()
+            for child_to_resen_idx in children_to_resend:
+                print("validating children didn't fail on OOM")
+                sys.stdout.flush()
+                _check_if_child_died_on_oom(children_logs_dir, child_to_resen_idx)
+                print("removing failed children logs")
+                sys.stdout.flush()
+                _remove_logs_of_child_job(children_logs_dir, child_to_resen_idx)
+            print("resending failed children jobs")
+            sys.stdout.flush()
             resent_job_array_ids = resend_failed_jobs(out_paths[0].parent, children_to_resend, array_name)
             job_array_ids += resent_job_array_ids
+
+        newly_done_mask = children_statuses & ~prev_children_statuses
+        if newly_done_mask.any():
+            print(f"current iteration finished children indices: {np.where(newly_done_mask)[0]}")
+            sys.stdout.flush()
+        print(f"iteration {iteration}: done with {children_statuses.sum()} / {num_jobs} children jobs")
+        iteration += 1
         time.sleep(60)
 
 
@@ -152,6 +257,9 @@ def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_
     send_jobs_command = f'bash {multiple_batches_bash_path} {single_batch_bash_path}'
     jobs_sending_res = subprocess.run(send_jobs_command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
+    print("sent children jobs")
+    sys.stdout.flush()
+
     job_array_ids = parse_sent_job_array_ids(jobs_sending_res.stdout)
 
-    return job_array_ids
+    return job_array_ids, logs_dir
