@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 import numpy as np
+from pyparsing import empty
 
 from pyERGM.utils import *
 from pyERGM.metrics import *
@@ -248,30 +249,28 @@ class TestDegreeMetrics(unittest.TestCase):
 
 
 class TestNumberOfEdgesTypesDirected(unittest.TestCase):
-    def test_calc_edge_weights(self):
+    def test_calc_edge_type_idx_assignment(self):
         neuronal_types = ['A', 'B', 'A', 'B']
         metric = NumberOfEdgesTypesDirected(neuronal_types)
-        expected_edge_weights = np.array([[0, 1, 0, 1],
-                                          [2, 3, 2, 3],
-                                          [0, 1, 0, 1],
-                                          [2, 3, 2, 3]])
+        expected_edge_type_indices = np.array([[0, 1, 0, 1],
+                                               [2, 3, 2, 3],
+                                               [0, 1, 0, 1],
+                                               [2, 3, 2, 3]])
 
-        expected_edge_weights += 1  # Increment because we also want a bin for nonexisting edges (which have the entry 0)
+        expected_edge_type_indices += 1  # Increment because we also want a bin for nonexisting edges (which have the entry 0)
 
-        self.assertTrue(np.all(metric._edge_type_idx_assignment == expected_edge_weights))
+        self.assertTrue(np.all(metric._edge_type_idx_assignment == expected_edge_type_indices))
 
         neuronal_types = ['A', 'B', 'B', 'A']
         metric = NumberOfEdgesTypesDirected(neuronal_types)
-        expected_edge_weights = np.array([[0, 1, 1, 0],
-                                          [2, 3, 3, 2],
-                                          [2, 3, 3, 2],
-                                          [0, 1, 1, 0]])
+        expected_edge_type_indices = np.array([[0, 1, 1, 0],
+                                               [2, 3, 3, 2],
+                                               [2, 3, 3, 2],
+                                               [0, 1, 1, 0]])
 
-        expected_edge_weights += 1  # Increment because we also want a bin for nonexisting edges (which have the entry 0)
+        expected_edge_type_indices += 1  # Increment because we also want a bin for nonexisting edges (which have the entry 0)
 
-        print(metric._edge_type_idx_assignment)
-        print(expected_edge_weights)
-        self.assertTrue(np.all(metric._edge_type_idx_assignment == expected_edge_weights))
+        self.assertTrue(np.all(metric._edge_type_idx_assignment == expected_edge_type_indices))
 
     def test_calculate(self):
         W = np.array([
@@ -349,34 +348,140 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         expected_change_score = np.array([0, 0, 1, 0])
         self.assertTrue(np.all(expected_change_score == calculated_change_score))
 
-    def test_calculate_change_score_full_network(self):
-        types = ['A', 'B', 'A', 'B']
-        metric = NumberOfEdgesTypesDirected(types)
+    def test_calc_mple_regressors(self):
+        neuronal_types = ['A', 'B', 'A', 'B', 'C', 'C']
+        metric = NumberOfEdgesTypesDirected(neuronal_types)
+        n_nodes = len(neuronal_types)
+        empty_matrix = np.zeros((n_nodes, n_nodes))
+        num_types = len(set(neuronal_types))
+        expected_mple_regressors = np.zeros((n_nodes ** 2 - n_nodes, num_types ** 2))
+        idx = 0
+        for i in range(n_nodes):
+            for j in range(n_nodes):
+                if i == j:
+                    continue
+                expected_mple_regressors[idx] = metric.calc_change_score(empty_matrix, (i, j))
+                idx += 1
 
+        mple_regressors = metric.calculate_mple_regressors(empty_matrix, (0, n_nodes ** 2 - n_nodes))
+        self.assertTrue(np.all(expected_mple_regressors == mple_regressors))
+
+
+class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
+    def test_calc_edge_type_idx_assignment(self):
+        neuronal_types = ['A', 'B', 'A', 'B']
+        metric = NumberOfEdgesTypesUndirected(neuronal_types)
+        expected_edge_type_indices = np.array([[0, 1, 0, 1],
+                                               [1, 2, 1, 2],
+                                               [0, 1, 0, 1],
+                                               [1, 2, 1, 2]])
+
+        expected_edge_type_indices += 1  # Increment because we also want a bin for nonexisting edges (which have the entry 0)
+
+        self.assertTrue(np.all(metric._edge_type_idx_assignment == expected_edge_type_indices))
+
+        neuronal_types = ['A', 'B', 'B', 'A']
+        metric = NumberOfEdgesTypesUndirected(neuronal_types)
+        expected_edge_type_indices = np.array([[0, 1, 1, 0],
+                                               [1, 2, 2, 1],
+                                               [1, 2, 2, 1],
+                                               [0, 1, 1, 0]])
+
+        expected_edge_type_indices += 1  # Increment because we also want a bin for nonexisting edges (which have the entry 0)
+
+        self.assertTrue(np.all(metric._edge_type_idx_assignment == expected_edge_type_indices))
+
+    def test_calculate(self):
+        W = np.array([
+            [0, 1, 1, 0],
+            [1, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+
+        neuronal_types = ['A', 'B', 'A', 'B']
+        expected_num_edges = np.array([1, 1, 1])
+        metric = NumberOfEdgesTypesUndirected(neuronal_types)
+        calculated_num_edges = metric.calculate(W)
+        self.assertTrue(np.all(expected_num_edges == calculated_num_edges))
+
+    def test_calculate_for_sample(self):
+        n = 4
+        sample_size = 2
         W1 = np.array([
             [0, 1, 0, 0],
-            [1, 0, 0, 1],
-            [1, 1, 0, 0],
+            [1, 0, 1, 0],
+            [0, 1, 0, 1],
             [0, 0, 1, 0]
         ])
-
-        expected_full_change_score = np.array([
-            [0, -1, 0, 0],
-            [1, 0, 0, 0],
-            [0, 1, 0, 0],
-            [0, 0, -1, 0],
-            [0, 0, 1, 0],
-            [0, 0, 0, -1],
-            [-1, 0, 0, 0],
-            [0, -1, 0, 0],
-            [0, 1, 0, 0],
-            [0, 0, 1, 0],
+        W2 = np.array([
+            [0, 0, 1, 1],
             [0, 0, 0, 1],
-            [0, 0, -1, 0]
+            [1, 0, 0, 1],
+            [1, 1, 1, 0]
         ])
 
-        full_change_score = metric.calculate_change_score_full_network(W1)
-        self.assertTrue(np.all(expected_full_change_score == full_change_score))
+        neuronal_types = ['A', 'B', 'A', 'B']
+        expected_num_edges = np.array([
+            [0, 3, 0],
+            [1, 2, 1]
+        ]).T
+
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
+        sample[:, :, 1] = W2
+        metric = NumberOfEdgesTypesUndirected(neuronal_types)
+        calculated_num_edges = metric.calculate_for_sample(sample)
+        self.assertTrue(np.all(expected_num_edges == calculated_num_edges))
+
+    def test_calc_change_score(self):
+        W1 = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 1, 0],
+            [0, 1, 0, 1],
+            [0, 0, 1, 0]
+        ])
+        W2 = np.array([
+            [0, 0, 1, 1],
+            [0, 0, 0, 1],
+            [1, 0, 0, 1],
+            [1, 1, 1, 0]
+        ])
+
+        neuronal_types = ['A', 'B', 'A', 'B']
+        metric = NumberOfEdgesTypesUndirected(neuronal_types)
+
+        calculated_change_score = metric.calc_change_score(W1, (0, 1))
+        expected_change_score = np.array([0, -1, 0])
+        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+
+        calculated_change_score = metric.calc_change_score(W1, (1, 3))
+        expected_change_score = np.array([0, 0, 1])
+        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+
+        calculated_change_score = metric.calc_change_score(W2, (0, 2))
+        expected_change_score = np.array([-1, 0, 0])
+        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+
+        calculated_change_score = metric.calc_change_score(W2, (1, 2))
+        expected_change_score = np.array([0, 1, 0])
+        self.assertTrue(np.all(expected_change_score == calculated_change_score))
+
+    def test_calc_mple_regressors(self):
+        neuronal_types = ['B', 'B', 'A', 'C', 'C', 'A']
+        metric = NumberOfEdgesTypesUndirected(neuronal_types)
+        n_nodes = len(neuronal_types)
+        empty_matrix = np.zeros((n_nodes, n_nodes))
+        num_types = len(set(neuronal_types))
+        expected_mple_regressors = np.zeros(((n_nodes ** 2 - n_nodes) // 2, (num_types ** 2 + num_types) // 2))
+        idx = 0
+        for i in range(n_nodes - 1):
+            for j in range(i + 1, n_nodes):
+                expected_mple_regressors[idx] = metric.calc_change_score(empty_matrix, (i, j))
+                idx += 1
+
+        mple_regressors = metric.calculate_mple_regressors(empty_matrix, (0, (n_nodes ** 2 - n_nodes) // 2))
+        self.assertTrue(np.all(expected_mple_regressors == mple_regressors))
 
 
 class TestNodeAttrSums(unittest.TestCase):
@@ -730,7 +835,7 @@ class TestNumberOfNodesPerType(unittest.TestCase):
         V = np.array([[1, 0],
                       [2, 1],
                       [1, 1],
-                      [0, 2]]) # n=4, k=2
+                      [0, 2]])  # n=4, k=2
 
         expected_num_neurons_per_type = np.array([1, 2, 1])
         metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
@@ -1189,7 +1294,7 @@ class TestMetricsCollection(unittest.TestCase):
         metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
         n_nodes = W.shape[0]
 
-        expected_statistics = [7, 2, 2, 2, 2, 1, 2, 3] # just a sanity check for the actual statistics
+        expected_statistics = [7, 2, 2, 2, 2, 1, 2, 3]  # just a sanity check for the actual statistics
 
         collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
         statistics = collection.calculate_statistics(W)
@@ -1257,7 +1362,6 @@ class TestMetricsCollection(unittest.TestCase):
         ])
 
         self.assertTrue(np.all(y == expected_dyads))
-
 
     def test_get_parameter_names(self):
         n = 18
