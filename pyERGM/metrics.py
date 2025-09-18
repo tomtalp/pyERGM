@@ -1,6 +1,6 @@
 import shutil
 from abc import ABC, abstractmethod
-from typing import Collection, Callable
+from typing import Collection, Callable, Sequence, Any
 from copy import deepcopy
 
 import numpy as np
@@ -101,7 +101,7 @@ class Metric(ABC):
             result[:, i] = self.calculate(network)
         return result
 
-    def calculate_mple_regressors(self, observed_network: np.ndarray | nx.Graph, edges_indices_lims: tuple[int]):
+    def calculate_mple_regressors(self, observed_network: np.ndarray | nx.Graph, edges_indices_lims: tuple[int, int]):
         num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
         Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count()))
         edge_idx = 0
@@ -226,7 +226,7 @@ class NumberOfEdges(Metric):
 
     @staticmethod
     @njit
-    def calculate_mple_regressors(observed_network: np.ndarray, edges_indices_lims: tuple[int]):
+    def calculate_mple_regressors(observed_network: np.ndarray, edges_indices_lims: tuple[int, int]):
         return np.ones((edges_indices_lims[1] - edges_indices_lims[0], 1))
 
     def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
@@ -637,7 +637,7 @@ class ExWeightNumEdges(Metric):
 
         return res
 
-    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int]):
+    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int, int]):
         # edge_weights shape is (num_weight_mats, n_nodes, n_nodes), the desired outcome is in the shape: (n_nodes**2 - n_nodes, num_weight_mats)
         num_nodes = len(self.exogenous_attr)
         if self._is_directed:
@@ -648,29 +648,44 @@ class ExWeightNumEdges(Metric):
         return Xs[edges_indices_lims[0]:edges_indices_lims[1], :]
 
 
-class NumberOfEdgesTypesDirected(Metric):
+class NumberOfEdgesTypes(Metric):
     """
-    A metric that counts how many edges exist between different node types in a directed graph.
-    For example -
-        A graph with `n` nodes, with an exogenous attribute `type=[A, B]` assigned to each node.
-        The metric counts the number of edges between nodes of type A->A, A->B, B->A, B->B of a given graph,
-        yielding len(type)**2 features.
-
-    Parameters
-    -----------
-        exogenous_attr : Collection
-            A collection of attributes assigned to each node in a graph with n nodes.
-
-            #TODO - len(exogenous_attr)==n is a requirement, right? Should we assert?
-
-        indices_to_ignore: list
-            # TODO - Specify the sorting convention
+    An abstract metric to count how many edges exist between different node types in a graph (directed or undirected).
     """
+
+    not_implemented_error_message = (
+            "This class is abstract by nature, please use either " +
+            "NumberOfEdgesTypesUndirected or NumberOfEdgesTypesDirected"
+    )
 
     def __str__(self):
-        return "num_edges_between_types_directed"
+        raise NotImplementedError(NumberOfEdgesTypes.not_implemented_error_message)
 
-    def __init__(self, exogenous_attr: Collection, indices_from_user=None):
+    @staticmethod
+    def _get_num_edges_in_mat_factor() -> int:
+        """
+        A getter to normalize calculations for directed/undirected graphs in children classes
+        """
+        raise NotImplementedError(NumberOfEdgesTypes.not_implemented_error_message)
+
+    def _calc_type_pairs_indices(self):
+        """
+        Calculate a mapping between node type pairs (edge pairs) and their indices in the sorted type paris list.
+        """
+        self._sorted_type_pairs_indices = None
+        raise NotImplementedError(NumberOfEdgesTypes.not_implemented_error_message)
+
+    def _get_total_feature_count(self):
+        raise NotImplementedError(NumberOfEdgesTypes.not_implemented_error_message)
+
+    def _get_flattened_edge_type_idx_assignment(self):
+        """
+        Get the flattened version of the matrix that stores the edge type (node type pair) index for every entry in the
+        matrix.
+        """
+        raise NotImplementedError(NumberOfEdgesTypes.not_implemented_error_message)
+
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None):
         self.exogenous_attr = exogenous_attr
 
         self.unique_types = sorted(list(set(self.exogenous_attr)))
@@ -691,13 +706,13 @@ class NumberOfEdgesTypesDirected(Metric):
                 self.indices_of_types[t].append(i)
 
         self.sorted_type_pairs = get_sorted_type_pairs(self.unique_types)
-        self._sorted_type_pairs_indices = {pair: i for i, pair in enumerate(self.sorted_type_pairs)}
+        self._calc_type_paris_indices()
 
         self._calc_edge_type_idx_assignment()
 
     def _calc_edge_type_idx_assignment(self):
         """
-        Each edge is assigned with the index of it's corresponding sorted type pair.
+        Each edge is assigned with the index of its corresponding sorted type pair.
 
         For example, for an n=4 matrix with types [A, B, A, B], the weight matrix is
             [ AA, AB, AA, AB
@@ -720,30 +735,23 @@ class NumberOfEdgesTypesDirected(Metric):
 
         self._edge_type_idx_assignment += 1  # Increment by 1 to avoid 0-indexing (the index 0 will be kept for non-existing edges)
 
-    def _get_total_feature_count(self):
-        return len(self.unique_types) ** 2
-
-    def calculate(self, input: np.ndarray):
-        stats = np.zeros(self._get_effective_feature_count())
-        idx = 0
-        for i, type_pair in enumerate(self.sorted_type_pairs):
-            if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
-                continue
-            stats[idx] = input[np.ix_(self.indices_of_types[type_pair[0]], self.indices_of_types[type_pair[1]])].sum()
-            idx += 1
-        return stats
-
     def calculate_for_sample(self, networks_sample: np.ndarray):
         sample_size = networks_sample.shape[2]
         stats = np.zeros((self._get_effective_feature_count(), sample_size))
-        idx = 0
+        num_ignored = 0
         for i, type_pair in enumerate(self.sorted_type_pairs):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
+                num_ignored += 1
                 continue
-            stats[idx] = networks_sample[
-                np.ix_(self.indices_of_types[type_pair[0]], self.indices_of_types[type_pair[1]])].sum(axis=(0, 1))
-            idx += 1
-        return stats
+            stats[self._sorted_type_pairs_indices[type_pair] - num_ignored] += networks_sample[
+                np.ix_(self.indices_of_types[type_pair[0]], self.indices_of_types[type_pair[1]])
+            ].sum(axis=(0, 1))
+        return stats / self._get_num_edges_in_mat_factor()
+
+    # TODO: when we finally make calculate_for_sample the mandatory abstract method in Metric and remove calculate
+    #  entirely or return the first matrix returned by calculate_for_sample, change this accordingly as well.
+    def calculate(self, network: np.ndarray):
+        return self.calculate_for_sample(expand_net_dims(network))[..., -1]
 
     def update_indices_to_ignore(self, indices_to_ignore):
         super().update_indices_to_ignore(indices_to_ignore)
@@ -772,45 +780,117 @@ class NumberOfEdgesTypesDirected(Metric):
             change_score[idx_in_features_vec] = sign
             return change_score
 
-    def calculate_change_score_full_network(self, current_network: np.ndarray):
-        """
-        Calculate the change score vectors for every edge in the network.
-
-        Parameters
-        ----------
-        current_network: np.ndarray
-            Input network of size (n, n)
-
-        Returns
-        -------
-        np.ndarray
-            Change score matrix of size (n^2-n, metric_num_features) which denotes the change score vector for every edge in the network
-        """
-        num_nodes = current_network.shape[0]
-        num_edges = num_nodes * num_nodes - num_nodes
-
-        change_scores = np.zeros((num_edges, len(self.sorted_type_pairs)))
-
-        sign_matrix = np.where(current_network == 1, -1,
-                               1)  # -1 for edges that exist (because we want to remove them), 1 for edges that don't exist (because we want to add them).
-        nondiag_signs = sign_matrix[~np.eye(sign_matrix.shape[0], dtype=bool)].flatten()
-
-        # -1 to ignore the empty edge type (edge_weights assigns 0 to empty edges, 1 for the first type-pair, etc...)
-        nondiag_weights = self._edge_type_idx_assignment[
-                              ~np.eye(self._edge_type_idx_assignment.shape[0], dtype=bool)].flatten() - 1
-        change_scores[np.arange(num_edges), nondiag_weights] = nondiag_signs
-        change_scores = change_scores.astype(np.int8)
-
-        return self._handle_indices_to_ignore(change_scores, axis=1)
-
-    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int]):
+    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int, int]):
         num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
-        Xs = np.zeros((num_edges_to_take, len(self.sorted_type_pairs)))
-        nondiag_type_idx = self._edge_type_idx_assignment[
-                               ~np.eye(self._edge_type_idx_assignment.shape[0], dtype=bool)].flatten() - 1
-        Xs[np.arange(num_edges_to_take), nondiag_type_idx[edges_indices_lims[0]:edges_indices_lims[1]]] = 1
+        Xs = np.zeros((num_edges_to_take, self._get_total_feature_count()))
+        # Get the type pair (edge type) index for every entry in the matrix, formatted as Xs (as if the matrix is
+        # flattened).
+        flattened_edge_type_idx_assignment = self._get_flattened_edge_type_idx_assignment()
+        # For each row in Xs (which denotes and entry in the adjacency matrix), update the right column (columns
+        # correspond to entries in the feature vector) - the column with the index of the corresponding type pair (the
+        # pair of nodes of this entry in the adjacency matrix) in the list of type pairs.
+        Xs[np.arange(num_edges_to_take), flattened_edge_type_idx_assignment[
+                                         edges_indices_lims[0]:edges_indices_lims[1]]] = 1
         Xs = Xs.astype(np.int8)
         return self._handle_indices_to_ignore(Xs, axis=1)
+
+
+class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
+    def __str__(self):
+        return "num_edges_between_types_undirected"
+
+    @staticmethod
+    def _get_num_edges_in_mat_factor():
+        return 2
+
+    def _get_total_feature_count(self):
+        num_unique_types = len(self.unique_types)
+        return num_unique_types * (num_unique_types + 1) // 2
+
+    def _get_sorted_canonical_type_pairs(self):
+        return [p for p in self.sorted_type_pairs if p == tuple(sorted(p))]
+
+    def _calc_type_paris_indices(self):
+        self._sorted_type_pairs_indices = {}
+
+        sorted_canonical_type_paris = self._get_sorted_canonical_type_pairs()
+        for i, (a, b) in enumerate(sorted_canonical_type_paris):
+            self._sorted_type_pairs_indices[(a, b)] = i
+            if a != b:
+                self._sorted_type_pairs_indices[(b, a)] = i
+
+    def _get_flattened_edge_type_idx_assignment(self):
+        # Reducing 1 because the type indexing in self._edge_type_idx_assignment is 1-based (0 is reserved for
+        # non-exising edges).
+        return self._edge_type_idx_assignment[
+            np.triu_indices(self._edge_type_idx_assignment.shape[0], k=1)].flatten() - 1
+
+    def _get_metric_names(self):
+        parameter_names = tuple()
+
+        metric_name = str(self)
+
+        sorted_canonical_type_pairs = self._get_sorted_canonical_type_pairs()
+        for i in range(self._get_total_feature_count()):
+            if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
+                continue
+            type_pair = str(sorted_canonical_type_pairs[i][0]) + "__" + str(sorted_canonical_type_pairs[i][1])
+            parameter_names += (f"{metric_name}_{type_pair}",)
+
+        return parameter_names
+
+    def _get_ignored_features(self):
+        if self._indices_to_ignore is None or not np.any(self._indices_to_ignore):
+            return tuple()
+
+        metric_name = str(self)
+        ignored_features = ()
+        sorted_canonical_type_pairs = self._get_sorted_canonical_type_pairs()
+        for i in range(self._get_total_feature_count()):
+            if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
+                type_pair = str(sorted_canonical_type_pairs[i][0]) + "__" + str(sorted_canonical_type_pairs[i][1])
+                ignored_features += (f"{metric_name}_{type_pair}",)
+
+        return ignored_features
+
+
+class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
+    """
+    A metric that counts how many edges exist between different node types in a directed graph.
+    For example -
+        A graph with `n` nodes, with an exogenous attribute `type=[A, B]` assigned to each node.
+        The metric counts the number of edges between nodes of type A->A, A->B, B->A, B->B of a given graph,
+        yielding len(type)**2 features.
+
+    Parameters
+    -----------
+        exogenous_attr : Collection
+            A collection of attributes assigned to each node in a graph with n nodes.
+
+            #TODO - len(exogenous_attr)==n is a requirement, right? Should we assert?
+
+        indices_to_ignore: list
+            # TODO - Specify the sorting convention
+    """
+
+    def __str__(self):
+        return "num_edges_between_types_directed"
+
+    @staticmethod
+    def _get_num_edges_in_mat_factor():
+        return 1
+
+    def _calc_type_paris_indices(self):
+        self._sorted_type_pairs_indices = {pair: i for i, pair in enumerate(self.sorted_type_pairs)}
+
+    def _get_total_feature_count(self):
+        return len(self.unique_types) ** 2
+
+    def _get_flattened_edge_type_idx_assignment(self):
+        # Reducing 1 because the type indexing in self._edge_type_idx_assignment is 1-based (0 is reserved for
+        # non-exising edges).
+        return self._edge_type_idx_assignment[
+            ~np.eye(self._edge_type_idx_assignment.shape[0], dtype=bool)].flatten() - 1
 
     def _get_metric_names(self):
         parameter_names = tuple()
@@ -1484,7 +1564,7 @@ class MetricsCollection:
             net = observed_networks[..., net_idx]
             if self.is_directed:
                 ys += net[~np.eye(n_nodes, dtype=bool)].flatten()[
-                     edges_indices_lims[0]:edges_indices_lims[1], None]
+                      edges_indices_lims[0]:edges_indices_lims[1], None]
             else:
                 ys += net[np.triu_indices(n_nodes, 1)][edges_indices_lims[0]:edges_indices_lims[1], None]
         return ys / num_nets
