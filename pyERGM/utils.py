@@ -1333,3 +1333,40 @@ def expand_net_dims(net: np.ndarray) -> np.ndarray:
     elif net.ndim != 3:
         raise ValueError("Cannot expand dims to an array that is not 2 or 3 dimensional")
     return net
+
+
+def calc_entropy_independent_probability_matrix(
+        prob_mat: np.ndarray,
+        reduction: str = 'sum',
+        eps: float = 1e-10
+) -> float | np.ndarray:
+    flattened_clipped_no_diag_mat = np.clip(remove_main_diagonal_flatten(prob_mat), a_min=eps, a_max=1 - eps)
+    entropy_per_entry = -(
+            flattened_clipped_no_diag_mat * np.log2(flattened_clipped_no_diag_mat) +
+            (1 - flattened_clipped_no_diag_mat) * np.log2(1 - flattened_clipped_no_diag_mat)
+    )
+    if reduction == 'none':
+        return entropy_per_entry
+    elif reduction == 'sum':
+        return np.sum(entropy_per_entry)
+    elif reduction == 'mean':
+        return np.mean(entropy_per_entry)
+    else:
+        raise ValueError(f"reduction must be 'sum', 'mean', or 'none', got: {reduction}")
+
+
+def calc_entropy_dyads_dists(
+        dyads_distributions: np.ndarray,
+        reduction: str = 'sum',
+        eps: float = 1e-10
+) -> float | np.ndarray:
+    clipped_dyads_dists = np.clip(dyads_distributions, a_min=eps, a_max=1 - eps)
+    entropy_per_dyad = -(clipped_dyads_dists * np.log2(clipped_dyads_dists)).sum(axis=1)
+    if reduction == 'none':
+        return entropy_per_dyad
+    elif reduction == 'sum':
+        return np.sum(entropy_per_dyad)
+    elif reduction == 'mean':
+        return np.mean(entropy_per_dyad)
+    else:
+        raise ValueError(f"reduction must be 'sum', 'mean', or 'none', got: {reduction}")
