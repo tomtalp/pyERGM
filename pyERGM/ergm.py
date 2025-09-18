@@ -336,6 +336,22 @@ class ERGM():
             raise NotImplementedError("Currently supporting likelihood calculations for models that are synaptic "
                                       "independent or with reciprocal synapses dependent")
 
+    def calc_model_entropy(self, reduction: str = 'sum', eps: float = 1e-10):
+        model_type = self._metrics_collection.choose_optimization_scheme()
+        if model_type == "MPLE":
+            # TODO: once calculating mple regressors doesn't require an input matrix, get rid of this.
+            dummy_zeros_net = np.zeros((self._n_nodes, self._n_nodes))
+            exact_av_mat = self.get_mple_prediction(dummy_zeros_net)
+            return calc_entropy_independent_probability_matrix(exact_av_mat, reduction=reduction, eps=eps)
+        elif model_type == "MPLE_RECIPROCITY":
+            exact_dyads_dist = self.get_mple_reciprocity_prediction()
+            return calc_entropy_dyads_dists(exact_dyads_dist, reduction=reduction, eps=eps)
+        else:
+            raise NotImplementedError(
+                "Currently supporting entropy calculations for models that are synaptic independent or with reciprocal "
+                "synapses dependent"
+            )
+
     def fit(self,
             observed_networks,
             lr=0.1,
