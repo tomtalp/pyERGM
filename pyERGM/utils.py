@@ -1155,11 +1155,8 @@ def predict_multi_class_logistic_regression(Xs, thetas):
     return softmax(Xs @ thetas, axis=1)
 
 
-def log_likelihood_multi_class_logistic_regression(true_labels, predictions, reduction='sum', log_base=np.exp(1)):
-    # TODO: trim predictions to avoid log(0)? If yes make sure the predictions over all dyad states sum up to 1 after
-    #  trimming? i.e., only the first row or also the last one?
-    #   predictions = np.clip(predictions, a_min=eps, a_max=1-eps)
-    #   predictions /= predictions.sum(axis=0)
+def log_likelihood_multi_class_logistic_regression(true_labels, predictions, reduction='sum', log_base=np.exp(1), eps=1e-10):
+    predictions = np.maximum(predictions, eps)
     individual_data_samples_minus_cross_ent = ((np.log(predictions) / np.log(log_base)) * true_labels).sum(axis=0)
     if reduction == 'none':
         return individual_data_samples_minus_cross_ent
