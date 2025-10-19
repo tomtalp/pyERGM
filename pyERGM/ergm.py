@@ -279,7 +279,7 @@ class ERGM():
                              "observed network!")
 
         if auto_optimization_scheme == 'MPLE':
-            return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size)
+            return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size, self._is_directed)
         elif auto_optimization_scheme == 'MPLE_RECIPROCITY':
             return sample_from_dyads_distribution(self._exact_dyadic_distributions, sample_size)
         else:
@@ -337,6 +337,22 @@ class ERGM():
         else:
             raise NotImplementedError("Currently supporting likelihood calculations for models that are synaptic "
                                       "independent or with reciprocal synapses dependent")
+
+    def calc_model_entropy(self, reduction: str = 'sum', eps: float = 1e-10):
+        model_type = self._metrics_collection.choose_optimization_scheme()
+        if model_type == "MPLE":
+            # TODO: once calculating mple regressors doesn't require an input matrix, get rid of this.
+            dummy_zeros_net = np.zeros((self._n_nodes, self._n_nodes))
+            exact_av_mat = self.get_mple_prediction(dummy_zeros_net)
+            return calc_entropy_independent_probability_matrix(exact_av_mat, reduction=reduction, eps=eps)
+        elif model_type == "MPLE_RECIPROCITY":
+            exact_dyads_dist = self.get_mple_reciprocity_prediction()
+            return calc_entropy_dyads_dists(exact_dyads_dist, reduction=reduction, eps=eps)
+        else:
+            raise NotImplementedError(
+                "Currently supporting entropy calculations for models that are synaptic independent or with reciprocal "
+                "synapses dependent"
+            )
 
     def fit(self,
             observed_networks,
@@ -558,7 +574,7 @@ class ERGM():
 
         if mcmc_seed_network is None and self._exact_average_mat is not None:
             probabilities_matrix = self.get_mple_prediction(observed_networks)
-            mcmc_seed_network = sample_from_independent_probabilities_matrix(probabilities_matrix, 1)
+            mcmc_seed_network = sample_from_independent_probabilities_matrix(probabilities_matrix, 1, self._is_directed)
             mcmc_seed_network = mcmc_seed_network[:, :, 0]
         burn_in = mcmc_burn_in
         for i in range(opt_steps):
@@ -1039,7 +1055,13 @@ class ConvergenceTester:
             sub_sample = sub_samples_features[:, cur_subsam_idx, :]
             sub_sample_mean = sub_sample.mean(axis=1)
             model_covariance_matrix = covariance_matrix_estimation(sub_sample, sub_sample_mean, method="naive")
+
+            if np.all(model_covariance_matrix == 0):
+                mahalanobis_dists[cur_subsam_idx] = np.inf
+                continue
+
             inv_model_cov_matrix = np.linalg.pinv(model_covariance_matrix)
+
             mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, sub_sample_mean, inv_model_cov_matrix)
 
         empirical_threshold = np.quantile(mahalanobis_dists, confidence)

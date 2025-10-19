@@ -568,7 +568,7 @@ def generate_binomial_tensor(net_size, node_features_size, num_samples, p=0.5):
     return np.random.binomial(1, p, (net_size, net_size + node_features_size, num_samples)).astype(np.int8)
 
 
-def sample_from_independent_probabilities_matrix(probability_matrix, sample_size):
+def sample_from_independent_probabilities_matrix(probability_matrix, sample_size, is_directed):
     """
     Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j)
     """
@@ -579,7 +579,11 @@ def sample_from_independent_probabilities_matrix(probability_matrix, sample_size
         for j in range(n_nodes):
             if i == j:
                 continue
-            sample[i, j, :] = np.random.binomial(1, probability_matrix[i, j], size=sample_size)
+            elif not is_directed and i > j:
+                sample[i, j, :] = sample[j, i, :]
+                continue
+            else:
+                sample[i, j, :] = np.random.binomial(1, probability_matrix[i, j], size=sample_size)
 
     return sample
 
@@ -698,7 +702,7 @@ def set_off_diagonal_elements_from_array(square_mat, values_to_set):
     square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set
 
 
-def get_edges_indices_lims(edges_indices_lims: tuple[int] | None, n_nodes: int, is_directed: bool):
+def get_edges_indices_lims(edges_indices_lims: tuple[int, int] | None, n_nodes: int, is_directed: bool):
     if edges_indices_lims is None:
         num_edges_to_take = n_nodes * n_nodes - n_nodes
         if not is_directed:
@@ -720,3 +724,39 @@ def expand_net_dims(net: np.ndarray) -> np.ndarray:
 def profiled_pickle_dump(out_path: str, obj):
     with open(out_path, "wb") as f:
         pickle.dump(obj, f)
+
+def calc_entropy_independent_probability_matrix(
+        prob_mat: np.ndarray,
+        reduction: str = 'sum',
+        eps: float = 1e-10
+) -> float | np.ndarray:
+    flattened_clipped_no_diag_mat = np.clip(remove_main_diagonal_flatten(prob_mat), a_min=eps, a_max=1 - eps)
+    entropy_per_entry = -(
+            flattened_clipped_no_diag_mat * np.log2(flattened_clipped_no_diag_mat) +
+            (1 - flattened_clipped_no_diag_mat) * np.log2(1 - flattened_clipped_no_diag_mat)
+    )
+    if reduction == 'none':
+        return entropy_per_entry
+    elif reduction == 'sum':
+        return np.sum(entropy_per_entry)
+    elif reduction == 'mean':
+        return np.mean(entropy_per_entry)
+    else:
+        raise ValueError(f"reduction must be 'sum', 'mean', or 'none', got: {reduction}")
+
+
+def calc_entropy_dyads_dists(
+        dyads_distributions: np.ndarray,
+        reduction: str = 'sum',
+        eps: float = 1e-10
+) -> float | np.ndarray:
+    clipped_dyads_dists = np.clip(dyads_distributions, a_min=eps, a_max=1 - eps)
+    entropy_per_dyad = -(clipped_dyads_dists * np.log2(clipped_dyads_dists)).sum(axis=1)
+    if reduction == 'none':
+        return entropy_per_dyad
+    elif reduction == 'sum':
+        return np.sum(entropy_per_dyad)
+    elif reduction == 'mean':
+        return np.mean(entropy_per_dyad)
+    else:
+        raise ValueError(f"reduction must be 'sum', 'mean', or 'none', got: {reduction}")
