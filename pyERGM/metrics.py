@@ -103,9 +103,31 @@ class Metric(ABC):
             result[:, i] = self.calculate(network)
         return result
 
-    def calculate_mple_regressors(self, observed_network: np.ndarray | nx.Graph, edges_indices_lims: tuple[int, int]):
-        num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
-        Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count()))
+    def _validate_calc_mple_regressors_args(
+            self,
+            Xs_out: np.ndarray,
+            feature_col_indices: npt.NDArray[np.int64],
+            edges_indices_lims: tuple[int, int] | None = None,
+    ):
+        if feature_col_indices.size != self._get_effective_feature_count():
+            raise ValueError(f"Got feature_col_indices of size {feature_col_indices.size}, "
+                             f"not matching the number of effective features of the metric {self}: "
+                             f"{self._get_ignored_features()}")
+        if edges_indices_lims is not None and Xs_out.shape[0] != edges_indices_lims[1] - edges_indices_lims[0]:
+            raise ValueError(f"The difference between the edge_indices_lims should match the number of rows in Xs_out. "
+                             f"Got edge_indices_lims: {edges_indices_lims}, Xs_out.shape: {Xs_out.shape}")
+        elif edges_indices_lims is None:
+            edges_indices_lims = (0, Xs_out.shape[0])
+        return edges_indices_lims
+
+    def calculate_mple_regressors(
+            self,
+            Xs_out: np.ndarray,
+            feature_col_indices: npt.NDArray[np.int64],
+            observed_network: np.ndarray | nx.Graph,
+            edges_indices_lims: tuple[int, int] | None = None,
+    ) -> None:
+        edges_indices_lims = self._validate_calc_mple_regressors_args(Xs_out, feature_col_indices, edges_indices_lims)
         edge_idx = 0
 
         if self._is_directed:
@@ -124,13 +146,14 @@ class Metric(ABC):
                     else:
                         observed_edge_off[i, j] = 0
 
-                    Xs[edge_idx - edges_indices_lims[0]] = self.calc_change_score(observed_edge_off, indices)
+                    Xs_out[edge_idx - edges_indices_lims[0], feature_col_indices] = self.calc_change_score(
+                        observed_edge_off, indices
+                    )
                     edge_idx += 1
                     if edge_idx == edges_indices_lims[1]:
-                        return Xs
+                        return
 
         else:
-            Xs = np.zeros((num_edges_to_take, self._get_effective_feature_count()))
             for i in range(self._n_nodes - 1):
                 for j in range(i + 1, self._n_nodes):
                     if edge_idx < edges_indices_lims[0]:
@@ -147,10 +170,12 @@ class Metric(ABC):
                         observed_edge_off[i, j] = 0
                         observed_edge_off[j, i] = 0
 
-                    Xs[edge_idx - edges_indices_lims[0]] = self.calc_change_score(observed_edge_off, indices)
+                    Xs_out[edge_idx - edges_indices_lims[0], feature_col_indices] = self.calc_change_score(
+                        observed_edge_off, indices
+                    )
                     edge_idx += 1
                     if edge_idx == edges_indices_lims[1]:
-                        return Xs
+                        return
 
     def _get_metric_names(self):
         """
@@ -227,10 +252,15 @@ class NumberOfEdges(Metric):
         """
         return networks_sample.sum(axis=(0, 1)) // self._get_num_edges_in_mat_factor()
 
-    @staticmethod
-    @njit
-    def calculate_mple_regressors(observed_network: np.ndarray, edges_indices_lims: tuple[int, int]):
-        return np.ones((edges_indices_lims[1] - edges_indices_lims[0], 1))
+    def calculate_mple_regressors(
+            self,
+            Xs_out: np.ndarray,
+            feature_col_indices: npt.NDArray[np.int64],
+            observed_network=None,
+            edges_indices_lims: tuple[int, int] | None = None,
+    ):
+        self._validate_calc_mple_regressors_args(Xs_out, feature_col_indices, edges_indices_lims)
+        Xs_out[:, feature_col_indices] = 1
 
     def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
                                         second_halves_to_use: np.ndarray,
@@ -640,15 +670,26 @@ class ExWeightNumEdges(Metric):
 
         return res
 
-    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int, int]):
-        # edge_weights shape is (num_weight_mats, n_nodes, n_nodes), the desired outcome is in the shape: (n_nodes**2 - n_nodes, num_weight_mats)
+    def calculate_mple_regressors(
+            self,
+            Xs_out: np.ndarray,
+            feature_col_indices: npt.NDArray[np.int64],
+            observed_network=None,
+            edges_indices_lims: tuple[int, int] | None = None,
+    ):
+        edges_indices_lims = self._validate_calc_mple_regressors_args(Xs_out, feature_col_indices, edges_indices_lims)
+        start, end = edges_indices_lims
+
+        # edge_weights shape is (num_weight_mats, n_nodes, n_nodes), the desired outcome is in the shape:
+        # (n_nodes**2 - n_nodes, num_weight_mats)
         num_nodes = len(self.exogenous_attr)
         if self._is_directed:
-            Xs = self.edge_weights[:, np.eye(num_nodes) == 0].transpose()
+            Xs_out[:, feature_col_indices] = self.edge_weights[:, np.eye(
+                num_nodes) == 0].transpose()[start:end]
         else:
             up_triangle_indices = np.triu_indices(num_nodes, k=1)
-            Xs = self.edge_weights[:, up_triangle_indices[0], up_triangle_indices[1]].transpose()
-        return Xs[edges_indices_lims[0]:edges_indices_lims[1], :]
+            Xs_out[:, feature_col_indices] = self.edge_weights[:, up_triangle_indices[0],
+                                                     up_triangle_indices[1]].transpose()[start:end]
 
 
 class NumberOfEdgesTypes(Metric):
@@ -783,19 +824,45 @@ class NumberOfEdgesTypes(Metric):
             change_score[idx_in_features_vec] = sign
             return change_score
 
-    def calculate_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int, int]):
-        num_edges_to_take = edges_indices_lims[1] - edges_indices_lims[0]
-        Xs = np.zeros((num_edges_to_take, self._get_total_feature_count()))
+    def calculate_mple_regressors(
+            self,
+            Xs_out: np.ndarray,
+            feature_col_indices: npt.NDArray[np.int64],
+            observed_network=None,
+            edges_indices_lims: tuple[int, int] | None = None,
+    ):
+        edges_indices_lims = self._validate_calc_mple_regressors_args(Xs_out, feature_col_indices, edges_indices_lims)
+
         # Get the type pair (edge type) index for every entry in the matrix, formatted as Xs (as if the matrix is
         # flattened).
         flattened_edge_type_idx_assignment = self._get_flattened_edge_type_idx_assignment()
+        start, end = edges_indices_lims
+        edge_lim_range = np.arange(start, end)
         # For each row in Xs (which denotes and entry in the adjacency matrix), update the right column (columns
         # correspond to entries in the feature vector) - the column with the index of the corresponding type pair (the
         # pair of nodes of this entry in the adjacency matrix) in the list of type pairs.
-        Xs[np.arange(num_edges_to_take), flattened_edge_type_idx_assignment[
-                                         edges_indices_lims[0]:edges_indices_lims[1]]] = 1
-        Xs = Xs.astype(np.int8)
-        return self._handle_indices_to_ignore(Xs, axis=1)
+        type_pair_indices_in_metric_cols = flattened_edge_type_idx_assignment[edge_lim_range]
+        # Sum up ignored indices up to each type pair, to subtract the number of ignored indices up to each idx when
+        # populating the full Xs that is already indexed such that ignored indices are absent.
+        if self._indices_to_ignore is not None:
+            ignored_indices_compensation = np.cumsum(self._indices_to_ignore).astype(int)
+        else:
+            ignored_indices_compensation = np.zeros(type_pair_indices_in_metric_cols.size, dtype=int)
+
+        # Compensate for ignored indices - transform the indexing from the full metric to the metric with ignored
+        # indices by subtracting the number of ignored indices up to each entry
+        type_pair_indices_in_metric_cols_ignored_idx_comp = (
+                type_pair_indices_in_metric_cols - ignored_indices_compensation[type_pair_indices_in_metric_cols]
+        )
+        # Extract a mask of Xs rows with non-ignored features changes (these rows should be updated in Xs. Others
+        # shouldn't be updated - they are ignored). These are exactly the rows for which the index of the columns to
+        # update after compensation (which stands for type pair index) is non-negative (i.e., the type pair is not]
+        # ignored).
+        non_ignored_mask = type_pair_indices_in_metric_cols_ignored_idx_comp >= 0
+        type_pair_indices_in_metric_collection_Xs_cols = feature_col_indices[
+            type_pair_indices_in_metric_cols_ignored_idx_comp[non_ignored_mask]
+            ]
+        Xs_out[edge_lim_range[non_ignored_mask], type_pair_indices_in_metric_collection_Xs_cols] = 1
 
 
 class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
@@ -1537,31 +1604,40 @@ class MetricsCollection:
         return change_scores
 
     @profile
-    def prepare_mple_regressors(self, observed_network: np.ndarray, edges_indices_lims: tuple[int, int] | None = None):
+    def prepare_mple_regressors(
+            self,
+            observed_network: np.ndarray | None = None,
+            edges_indices_lims: tuple[int, int] | None = None,
+    ):
         if self.requires_graph:
             G1 = connectivity_matrix_to_G(observed_network[:self.n_nodes, :self.n_nodes], directed=self.is_directed)
 
-        n_nodes = observed_network.shape[0]
-        edges_indices_lims = get_edges_indices_lims(edges_indices_lims, n_nodes, self.is_directed)
+        edges_indices_lims = get_edges_indices_lims(edges_indices_lims, self.n_nodes, self.is_directed)
         Xs = np.zeros((edges_indices_lims[1] - edges_indices_lims[0], self.num_of_features))
 
         feature_idx = 0
         for metric in self.metrics:
-            if metric.requires_graph:
-                input = G1
+            if observed_network is not None:
+                if metric.requires_graph:
+                    input = G1
+                else:
+                    if metric._metric_type in ['binary_edge', 'non_binary_edge']:
+                        input = observed_network[:self.n_nodes, :self.n_nodes]
+                    elif metric._metric_type == 'node':
+                        feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
+                                                                              list(np.arange(self.n_node_features)))
+                        feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
+                        input = observed_network[:, feature_indices_to_pass]
             else:
-                if metric._metric_type in ['binary_edge', 'non_binary_edge']:
-                    input = observed_network[:self.n_nodes, :self.n_nodes]
-                elif metric._metric_type == 'node':
-                    feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
-                                                                          list(np.arange(self.n_node_features)))
-                    feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
-                    input = observed_network[:, feature_indices_to_pass]
+                input = None
 
             n_features_from_metric = metric._get_effective_feature_count()
-            cur_regressors = metric.calculate_mple_regressors(input, edges_indices_lims=edges_indices_lims)
-            Xs[:, feature_idx:feature_idx + n_features_from_metric] = cur_regressors
-
+            metric.calculate_mple_regressors(
+                Xs_out=Xs,
+                feature_col_indices=np.arange(feature_idx, feature_idx + n_features_from_metric, dtype=int),
+                observed_network=input,
+                edges_indices_lims=edges_indices_lims,
+            )
             feature_idx += n_features_from_metric
         return Xs
 

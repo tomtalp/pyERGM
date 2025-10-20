@@ -4,13 +4,16 @@ from unittest.mock import patch, MagicMock, mock_open
 from pyERGM.cluster_utils import *
 
 class TestClusterUtils(unittest.TestCase):
+    def setUp(self):
+        if str(Path.cwd()).endswith('tests'):
+            os.chdir(str(Path.cwd().parent))
 
     @patch("subprocess.run")
     def test_should_check_output_files_marks_false_for_running_jobs(self, mock_run):
         # Simulate bjobs output: JOBID USER STAT QUEUE ... JOB_NAME ...
         mock_run.return_value.stdout = (
-            "87920 tomta RUN short login1 host *leNets[1] Aug 31 14:53\n"
-            "87920 tomta DONE short login1 host *leNets[2] Aug 31 14:53\n"
+            "87920 RUN *leNets[1]\n"
+            "87920 DONE *leNets[2]\n"
         )
 
         res = should_check_output_files(["87920"], 2)
@@ -23,8 +26,8 @@ class TestClusterUtils(unittest.TestCase):
     @patch("subprocess.run")
     def test_should_check_output_files_all_done(self, mock_run):
         mock_run.return_value.stdout = (
-            "87920 tomta DONE short login1 host *leNets[1] Aug 31 14:53\n"
-            "87920 tomta EXIT short login1 host *leNets[2] Aug 31 14:53\n"
+            "87920 DONE *leNets[1]\n"
+            "87920 EXIT *leNets[2]\n"
         )
 
         res = should_check_output_files(["87920"], 2)
@@ -44,7 +47,7 @@ class TestClusterUtils(unittest.TestCase):
             MagicMock(stdout=b"Job <7865> is submitted to default queue.\n"),
         ]
 
-
+        print(Path.cwd())
         ids = resend_failed_jobs(Path(""), list(range(150)), "arrayname")
 
         # It should split into 2 batches (LSF_ID_LIST_LEN_LIMIT = 5)
