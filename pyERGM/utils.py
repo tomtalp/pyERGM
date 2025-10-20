@@ -1157,7 +1157,7 @@ def predict_multi_class_logistic_regression(Xs, thetas):
 
 def log_likelihood_multi_class_logistic_regression(true_labels, predictions, reduction='sum', log_base=np.exp(1), eps=1e-10):
     predictions = np.maximum(predictions, eps)
-    individual_data_samples_minus_cross_ent = ((np.log(predictions) / np.log(log_base)) * true_labels).sum(axis=0)
+    individual_data_samples_minus_cross_ent = ((np.log(predictions) / np.log(log_base)) * true_labels).sum(axis=1)
     if reduction == 'none':
         return individual_data_samples_minus_cross_ent
     elif reduction == 'sum':
