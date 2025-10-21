@@ -1,6 +1,7 @@
 import numpy as np
 from scipy.optimize import minimize, OptimizeResult
 from scipy.special import softmax
+import glob
 
 from pyERGM.metrics import *
 
@@ -125,19 +126,21 @@ def analytical_minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10):
     return -calc_logistic_regression_predictions_log_likelihood(pred, ys)[0][0]
 
 
-def analytical_minus_log_likelihood_distributed(thetas, data_path, num_edges_per_job):
+def analytical_minus_log_likelihood_distributed(thetas, data_path):
     log_like, grad = distributed_logistic_regression_optimization_step(
         data_path,
         thetas.reshape(thetas.size, 1),
         ('log_likelihood', 'log_likelihood_gradient'),
-        num_edges_per_job,
     )
     return -log_like, -grad.reshape(thetas.size, )
 
 
-def analytical_logistic_regression_predictions_distributed(thetas, data_path, num_edges_per_job):
-    return distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                             ('predictions',), num_edges_per_job)[0]
+def analytical_logistic_regression_predictions_distributed(thetas, data_path):
+    return distributed_logistic_regression_optimization_step(
+        data_path,
+        thetas.reshape(thetas.size, 1),
+        ('predictions',),
+    )[0]
 
 
 def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10):
@@ -228,6 +231,10 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
         with open(metric_collection_path, 'wb') as f:
             pickle.dump(metrics_collection, f)
+        num_edges_per_job = kwargs.get('num_edges_per_job', 100000)
+        distributed_mple_data_chunks_calculations(data_path, num_edges_per_job)
+
+
 
     num_features = metrics_collection.calc_num_of_features()
     if initial_thetas is None:
@@ -249,12 +256,11 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
                 f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
         pred = calc_logistic_regression_predictions(Xs, res.x.reshape(-1, 1)).flatten()
     else:
-        num_edges_per_job = kwargs.get('num_edges_per_job', 100000)
         if optimization_method == "L-BFGS-B":
-            res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
+            res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path,),
                            jac=True, callback=_after_optim_iteration_callback, method=optimization_method)
         elif optimization_method == "Newton-CG":
-            res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
+            res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path,),
                            jac=True,
                            hess=analytical_minus_log_likelihood_hessian_distributed,
                            callback=_after_optim_iteration_callback, method=optimization_method)
@@ -262,21 +268,23 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method} for distributed optimization. "
                 f"Options are: Newton-CG, L-BFGS-B")
-        pred = analytical_logistic_regression_predictions_distributed(res.x.reshape(-1, 1), data_path,
-                                                                      num_edges_per_job).flatten()
+        pred = analytical_logistic_regression_predictions_distributed(res.x.reshape(-1, 1), data_path).flatten()
 
     print(res)
     sys.stdout.flush()
+
+    # Clean up MPLE data (metrics_collection, observed_networks and Xs,ys chunks).
+    shutil.rmtree(os.path.join(data_path))
+
     return res.x, pred, res.success
 
 
-def distributed_logistic_regression_optimization_step(data_path, thetas, funcs_to_calc, num_edges_per_job=5000):
+def distributed_logistic_regression_optimization_step(data_path, thetas, funcs_to_calc):
     # Arrange files and send the children jobs
     num_jobs, out_path, job_array_ids, children_logs_dir = _run_distributed_logistic_regression_children_jobs(
         data_path,
         thetas,
         funcs_to_calc,
-        num_edges_per_job,
     )
 
     # Wait for all jobs to finish.
@@ -307,19 +315,53 @@ def distributed_logistic_regression_optimization_step(data_path, thetas, funcs_t
     return tuple(aggregated_funcs)
 
 
-def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, funcs_to_calculate, num_edges_per_job):
+def distributed_mple_data_chunks_calculations(data_path, num_edges_per_job):
+    out_path = str(Path(data_path).parent)
+    cmd_line_single_batch = (f'python ./mple_data_distributed_paging.py '
+                         f'--out_dir_path={out_path} '
+                         f'--num_edges_per_job={num_edges_per_job} ')
+
+    with open(os.path.join(data_path, 'observed_networks.pkl'), 'rb') as f:
+        observed_networks = pickle.load(f)
+    num_nodes = observed_networks.shape[0]
+    del observed_networks
+    num_data_points = num_nodes * num_nodes - num_nodes
+    num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
+
+    print("sending children jobs to calculate MPLE data chunks")
+    sys.stdout.flush()
+    job_array_ids, children_logs_dir = run_distributed_children_jobs(
+        out_path,
+        cmd_line_single_batch,
+        "distributed_mple_data_paging.sh",
+        num_jobs, 'data_paging',
+    )
+
+    # Wait for all jobs to finish.
+    chunks_path = (data_path / 'paged_chunks').resolve()
+    os.makedirs(chunks_path, exist_ok=True)
+
+    print("start waiting for children jobs in MPLE data paging")
+    sys.stdout.flush()
+    wait_for_distributed_children_outputs(num_jobs, [chunks_path], job_array_ids, 'data_paging',
+                                          children_logs_dir)
+    print("done waiting for children jobs in MPLE optimization")
+    sys.stdout.flush()
+    # Clean current scripts
+    shutil.rmtree((out_path / "scripts").resolve())
+
+
+def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, funcs_to_calculate):
     out_path = data_path.parent
 
     cmd_line_single_batch = construct_single_batch_bash_cmd_logistic_regression(
-        out_path, cur_thetas,
-        funcs_to_calculate, num_edges_per_job)
+        out_path,
+        cur_thetas,
+        funcs_to_calculate,
+    )
 
-    with open(os.path.join(data_path, "observed_networks.pkl"), 'rb') as f:
-        observed_networks = pickle.load(f)
-
-    num_nodes = observed_networks.shape[0]
-    num_data_points = num_nodes * num_nodes - num_nodes
-    num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
+    paged_chunks_path = os.path.join(data_path, "paged_chunks")
+    num_jobs = len(glob.glob(f"{paged_chunks_path}/[0-9]*.npz"))
 
     print("sending children jobs to calculate MPLE likelihood grad")
     sys.stdout.flush()

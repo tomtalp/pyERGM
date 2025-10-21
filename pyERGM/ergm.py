@@ -204,12 +204,14 @@ class ERGM():
             The estimated coefficients of the ERGM.
         """
         print("MPLE")
-        trained_thetas, prediction, success = mple_logistic_regression_optimization(self._metrics_collection,
-                                                                                    observed_networks,
-                                                                                    is_distributed=self._is_distributed_optimization,
-                                                                                    optimization_method=optimization_method,
-                                                                                    num_edges_per_job=kwargs.get(
-                                                                                        "num_edges_per_job", 100000))
+        num_edges_per_job = kwargs.get("num_edges_per_job", 100000)
+        trained_thetas, prediction, success = mple_logistic_regression_optimization(
+            self._metrics_collection,
+            observed_networks,
+            is_distributed=self._is_distributed_optimization,
+            optimization_method=optimization_method,
+            num_edges_per_job=num_edges_per_job,
+        )
 
         self._exact_average_mat = self._rearrange_prediction_to_av_mat(prediction)
 

@@ -13,7 +13,7 @@ import sys
 LSF_ID_LIST_LEN_LIMIT = 100
 
 
-def construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, funcs_to_calculate, num_edges_per_job):
+def construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, funcs_to_calculate):
     # Construct a string with the current thetas, to pass using the command line to children jobs.
     thetas_str = ''
     for t in cur_thetas:
@@ -24,7 +24,6 @@ def construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, fu
 
     cmd_line_for_bsub = (f'python -m memory_profiler ./logistic_regression_distributed_calcs.py '
                          f'--out_dir_path={out_path} '
-                         f'--num_edges_per_job={num_edges_per_job} '
                          f'--functions={fns_str} '
                          f'--thetas={thetas_str}')
     return cmd_line_for_bsub
