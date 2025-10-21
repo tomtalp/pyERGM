@@ -862,7 +862,7 @@ class NumberOfEdgesTypes(Metric):
         type_pair_indices_in_metric_collection_Xs_cols = feature_col_indices[
             type_pair_indices_in_metric_cols_ignored_idx_comp[non_ignored_mask]
             ]
-        Xs_out[edge_lim_range[non_ignored_mask], type_pair_indices_in_metric_collection_Xs_cols] = 1
+        Xs_out[np.arange(0, end - start)[non_ignored_mask], type_pair_indices_in_metric_collection_Xs_cols] = 1
 
 
 class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):

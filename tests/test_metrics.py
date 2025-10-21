@@ -370,6 +370,15 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         )
         self.assertTrue(np.all(expected_mple_regressors == mple_regressors))
 
+        edge_indices = (2, 6)
+        mple_regressors = np.zeros((edge_indices[1] - edge_indices[0], num_types ** 2))
+        metric.calculate_mple_regressors(
+            Xs_out=mple_regressors,
+            feature_col_indices=np.arange(mple_regressors.shape[1], dtype=int),
+            edges_indices_lims=edge_indices,
+        )
+        self.assertTrue(np.all(expected_mple_regressors[edge_indices[0]:edge_indices[1]] == mple_regressors))
+
 
 class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
     def test_calc_edge_type_idx_assignment(self):

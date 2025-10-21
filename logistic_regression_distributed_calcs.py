@@ -27,9 +27,10 @@ def main():
 
     # Get data chunk and predictions
     num_nodes = observed_networks.shape[0]
+
     edge_indices = (func_id * num_edges_per_job,
                     min((func_id + 1) * num_edges_per_job, num_nodes * num_nodes - num_nodes))
-    Xs_chunk = metric_collection.prepare_mple_regressors(observed_networks[..., 0], edge_indices)
+    Xs_chunk = metric_collection.prepare_mple_regressors(observed_network=None, edges_indices_lims=edge_indices)
     ys_chunk = metric_collection.prepare_mple_labels(observed_networks, edge_indices)
     chunk_prediction = calc_logistic_regression_predictions(Xs_chunk, thetas)
 
