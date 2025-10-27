@@ -231,6 +231,9 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
         with open(metric_collection_path, 'wb') as f:
             pickle.dump(metrics_collection, f)
+        observed_networks_path = os.path.join(data_path, 'observed_networks.pkl')
+        with open(observed_networks_path, 'wb') as f:
+            pickle.dump(observed_networks, f)
         num_edges_per_job = kwargs.get('num_edges_per_job', 100000)
         distributed_mple_data_chunks_calculations(data_path, num_edges_per_job)
 
@@ -316,7 +319,7 @@ def distributed_logistic_regression_optimization_step(data_path, thetas, funcs_t
 
 
 def distributed_mple_data_chunks_calculations(data_path, num_edges_per_job):
-    out_path = str(Path(data_path).parent)
+    out_path = Path(data_path).parent
     cmd_line_single_batch = (f'python ./mple_data_distributed_paging.py '
                          f'--out_dir_path={out_path} '
                          f'--num_edges_per_job={num_edges_per_job} ')
@@ -338,14 +341,14 @@ def distributed_mple_data_chunks_calculations(data_path, num_edges_per_job):
     )
 
     # Wait for all jobs to finish.
-    chunks_path = (data_path / 'paged_chunks').resolve()
+    chunks_path = (out_path / 'mple_data_paged_chunks').resolve()
     os.makedirs(chunks_path, exist_ok=True)
 
     print("start waiting for children jobs in MPLE data paging")
     sys.stdout.flush()
     wait_for_distributed_children_outputs(num_jobs, [chunks_path], job_array_ids, 'data_paging',
                                           children_logs_dir)
-    print("done waiting for children jobs in MPLE optimization")
+    print("done waiting for children jobs in MPLE data paging")
     sys.stdout.flush()
     # Clean current scripts
     shutil.rmtree((out_path / "scripts").resolve())
@@ -360,7 +363,7 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, fu
         funcs_to_calculate,
     )
 
-    paged_chunks_path = os.path.join(data_path, "paged_chunks")
+    paged_chunks_path = os.path.join(out_path, "mple_data_paged_chunks")
     num_jobs = len(glob.glob(f"{paged_chunks_path}/[0-9]*.npz"))
 
     print("sending children jobs to calculate MPLE likelihood grad")

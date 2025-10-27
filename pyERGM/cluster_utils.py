@@ -123,7 +123,7 @@ def wait_for_distributed_children_outputs(num_jobs: int, out_paths: Sequence[Pat
         for i in np.where(should_check_out_files)[0]:
             is_done = True
             for out_path in out_paths:
-                if not os.path.exists(os.path.join(out_path, f'{i}.pkl')):
+                if not any(out_path.glob(f"{i}.*")):
                     is_done = False
                     break
             children_statuses[i] = is_done
@@ -184,14 +184,23 @@ def should_check_output_files(job_array_ids: list, num_sent_jobs: int) -> npt.ND
 
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     lines = result.stdout.strip().splitlines()
+    kill_cmd = ['bkill']
     for i, line in enumerate(lines):
         parts = line.split(None, 2)
         jobid, stat, job_name = parts
 
         idx = int(job_name[job_name.rfind("[") + 1:job_name.rfind("]")])
+        if stat in ["PSUSP", "USUSP", "SSUSP"]:
+            stat = "EXIT"
+
+            kill_cmd.append(f'{jobid}[{idx}]')
 
         if stat not in {"DONE", "EXIT"}:
             should_check_out_files[idx - 1] = False
+    if len(kill_cmd) > 1:
+        print(f"killing suspended jobs: {' '.join(kill_cmd[1:])}")
+        sys.stdout.flush()
+        subprocess.run(kill_cmd)
     return should_check_out_files
 
 
@@ -222,7 +231,7 @@ def parse_sent_job_array_ids(process_stdout) -> list:
     return job_array_ids
 
 
-def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_template_file_name, num_jobs,
+def run_distributed_children_jobs(out_path: Path, cmd_line_single_batch, single_batch_template_file_name, num_jobs,
                                   array_name):
     # Create current bash scripts to send distributed calculations
     scripts_path = (out_path / "scripts").resolve()

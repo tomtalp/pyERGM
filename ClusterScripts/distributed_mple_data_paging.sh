@@ -1,4 +1,4 @@
-#BSUB -q gsla-cpu
+#BSUB -q short
 #BSUB -R "span[hosts=1]"
 #BSUB -R rusage[mem=120000]
 #BSUB -o ../logs/intermediate_calcs/outs.%J.%I.log

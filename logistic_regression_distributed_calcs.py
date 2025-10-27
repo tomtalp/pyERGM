@@ -16,12 +16,12 @@ def main():
     out_dir_path = args.out_dir_path
     funcs_to_calc = args.functions.split(',')
     thetas = np.fromstring(args.thetas, sep=',')
-    thetas = thetas[:, None]
+    thetas = thetas[:, None].astype(np.float32)
     func_id = int(os.environ['LSB_JOBINDEX']) - 1
 
-    mple_data_chunk = np.load(os.path.join(out_dir_path, 'data', 'paged_chunks', f'{func_id}.npz'))
-    Xs_chunk = mple_data_chunk['Xs_chunk']
-    ys_chunk = mple_data_chunk['ys_chunk']
+    mple_data_chunk = np.load(os.path.join(out_dir_path, 'mple_data_paged_chunks', f'{func_id}.npz'))
+    Xs_chunk = mple_data_chunk['Xs_chunk'].astype(np.float32)
+    ys_chunk = mple_data_chunk['ys_chunk'].astype(np.float32)
     mple_data_chunk.close()
 
     chunk_prediction = calc_logistic_regression_predictions(Xs_chunk, thetas)

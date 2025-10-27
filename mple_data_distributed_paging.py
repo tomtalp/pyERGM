@@ -26,7 +26,7 @@ def main():
     Xs_chunk = metric_collection.prepare_mple_regressors(observed_network=None, edges_indices_lims=edge_indices)
     ys_chunk = metric_collection.prepare_mple_labels(observed_networks, edge_indices)
 
-    chunks_out_path = os.path.join(out_dir_path, 'data', 'paged_chunks')
+    chunks_out_path = os.path.join(out_dir_path, 'mple_data_paged_chunks')
     os.makedirs(chunks_out_path, exist_ok=True)
 
     np.savez_compressed(os.path.join(chunks_out_path, f'{func_id}.npz'), Xs_chunk=Xs_chunk, ys_chunk=ys_chunk)
