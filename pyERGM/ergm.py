@@ -7,6 +7,7 @@ from pyERGM.mple_optimizaiton import *
 
 from memory_profiler import profile
 
+
 class ERGM():
     @profile
     def __init__(self,
@@ -243,19 +244,23 @@ class ERGM():
     #  average matrix of the model, so should be computed once and stored. If the model is dyadic dependent, this is an
     #  approximation, and the degree to which changes in the observed_network will change the prediction depend on the
     #  metrics and the specific networks, it can not be pre-determined.
-    def get_mple_prediction(self, observed_networks: np.ndarray):
+    def get_mple_prediction(self, observed_networks: np.ndarray, **kwargs):
         if observed_networks.ndim == 3:
             observed_networks = observed_networks[..., 0]
         is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
         if is_dyadic_independent and self._exact_average_mat is not None:
             return self._exact_average_mat.copy()
 
-        # TODO: handle this case
         if self._is_distributed_optimization:
-            raise NotImplementedError(
-                "calculating mple predictions distributed without fitting is yet to be implemented")
-        Xs = self._metrics_collection.prepare_mple_regressors(observed_networks)
-        pred = calc_logistic_regression_predictions(Xs, self._thetas).flatten()
+            data_path = distributed_mple_data_chunks_calculations(
+                self._metrics_collection,
+                observed_networks,
+                num_edges_per_job=kwargs.get("num_edges_per_job", 100000),
+            )
+            pred = analytical_logistic_regression_predictions_distributed(self._thetas, data_path)
+        else:
+            Xs = self._metrics_collection.prepare_mple_regressors(observed_networks)
+            pred = calc_logistic_regression_predictions(Xs, self._thetas).flatten()
         if is_dyadic_independent:
             self._exact_average_mat = self._rearrange_prediction_to_av_mat(pred)
             return self._exact_average_mat.copy()
