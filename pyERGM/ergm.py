@@ -245,6 +245,8 @@ class ERGM():
     #  approximation, and the degree to which changes in the observed_network will change the prediction depend on the
     #  metrics and the specific networks, it can not be pre-determined.
     def get_mple_prediction(self, observed_networks: np.ndarray, **kwargs):
+        print("MPLE_PREDICTION")
+        sys.stdout.flush()
         if observed_networks.ndim == 3:
             observed_networks = observed_networks[..., 0]
         is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
@@ -252,12 +254,14 @@ class ERGM():
             return self._exact_average_mat.copy()
 
         if self._is_distributed_optimization:
+            print("in get_mple_prediction, distributed optimization scenario")
+            sys.stdout.flush()
             data_path = distributed_mple_data_chunks_calculations(
                 self._metrics_collection,
                 observed_networks,
                 num_edges_per_job=kwargs.get("num_edges_per_job", 100000),
             )
-            pred = analytical_logistic_regression_predictions_distributed(self._thetas, data_path)
+            pred = analytical_logistic_regression_predictions_distributed(self._thetas, data_path).flatten()
         else:
             Xs = self._metrics_collection.prepare_mple_regressors(observed_networks)
             pred = calc_logistic_regression_predictions(Xs, self._thetas).flatten()

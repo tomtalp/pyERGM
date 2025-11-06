@@ -132,13 +132,13 @@ def wait_for_distributed_children_outputs(num_jobs: int, out_paths: Sequence[Pat
         if children_to_resend:
             print("found children jobs to resend: {}".format(children_to_resend))
             sys.stdout.flush()
-            for child_to_resen_idx in children_to_resend:
+            for child_to_resend_idx in children_to_resend:
                 print("validating children didn't fail on OOM")
                 sys.stdout.flush()
-                _check_if_child_died_on_oom(children_logs_dir, child_to_resen_idx)
+                _check_if_child_died_on_oom(children_logs_dir, child_to_resend_idx)
                 print("removing failed children logs")
                 sys.stdout.flush()
-                _remove_logs_of_child_job(children_logs_dir, child_to_resen_idx)
+                _remove_logs_of_child_job(children_logs_dir, child_to_resend_idx)
             print("resending failed children jobs")
             sys.stdout.flush()
             resent_job_array_ids = resend_failed_jobs(out_paths[0].parent, children_to_resend, array_name)
@@ -149,6 +149,7 @@ def wait_for_distributed_children_outputs(num_jobs: int, out_paths: Sequence[Pat
             print(f"current iteration finished children indices: {np.where(newly_done_mask)[0]}")
             sys.stdout.flush()
         print(f"iteration {iteration}: done with {children_statuses.sum()} / {num_jobs} children jobs")
+        sys.stdout.flush()
         iteration += 1
         time.sleep(60)
 
@@ -201,6 +202,16 @@ def should_check_output_files(job_array_ids: list, num_sent_jobs: int) -> npt.ND
         print(f"killing suspended jobs: {' '.join(kill_cmd[1:])}")
         sys.stdout.flush()
         subprocess.run(kill_cmd)
+        # Wait for all killed jobs to actually finish (be in DONE/EXIT state). timeout of 10 min. recheck every 2 sec.
+        # This avoids a racing condition between the LSF scheduler killing the job and us removing the log files:
+        #   if the job is killed after the log files were removed, they will be recreated. As the job is resent, which
+        #   would create by itself new log files, we will hav duplicate log files which we don't handle.
+        print('start waiting for killed jobs to exit')
+        sys.stdout.flush()
+        wait_expr = " && ".join([f"ended({job_id_str})" for job_id_str in kill_cmd[1:]])
+        subprocess.run(["bwait", "-w", wait_expr, "-t", "600", "-r", "2"])
+        print('done waiting for killed jobs to exit')
+        sys.stdout.flush()
     return should_check_out_files
 
 

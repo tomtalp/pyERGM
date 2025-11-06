@@ -1642,6 +1642,7 @@ class MetricsCollection:
         return Xs
 
     def prepare_mple_labels(self, observed_networks: np.ndarray, edges_indices_lims: tuple[int, int] | None = None):
+        observed_networks = expand_net_dims(observed_networks)
         n_nodes = observed_networks.shape[0]
         edges_indices_lims = get_edges_indices_lims(edges_indices_lims, n_nodes, self.is_directed)
         ys = np.zeros((edges_indices_lims[1] - edges_indices_lims[0], 1))

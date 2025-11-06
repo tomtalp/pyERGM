@@ -314,20 +314,23 @@ def distributed_mple_data_chunks_calculations(
     # Copy the `MetricsCollection` and the observed network to provide its path to children jobs, so they will be
     # able to access it.
     metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
+    print("dumping metrics collection")
+    sys.stdout.flush()
     with open(metric_collection_path, 'wb') as f:
         pickle.dump(metrics_collection, f)
+    print("dumped metrics collection")
+    sys.stdout.flush()
     observed_networks_path = os.path.join(data_path, 'observed_networks.pkl')
+    print("dumping observed networks")
     with open(observed_networks_path, 'wb') as f:
         pickle.dump(observed_networks, f)
+    print("dumped observed networks")
     out_path = Path(data_path).parent
     cmd_line_single_batch = (f'python ./mple_data_distributed_paging.py '
                              f'--out_dir_path={out_path} '
                              f'--num_edges_per_job={num_edges_per_job} ')
 
-    with open(os.path.join(data_path, 'observed_networks.pkl'), 'rb') as f:
-        observed_networks = pickle.load(f)
     num_nodes = observed_networks.shape[0]
-    del observed_networks
     num_data_points = num_nodes * num_nodes - num_nodes
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
 
