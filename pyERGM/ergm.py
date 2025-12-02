@@ -23,6 +23,7 @@ class ERGM():
                  collinearity_fixer_sample_size=1000,
                  is_distributed_optimization=False,
                  optimization_options={},
+                 mask: npt.NDArray[bool] | None = None,
                  **kwargs):
         """
         An ERGM model object. 
@@ -59,7 +60,9 @@ class ERGM():
 
         collinearity_fixer_sample_size : int
             Optional. The number of networks to sample for fixing collinearity. *Defaults to 1000*
-        
+
+        mask: npt.NDArray[bool] | None
+            Optional. Designating which entries should be taken into account for optimization and metric calculations.
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed

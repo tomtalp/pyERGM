@@ -2,6 +2,7 @@ import itertools
 from collections import Counter
 from typing import Collection
 import numpy as np
+from numpy import typing as npt
 import networkx as nx
 from numba import njit
 from scipy.spatial.distance import mahalanobis
@@ -702,13 +703,35 @@ def set_off_diagonal_elements_from_array(square_mat, values_to_set):
     square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set
 
 
-def get_edges_indices_lims(edges_indices_lims: tuple[int, int] | None, n_nodes: int, is_directed: bool):
-    if edges_indices_lims is None:
-        num_edges_to_take = n_nodes * n_nodes - n_nodes
-        if not is_directed:
-            num_edges_to_take = num_edges_to_take // 2
-        edges_indices_lims = (0, num_edges_to_take)
-    return edges_indices_lims
+def get_edges_indices_mask(
+        edge_indices_mask_or_mask_lims: npt.NDArray[bool] | tuple[int, int] | None,
+        n_nodes: int,
+        is_directed: bool,
+):
+    total_num_edges = n_nodes * n_nodes - n_nodes
+    if not is_directed:
+        total_num_edges = total_num_edges // 2
+    if isinstance(edge_indices_mask_or_mask_lims, np.ndarray):
+        if edge_indices_mask_or_mask_lims.shape != (total_num_edges, 1):
+            raise ValueError(
+                f"Got mask of shape {edge_indices_mask_or_mask_lims.shape}, but expected {(total_num_edges, 1)}")
+        if edge_indices_mask_or_mask_lims.sum() == 0:
+            raise ValueError(f"Got an empty mask, which is not supported (the mask should include at least one edge)")
+        mask = edge_indices_mask_or_mask_lims
+    else:
+        mask = np.ones((total_num_edges, 1), dtype=bool)
+        if isinstance(edge_indices_mask_or_mask_lims, tuple):
+            if edge_indices_mask_or_mask_lims[0] >= edge_indices_mask_or_mask_lims[1]:
+                raise ValueError(f"Got non strictly increasing mask limits: {edge_indices_mask_or_mask_lims}, which is"
+                                 f"not supported.")
+            elif edge_indices_mask_or_mask_lims[0] < 0 or edge_indices_mask_or_mask_lims[1] < 0:
+                raise ValueError(f"Got negative mask limits: {edge_indices_mask_or_mask_lims}, which is not supported")
+            elif edge_indices_mask_or_mask_lims[1] > total_num_edges:
+                raise ValueError(f"Got upper mask limit: {edge_indices_mask_or_mask_lims[1]} that exceeds the total "
+                                 f"number of edges: {total_num_edges}")
+            mask[edge_indices_mask_or_mask_lims[0]:edge_indices_mask_or_mask_lims[1]] = False
+            mask = ~mask
+    return mask
 
 
 def expand_net_dims(net: np.ndarray) -> np.ndarray:
@@ -724,6 +747,7 @@ def expand_net_dims(net: np.ndarray) -> np.ndarray:
 def profiled_pickle_dump(out_path: str, obj):
     with open(out_path, "wb") as f:
         pickle.dump(obj, f)
+
 
 def calc_entropy_independent_probability_matrix(
         prob_mat: np.ndarray,
