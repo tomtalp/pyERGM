@@ -608,7 +608,7 @@ def num_dyads_to_num_nodes(num_dyads):
     """
     x = num_dyads
     n(n-1) = 2*x
-    n^2-n-2x=0 --> n = \frac{1+\sqrt{1-4\cdot(-2x)}}{2}
+    n^2-n-2x=0 --> n = \\frac{1+\\sqrt{1-4\\cdot(-2x)}}{2}
     """
     return np.round((1 + np.sqrt(1 + 8 * num_dyads)) / 2).astype(int)
 
