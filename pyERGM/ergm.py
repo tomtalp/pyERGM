@@ -63,10 +63,27 @@ class ERGM():
 
         mask: npt.NDArray[bool] | None
             Optional. Designating which entries should be taken into account for optimization and metric calculations.
+            The shape can be either (n, n) or (n**2 - n, 1). The latter is the flattened version with no main diagonal
+            of square mask.
         """
         self._n_nodes = n_nodes
         self._is_directed = is_directed
         self._is_distributed_optimization = is_distributed_optimization
+        if mask is None:
+            self._mask = None
+        else:
+            if mask.shape == (n_nodes, n_nodes):
+                self._mask = flatten_square_matrix_to_edge_list(mask, self._is_directed)
+            elif ((mask.shape == (n_nodes ** 2 - n_nodes, 1) and self._is_directed) or
+                  (mask.shape == (n_nodes ** 2 - n_nodes // 2, 1) and not self._is_directed)
+            ):
+                self._mask = mask.copy()
+            else:
+                raise ValueError(
+                    f"Invalid mask shape. Expected: ({n_nodes}, {n_nodes}) or [({n_nodes ** 2 - n_nodes}, 1) for "
+                    f"directed models or ({n_nodes ** 2 - n_nodes // 2}, 1) for undirected models]. "
+                    f"Received: {mask.shape}, the model is {'' if self._is_directed else 'un'}directed."
+                )
 
         self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
                                                      use_sparse_matrix=use_sparse_matrix,
@@ -76,7 +93,10 @@ class ERGM():
                                                      num_samples_per_job_collinearity_fixer=kwargs.get(
                                                          'num_samples_per_job_collinearity_fixer', 5),
                                                      ratio_threshold_collinearity_fixer=kwargs.get(
-                                                         'ratio_threshold_collinearity_fixer', 5e-6))
+                                                         'ratio_threshold_collinearity_fixer', 5e-6),
+                                                     mask=self._mask)
+        if "MPLE" != self._metrics_collection.choose_optimization_scheme() and self._mask is not None:
+            raise NotImplementedError("Masking is currently supported only for edge independent models.")
 
         self.n_node_features = self._metrics_collection.n_node_features
         self.node_feature_names = self._metrics_collection.node_feature_names.copy()
@@ -222,15 +242,11 @@ class ERGM():
         return trained_thetas, success
 
     def _rearrange_prediction_to_av_mat(self, prediction):
-        av_mat = np.zeros((self._n_nodes, self._n_nodes))
-        if self._is_directed:
-            av_mat[~np.eye(self._n_nodes, dtype=bool)] = prediction
-        else:
-            upper_triangle_indices = np.triu_indices(self._n_nodes, k=1)
-            av_mat[upper_triangle_indices] = prediction
-            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
-            av_mat[lower_triangle_indices_aligned] = prediction
-        return av_mat
+        return reshape_flattened_off_diagonal_elements_to_square(
+            flattened_array=prediction,
+            is_directed=self._is_directed,
+            flat_mask=self._mask,
+        )
 
     def _mple_reciprocity_fit(self, observed_networks, optimization_method: str = 'L-BFGS-B'):
         print("MPLE_RECIPROCITY")
@@ -322,9 +338,10 @@ class ERGM():
             if self._exact_average_mat is None:
                 raise RuntimeError("Cannot calculate the likelihood of data before properly fitting the model. Call "
                                    "`model.fit()` and try again.")
+            mask = self._mask if self._mask is not None else ...
             log_like = calc_logistic_regression_predictions_log_likelihood(
-                remove_main_diagonal_flatten(self._exact_average_mat).reshape(-1, 1),
-                remove_main_diagonal_flatten(observed_network).reshape(-1, 1),
+                flatten_square_matrix_to_edge_list(self._exact_average_mat, self._is_directed)[mask].reshape(-1, 1),
+                flatten_square_matrix_to_edge_list(observed_network, self._is_directed)[mask].reshape(-1, 1),
                 reduction=reduction,
                 log_base=log_base)
 
@@ -358,7 +375,9 @@ class ERGM():
             # TODO: once calculating mple regressors doesn't require an input matrix, get rid of this.
             dummy_zeros_net = np.zeros((self._n_nodes, self._n_nodes))
             exact_av_mat = self.get_mple_prediction(dummy_zeros_net)
-            return calc_entropy_independent_probability_matrix(exact_av_mat, reduction=reduction, eps=eps)
+            return calc_entropy_independent_probability_matrix(
+                prob_mat=exact_av_mat, is_directed=self._is_directed, reduction=reduction, eps=eps
+            )
         elif model_type == "MPLE_RECIPROCITY":
             exact_dyads_dist = self.get_mple_reciprocity_prediction()
             return calc_entropy_dyads_dists(exact_dyads_dist, reduction=reduction, eps=eps)

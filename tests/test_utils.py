@@ -1,5 +1,6 @@
 import unittest
 
+import numpy as np
 from scipy.stats import pearsonr
 
 from pyERGM.utils import *
@@ -70,122 +71,41 @@ class GeneralUtilsTester(unittest.TestCase):
                                  sampled_networks.mean(axis=-1)[
                                      ~np.eye(n_nodes, dtype=bool)].flatten()).statistic > 0.99)
 
-    def test_mask_array_passed_is_returned_as_is_directed(self):
-        n_nodes = 4
-        is_directed = True
-        total = n_nodes * n_nodes - n_nodes  # 12
-        inp_mask = np.ones((total, 1), dtype=bool)
-        out_mask = get_edges_indices_mask(inp_mask, n_nodes, is_directed)
-        # function returns the same array object and value
-        self.assertIs(out_mask, inp_mask)
-        self.assertTrue(np.all(out_mask == inp_mask))
+    def test_flatten_square_matrix_to_edge_list(self):
+        set_seed(49876)
+        n = 10
+        matrix = np.random.rand(n ** 2).reshape(n, n)
+        flattened_directed = flatten_square_matrix_to_edge_list(matrix, True)
+        flattened_undirected = flatten_square_matrix_to_edge_list(matrix + matrix.T, False)
+        self.assertEqual(flattened_directed.shape, (n ** 2 - n, ))
+        self.assertEqual(flattened_undirected.shape, ((n ** 2 - n) // 2,))
+        idx_directed = 0
+        idx_undirected = 0
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                self.assertEqual(flattened_directed[idx_directed], matrix[i, j])
+                idx_directed += 1
+                if j > i:
+                    self.assertEqual(flattened_undirected[idx_undirected], matrix[i, j] + matrix[j, i])
+                    idx_undirected += 1
 
-    def test_mask_array_passed_is_returned_as_is_undirected(self):
-        n_nodes = 5
-        is_directed = False
-        total = (n_nodes * n_nodes - n_nodes) // 2
-        inp_mask = np.ones((total, 1), dtype=bool)
-        out_mask = get_edges_indices_mask(inp_mask, n_nodes, is_directed)
-        self.assertIs(out_mask, inp_mask)
-        self.assertTrue(np.all(out_mask == inp_mask))
 
-    def test_mask_array_wrong_shape_raises_value_error_directed(self):
-        n_nodes = 4
-        is_directed = True
-        total = n_nodes * n_nodes - n_nodes  # 12
 
-        # 1-D array (total,) instead of (total,1)
-        bad_mask1 = np.zeros((total,), dtype=bool)
-        with self.assertRaises(ValueError):
-            get_edges_indices_mask(bad_mask1, n_nodes, is_directed)
+    def test_reshape_flattened_off_diagonal_elements_to_square(self):
+        set_seed(39876)
+        n = 10
+        matrix = np.random.rand(n ** 2).reshape(n, n)
+        matrix[np.diag_indices(n)] = 0
+        flattened = flatten_square_matrix_to_edge_list(matrix, True)
+        reshaped = reshape_flattened_off_diagonal_elements_to_square(flattened, is_directed=True)
+        self.assertTrue(np.allclose(reshaped, matrix))
 
-        # wrong second dimension
-        bad_mask2 = np.zeros((total, 2), dtype=bool)
-        with self.assertRaises(ValueError):
-            get_edges_indices_mask(bad_mask2, n_nodes, is_directed)
-
-    def test_mask_array_wrong_shape_raises_value_error_undirected(self):
-        n_nodes = 5
-        is_directed = False
-        total = (n_nodes * n_nodes - n_nodes) // 2
-
-        bad = np.zeros((total + 1, 1), dtype=bool)  # wrong first dimension
-        with self.assertRaises(ValueError):
-            get_edges_indices_mask(bad, n_nodes, is_directed)
-
-    def test_mask_array_all_false_raises_value_error(self):
-        n_nodes = 4
-        is_directed = True
-        total = n_nodes * n_nodes - n_nodes  # 12
-
-        empty_mask = np.zeros((total, 1), dtype=bool)  # all False
-        with self.assertRaises(ValueError):
-            get_edges_indices_mask(empty_mask, n_nodes, is_directed)
-
-    def test_none_returns_all_true_directed_and_undirected_and_n_nodes_one(self):
-        # directed
-        n_nodes = 4
-        out_mask_dir = get_edges_indices_mask(None, n_nodes, True)
-        expected_shape_dir = (n_nodes * n_nodes - n_nodes, 1)  # 12 x 1
-        self.assertEqual(out_mask_dir.shape, expected_shape_dir)
-        self.assertTrue(np.all(out_mask_dir))
-
-        # undirected
-        out_mask_undir = get_edges_indices_mask(None, n_nodes, False)
-        expected_shape_undir = ((n_nodes * n_nodes - n_nodes) // 2, 1)  # 6 x 1
-        self.assertEqual(out_mask_undir.shape, expected_shape_undir)
-        self.assertTrue(np.all(out_mask_undir))
-
-        # edge case: n_nodes = 1 -> total_num_edges == 0 -> shape (0,1)
-        out_mask_zero = get_edges_indices_mask(None, 1, True)
-        self.assertEqual(out_mask_zero.shape, (0, 1))
-        # empty array: all() on empty is True, but we still assert shape correctness
-        self.assertTrue(isinstance(out_mask_zero, np.ndarray))
-
-    def test_tuple_limits_middle_range_directed(self):
-        n_nodes = 4
-        is_directed = True
-        total = n_nodes * n_nodes - n_nodes  # 12
-        lo, hi = 3, 7
-        out_mask = get_edges_indices_mask((lo, hi), n_nodes, is_directed)
-        # True only for indices 3..6 (slice semantics)
-        expected = np.zeros((total, 1), dtype=bool)
-        expected[lo:hi] = True
-        self.assertTrue(np.all(expected == out_mask))
-
-    def test_tuple_full_range_allowed_and_equals_none(self):
-        n_nodes = 5
-        is_directed = True
-        total = n_nodes * n_nodes - n_nodes
-        out_mask_tuple = get_edges_indices_mask((0, total), n_nodes, is_directed)
-        out_mask_none = get_edges_indices_mask(None, n_nodes, is_directed)
-        # both should be all True
-        self.assertTrue(np.all(out_mask_tuple))
-        self.assertTrue(np.all(out_mask_none))
-        self.assertTrue(np.all(out_mask_tuple == out_mask_none))
-
-    def test_tuple_non_strict_limits_raises(self):
-        n_nodes = 4
-        is_directed = True
-        # start == end is not strictly increasing -> raise
-        with self.assertRaises(ValueError):
-            get_edges_indices_mask((2, 2), n_nodes, is_directed)
-        # start > end also not allowed
-        with self.assertRaises(ValueError):
-            get_edges_indices_mask((5, 3), n_nodes, is_directed)
-
-    def test_tuple_negative_indices_raises(self):
-        n_nodes = 4
-        is_directed = True
-        with self.assertRaises(ValueError):
-            get_edges_indices_mask((-5, -2), n_nodes, is_directed)
-
-    def test_tuple_hi_exceeds_total_raises(self):
-        n_nodes = 4
-        is_directed = True
-        total = n_nodes * n_nodes - n_nodes  # 12
-        with self.assertRaises(ValueError):
-            get_edges_indices_mask((10, total + 1), n_nodes, is_directed)
+        matrix = matrix + matrix.T
+        flattened = flatten_square_matrix_to_edge_list(matrix, False)
+        reshaped = reshape_flattened_off_diagonal_elements_to_square(flattened, is_directed=False)
+        self.assertTrue(np.allclose(reshaped, matrix))
 
 
 class TestGreatestConvexMinorant(unittest.TestCase):

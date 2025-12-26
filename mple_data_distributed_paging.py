@@ -19,10 +19,8 @@ def main():
     with open(os.path.join(out_dir_path, 'data', 'observed_networks.pkl'), 'rb') as f:
         observed_networks = pickle.load(f)
 
-    num_nodes = observed_networks.shape[0]
-
     edge_indices = (func_id * num_edges_per_job,
-                    min((func_id + 1) * num_edges_per_job, num_nodes * num_nodes - num_nodes))
+                    min((func_id + 1) * num_edges_per_job, metric_collection.mask.sum()))
     Xs_chunk = metric_collection.prepare_mple_regressors(observed_network=None, edges_indices_lims=edge_indices)
     ys_chunk = metric_collection.prepare_mple_labels(observed_networks, edge_indices)
 
