@@ -1203,7 +1203,9 @@ class MetricsCollection:
             self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
                                     is_distributed=is_collinearity_distributed,
                                     num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5),
-                                    ratio_threshold=kwargs.get('ratio_threshold_collinearity_fixer', 5e-6), )
+                                    ratio_threshold=kwargs.get('ratio_threshold_collinearity_fixer', 5e-6),
+                                    nonzero_thr=kwargs.get('nonzero_threshold_collinearity_fixer', 0.1),
+                                    )
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
