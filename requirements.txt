@@ -6,3 +6,5 @@ seaborn==0.13.2
 numba==0.60.0
 torch==2.2.0
 mkdocs-material==9.5.39
+mkdocstrings[python]==0.25.2
+mkdocs-autorefs>=1.2.0

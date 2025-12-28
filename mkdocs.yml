@@ -13,8 +13,13 @@ nav:
   - Evaluating model performance: evaluating.md
   - Metrics:
     - Introduction to graph metrics: metrics.md
-    - List of metrics: metrics_reference.md
     - Creating custom metrics: custom_metrics.md
+  - API Reference:
+    - ERGM: api/ergm.md
+    - Metrics: api/metrics.md
+    - Sampling: api/sampling.md
+    - Datasets: api/datasets.md
+    - Utils: api/utils.md
     
 
 markdown_extensions:
@@ -28,3 +33,19 @@ extra_javascript:
 
 repo_name: 'pyERGM'
 repo_url: 'https://github.com/tomtalp/pyERGM'
+
+plugins:
+  - search
+  - autorefs
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: numpy
+            show_source: false
+            show_root_toc_entry: false
+            members_order: source
+            filters:
+              - "!^_"
+            merge_init_into_class: true
+            separate_signature: true
