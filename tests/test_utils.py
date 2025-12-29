@@ -1,5 +1,6 @@
 import unittest
 
+import numpy as np
 from scipy.stats import pearsonr
 
 from pyERGM.utils import *
@@ -70,7 +71,41 @@ class GeneralUtilsTester(unittest.TestCase):
                                  sampled_networks.mean(axis=-1)[
                                      ~np.eye(n_nodes, dtype=bool)].flatten()).statistic > 0.99)
 
+    def test_flatten_square_matrix_to_edge_list(self):
+        set_seed(49876)
+        n = 10
+        matrix = np.random.rand(n ** 2).reshape(n, n)
+        flattened_directed = flatten_square_matrix_to_edge_list(matrix, True)
+        flattened_undirected = flatten_square_matrix_to_edge_list(matrix + matrix.T, False)
+        self.assertEqual(flattened_directed.shape, (n ** 2 - n, ))
+        self.assertEqual(flattened_undirected.shape, ((n ** 2 - n) // 2,))
+        idx_directed = 0
+        idx_undirected = 0
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                self.assertEqual(flattened_directed[idx_directed], matrix[i, j])
+                idx_directed += 1
+                if j > i:
+                    self.assertEqual(flattened_undirected[idx_undirected], matrix[i, j] + matrix[j, i])
+                    idx_undirected += 1
 
+
+
+    def test_reshape_flattened_off_diagonal_elements_to_square(self):
+        set_seed(39876)
+        n = 10
+        matrix = np.random.rand(n ** 2).reshape(n, n)
+        matrix[np.diag_indices(n)] = 0
+        flattened = flatten_square_matrix_to_edge_list(matrix, True)
+        reshaped = reshape_flattened_off_diagonal_elements_to_square(flattened, is_directed=True)
+        self.assertTrue(np.allclose(reshaped, matrix))
+
+        matrix = matrix + matrix.T
+        flattened = flatten_square_matrix_to_edge_list(matrix, False)
+        reshaped = reshape_flattened_off_diagonal_elements_to_square(flattened, is_directed=False)
+        self.assertTrue(np.allclose(reshaped, matrix))
 
 
 class TestGreatestConvexMinorant(unittest.TestCase):
