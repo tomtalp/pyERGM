@@ -94,7 +94,10 @@ class ERGM():
                                                          'num_samples_per_job_collinearity_fixer', 5),
                                                      ratio_threshold_collinearity_fixer=kwargs.get(
                                                          'ratio_threshold_collinearity_fixer', 5e-6),
-                                                     mask=self._mask)
+                                                     nonzero_threshold_collinearity_fixer=kwargs.get(
+                                                         'nonzero_threshold_collinearity_fixer', 0.1),
+                                                     mask=self._mask,
+                                                     )
         if "MPLE" != self._metrics_collection.choose_optimization_scheme() and self._mask is not None:
             raise NotImplementedError("Masking is currently supported only for edge independent models.")
 
