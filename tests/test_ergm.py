@@ -9,6 +9,17 @@ from pyERGM.datasets import sampson_matrix
 import sys
 from scipy.linalg import eigh
 
+def ccc(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """
+    Concordance-Correlation-Coefficient
+    Measures the goodness of fit of data and predictions (closeness to the identity line)
+    Can be defined as 1 - mean_distance_from_identity/mean_distance_from_identity_assuming_independence
+    """
+    mean_true, mean_pred = np.mean(y_true), np.mean(y_pred)
+    var_true, var_pred = np.var(y_true), np.var(y_pred)
+    cov = np.mean((y_true - mean_true) * (y_pred - mean_pred))
+    return (2 * cov) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
+
 
 class TestERGM(unittest.TestCase):
     def setUp(self):
@@ -347,9 +358,8 @@ class TestERGM(unittest.TestCase):
                            }
         expected_thetas = np.array(list(expected_values.values()))
 
-        thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas) ** 2) / np.sum(
-            (expected_thetas - np.mean(expected_thetas)) ** 2)
-        self.assertTrue(thetas_R_2 > 0.99)
+        thetas_ccc = ccc(model_thethas, expected_thetas)
+        self.assertTrue(thetas_ccc > 0.99)
         self.assertTrue(convergence_result["success"])
 
     # def test_sampson_MCMLE_with_node_features(self):
@@ -593,9 +603,8 @@ class TestERGM(unittest.TestCase):
                            }
         expected_thetas = np.array(list(expected_values.values()))
 
-        thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas) ** 2) / np.sum(
-            (expected_thetas - np.mean(expected_thetas)) ** 2)
-        self.assertTrue(thetas_R_2 > 0.99)
+        thetas_ccc = ccc(model_thethas, expected_thetas)
+        self.assertTrue(thetas_ccc > 0.99)
         self.assertTrue(convergence_result["success"])
 
     def test_mple_reciprocity_sampling(self):
@@ -645,7 +654,8 @@ class TestERGM(unittest.TestCase):
         expected_theta = np.log(observed_p / (1 - observed_p))  # log odds ratio for p
 
         model = ERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
-        model.fit(observed_net)
+        result = model.fit(observed_net)
+        self.assertTrue(result["success"])
 
         self.assertTrue(np.abs(model._thetas - expected_theta) < 1e-5)
 
@@ -680,7 +690,8 @@ class TestERGM(unittest.TestCase):
 
         model = ERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
 
-        model.fit(observed_net)
+        result = model.fit(observed_net)
+        self.assertTrue(result["success"])
 
         self.assertTrue(np.abs(model._thetas - expected_theta) < 1e-5)
 
@@ -767,10 +778,9 @@ class TestERGM(unittest.TestCase):
             bootstrap_convergence_stds_away_thr=0.75,
         )
 
-        thetas_R_2 = 1 - np.sum((base_model._thetas - tested_model._thetas) ** 2) / np.sum(
-            (base_model._thetas - np.mean(base_model._thetas)) ** 2)
-        self.assertTrue(thetas_R_2 > 0.96)
-    
+        thetas_ccc = ccc(base_model._thetas, tested_model._thetas)
+        self.assertTrue(thetas_ccc > 0.96)
+
     def test_directed_undirected_sample_from_probas(self):
         set_seed(123)
         probability_matrix = np.array([
@@ -794,3 +804,73 @@ class TestERGM(unittest.TestCase):
         W = sample[:, :, 0]
         self.assertTrue(np.all(W == W.T))
         self.assertTrue(np.all(W[np.diag_indices(n_nodes)] == 0))
+
+    def test_e_2_e_training_with_mask_directed(self):
+        set_seed(348976)
+        n = 20
+        data = generate_binomial_tensor(net_size=n, node_features_size=0, num_samples=3, p=0.1)
+        types = np.random.choice([1, 2, 3], size=n)
+        positions = np.random.rand(n * 3).reshape(n, 3)
+        metrics_to_mask = [
+            NumberOfEdgesDirected(),
+            NumberOfEdgesTypesDirected(types),
+            SumDistancesConnectedNeurons(positions, is_directed=True),
+        ]
+
+        num_nodes_to_mask = 5
+        mask = np.zeros((n, n))
+        mask[:-num_nodes_to_mask, :-num_nodes_to_mask] = 1
+        mask[np.diag_indices(n)] = 0
+        mask = mask.astype(bool)
+
+        masked_model = ERGM(n_nodes=n, metrics_collection=metrics_to_mask, is_directed=True, mask=mask)
+        result = masked_model.fit(data)
+        self.assertTrue(result["success"])
+
+        metrics_no_mask = [
+            NumberOfEdgesDirected(),
+            NumberOfEdgesTypesDirected(types[:-num_nodes_to_mask]),
+            SumDistancesConnectedNeurons(positions[:-num_nodes_to_mask], is_directed=True),
+        ]
+        normal_model = ERGM(n_nodes=n - num_nodes_to_mask, metrics_collection=metrics_no_mask, is_directed=True)
+        result = normal_model.fit(data[:-num_nodes_to_mask, :-num_nodes_to_mask, ...])
+        self.assertTrue(result["success"])
+
+        thetas_ccc = ccc(normal_model._thetas, masked_model._thetas)
+        self.assertTrue(thetas_ccc > 0.99)
+
+    def test_e_2_e_training_with_mask_undirected(self):
+        set_seed(389476)
+        n = 20
+        data = generate_binomial_tensor(net_size=n, node_features_size=0, num_samples=3, p=0.1)
+        # symmetrize
+        data = np.round((data + data.transpose(1, 0, 2)) / 2)
+        types = np.random.choice([1, 2, 3], size=n)
+        positions = np.random.rand(n * 3).reshape(n, 3)
+        metrics_to_mask = [
+            NumberOfEdgesUndirected(),
+            NumberOfEdgesTypesUndirected(types),
+            SumDistancesConnectedNeurons(positions, is_directed=False),
+        ]
+
+        num_nodes_to_mask = 5
+        mask = np.zeros((n, n))
+        mask[:-num_nodes_to_mask, :-num_nodes_to_mask] = 1
+        mask[np.diag_indices(n)] = 0
+        mask = mask.astype(bool)
+
+        masked_model = ERGM(n_nodes=n, metrics_collection=metrics_to_mask, is_directed=False, mask=mask)
+        result = masked_model.fit(data)
+        self.assertTrue(result["success"])
+
+        metrics_no_mask = [
+            NumberOfEdgesUndirected(),
+            NumberOfEdgesTypesUndirected(types[:-num_nodes_to_mask]),
+            SumDistancesConnectedNeurons(positions[:-num_nodes_to_mask], is_directed=False),
+        ]
+        normal_model = ERGM(n_nodes=n - num_nodes_to_mask, metrics_collection=metrics_no_mask, is_directed=False)
+        result = normal_model.fit(data[:-num_nodes_to_mask, :-num_nodes_to_mask, ...])
+        self.assertTrue(result["success"])
+
+        thetas_ccc = ccc(normal_model._thetas, masked_model._thetas)
+        self.assertTrue(thetas_ccc > 0.99)

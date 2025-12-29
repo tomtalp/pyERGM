@@ -28,6 +28,8 @@ class Metric(ABC):
 
         self.metric_node_feature = metric_node_feature  # relevant only if metric_type='node'
 
+        self.does_support_mask = False
+
     def initialize_indices_to_ignore(self):
         self._indices_to_ignore = np.array([False] * self._get_total_feature_count())
 
@@ -103,40 +105,23 @@ class Metric(ABC):
             result[:, i] = self.calculate(network)
         return result
 
-    def _validate_calc_mple_regressors_args(
-            self,
-            Xs_out: np.ndarray,
-            feature_col_indices: npt.NDArray[np.int64],
-            edges_indices_lims: tuple[int, int] | None = None,
-    ):
-        if feature_col_indices.size != self._get_effective_feature_count():
-            raise ValueError(f"Got feature_col_indices of size {feature_col_indices.size}, "
-                             f"not matching the number of effective features of the metric {self}: "
-                             f"{self._get_ignored_features()}")
-        if edges_indices_lims is not None and Xs_out.shape[0] != edges_indices_lims[1] - edges_indices_lims[0]:
-            raise ValueError(f"The difference between the edge_indices_lims should match the number of rows in Xs_out. "
-                             f"Got edge_indices_lims: {edges_indices_lims}, Xs_out.shape: {Xs_out.shape}")
-        elif edges_indices_lims is None:
-            edges_indices_lims = (0, Xs_out.shape[0])
-        return edges_indices_lims
-
     def calculate_mple_regressors(
             self,
             Xs_out: np.ndarray,
             feature_col_indices: npt.NDArray[np.int64],
+            edge_indices_mask: npt.NDArray[bool],
             observed_network: np.ndarray | nx.Graph,
-            edges_indices_lims: tuple[int, int] | None = None,
     ) -> None:
-        edges_indices_lims = self._validate_calc_mple_regressors_args(Xs_out, feature_col_indices, edges_indices_lims)
-        edge_idx = 0
+        edge_idx_in_full_xs = 0
+        edge_idx_in_masked_xs = 0
 
         if self._is_directed:
             for i in range(self._n_nodes):
                 for j in range(self._n_nodes):
                     if i == j:
                         continue
-                    if edge_idx < edges_indices_lims[0]:
-                        edge_idx += 1
+                    if not edge_indices_mask[edge_idx_in_full_xs]:
+                        edge_idx_in_full_xs += 1
                         continue
                     indices = (i, j)
                     observed_edge_off = observed_network.copy()
@@ -146,18 +131,17 @@ class Metric(ABC):
                     else:
                         observed_edge_off[i, j] = 0
 
-                    Xs_out[edge_idx - edges_indices_lims[0], feature_col_indices] = self.calc_change_score(
+                    Xs_out[edge_idx_in_masked_xs, feature_col_indices] = self.calc_change_score(
                         observed_edge_off, indices
                     )
-                    edge_idx += 1
-                    if edge_idx == edges_indices_lims[1]:
-                        return
+                    edge_idx_in_full_xs += 1
+                    edge_idx_in_masked_xs += 1
 
         else:
             for i in range(self._n_nodes - 1):
                 for j in range(i + 1, self._n_nodes):
-                    if edge_idx < edges_indices_lims[0]:
-                        edge_idx += 1
+                    if not edge_indices_mask[edge_idx_in_full_xs]:
+                        edge_idx_in_full_xs += 1
                         continue
 
                     indices = (i, j)
@@ -170,12 +154,11 @@ class Metric(ABC):
                         observed_edge_off[i, j] = 0
                         observed_edge_off[j, i] = 0
 
-                    Xs_out[edge_idx - edges_indices_lims[0], feature_col_indices] = self.calc_change_score(
+                    Xs_out[edge_idx_in_masked_xs, feature_col_indices] = self.calc_change_score(
                         observed_edge_off, indices
                     )
-                    edge_idx += 1
-                    if edge_idx == edges_indices_lims[1]:
-                        return
+                    edge_idx_in_full_xs += 1
+                    edge_idx_in_masked_xs += 1
 
     def _get_metric_names(self):
         """
@@ -228,6 +211,7 @@ class NumberOfEdges(Metric):
     def __init__(self):
         super().__init__(requires_graph=False)
         self._is_dyadic_independent = True
+        self.does_support_mask = True
 
     @staticmethod
     def _get_num_edges_in_mat_factor() -> int:
@@ -238,28 +222,39 @@ class NumberOfEdges(Metric):
             "This class is abstract by nature, please use either NumberOfEdgesUndirected or NumberOfEdgesDirected"
         )
 
-    def calculate(self, W: np.ndarray):
-        return np.sum(W) // self._get_num_edges_in_mat_factor()
+    def calculate(self, W: np.ndarray, mask: npt.NDArray[bool] | None = None) -> float:
+        mat_sum = np.sum(W) if mask is None else np.sum(W * mask)
+        return mat_sum // self._get_num_edges_in_mat_factor()
 
     @staticmethod
     @njit
     def calc_change_score(current_network: np.ndarray, indices: tuple):
         return -1 if current_network[indices[0], indices[1]] else 1
 
-    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
+    def calculate_for_sample(
+            self,
+            networks_sample: np.ndarray | torch.Tensor,
+            mask: npt.NDArray[bool] | None = None
+    ) -> np.ndarray:
         """
         Sum each matrix over all matrices in sample
         """
-        return networks_sample.sum(axis=(0, 1)) // self._get_num_edges_in_mat_factor()
+        mat_sum = (
+            np.sum(networks_sample, axis=(0, 1)) if mask is None else
+            np.sum(
+                networks_sample[np.where(reshape_flattened_off_diagonal_elements_to_square(mask, self._is_directed))],
+                axis=0,
+            )
+        )
+        return mat_sum // self._get_num_edges_in_mat_factor()
 
     def calculate_mple_regressors(
             self,
             Xs_out: np.ndarray,
             feature_col_indices: npt.NDArray[np.int64],
+            edge_indices_mask: npt.NDArray[bool],
             observed_network=None,
-            edges_indices_lims: tuple[int, int] | None = None,
     ):
-        self._validate_calc_mple_regressors_args(Xs_out, feature_col_indices, edges_indices_lims)
         Xs_out[:, feature_col_indices] = 1
 
     def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
@@ -514,7 +509,7 @@ class UndirectedDegree(BaseDegreeVector):
 class Reciprocity(Metric):
     """
     The Reciprocity metric takes the connectivity matrix of a directed graph, and returns a vector
-    of size n-choose-2 indicating whether nodes i,j are connected. i.e. $ y_{i, j} \cdot y_{j, i} $
+    of size n-choose-2 indicating whether nodes i,j are connected. i.e. $ y_{i, j} \\cdot y_{j, i} $
     for every possible pair of nodes   
     """
 
@@ -629,6 +624,7 @@ class ExWeightNumEdges(Metric):
         self.exogenous_attr = exogenous_attr
         self.edge_weights = None
         self._calc_edge_weights()
+        self.does_support_mask = True
 
     @abstractmethod
     def _calc_edge_weights(self):
@@ -645,28 +641,39 @@ class ExWeightNumEdges(Metric):
         sign = -1 if current_network[indices[0], indices[1]] else 1
         return sign * self._handle_indices_to_ignore(self.edge_weights)[:, indices[0], indices[1]]
 
-    def calculate(self, input: np.ndarray):
-        # TODO - Since most of our focus is on the `calculate_for_sample` functions,
-        #  we can convert all individual calculate(x) functions to calculate_for_sample([x])
-        #  and reuse code.
-        res = np.einsum('ij,kij->k', input, self.edge_weights)
-        if not self._is_directed:
-            res = res / 2
-        return self._handle_indices_to_ignore(res)
+    def calculate(self, input: np.ndarray, mask: npt.NDArray[bool] | None = None):
+        return self.calculate_for_sample(expand_net_dims(input), mask=mask)[..., -1]
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
-        res = self._numba_calculate_for_sample(networks_sample, self.edge_weights)
+    def calculate_for_sample(self, networks_sample: np.ndarray, mask: npt.NDArray[bool] | None = None):
+        if mask is not None:
+            mask = reshape_flattened_off_diagonal_elements_to_square(mask, self._is_directed)
+        res = self._numba_calculate_for_sample(networks_sample, self.edge_weights, mask)
         if not self._is_directed:
             res = res / 2
         return self._handle_indices_to_ignore(res)
 
     @staticmethod
     @njit
-    def _numba_calculate_for_sample(networks_sample: np.ndarray, edge_weights: np.ndarray):
+    def _numba_calculate_for_sample(
+            networks_sample: np.ndarray,
+            edge_weights: np.ndarray,
+            mask: npt.NDArray[bool] | None = None,
+    ):
+        # transform to shape m X n(n-1) where m is the number of weight matrices (flatten each weight matrix)
         reshaped_edge_weights = edge_weights.reshape(edge_weights.shape[0], -1).astype(np.float64)
-        reshaped_networks_sample = networks_sample.reshape(-1, networks_sample.shape[2]).astype(np.float64)
 
-        res = reshaped_edge_weights @ reshaped_networks_sample
+        masked_reshaped_edge_weights = reshaped_edge_weights.copy()
+        if mask is not None:
+            # This method expects squared masks, to match the dimensionality of edge_weights. Ignoring the elements on
+            # the diagonal in calculations is handled by having zero edge weights for those elements.
+            masked_reshaped_edge_weights *= mask.flatten()
+
+        # transform to shape n(n-1) X k where k is the sample size (flatten each network in the sample)
+        reshaped_networks_sample = networks_sample.reshape(-1, networks_sample.shape[-1]).astype(np.float64)
+
+        # Calculate an m X k matrix where each column is the statistics (m node attributed sum) and there is a column
+        # per network in the sample.
+        res = masked_reshaped_edge_weights @ reshaped_networks_sample
 
         return res
 
@@ -674,22 +681,19 @@ class ExWeightNumEdges(Metric):
             self,
             Xs_out: np.ndarray,
             feature_col_indices: npt.NDArray[np.int64],
+            edge_indices_mask: npt.NDArray[bool],
             observed_network=None,
-            edges_indices_lims: tuple[int, int] | None = None,
     ):
-        edges_indices_lims = self._validate_calc_mple_regressors_args(Xs_out, feature_col_indices, edges_indices_lims)
-        start, end = edges_indices_lims
-
         # edge_weights shape is (num_weight_mats, n_nodes, n_nodes), the desired outcome is in the shape:
         # (n_nodes**2 - n_nodes, num_weight_mats)
         num_nodes = len(self.exogenous_attr)
         if self._is_directed:
             Xs_out[:, feature_col_indices] = self.edge_weights[:, np.eye(
-                num_nodes) == 0].transpose()[start:end]
+                num_nodes) == 0].transpose()[edge_indices_mask]
         else:
             up_triangle_indices = np.triu_indices(num_nodes, k=1)
             Xs_out[:, feature_col_indices] = self.edge_weights[:, up_triangle_indices[0],
-                                                     up_triangle_indices[1]].transpose()[start:end]
+                                             up_triangle_indices[1]].transpose()[edge_indices_mask]
 
 
 class NumberOfEdgesTypes(Metric):
@@ -729,6 +733,13 @@ class NumberOfEdgesTypes(Metric):
         """
         raise NotImplementedError(NumberOfEdgesTypes.not_implemented_error_message)
 
+    def _get_sorted_canonical_type_pairs(self):
+        """
+        Get the list of type pairs representative (the representative depends on whether ordering is improtant, i.e.,
+        directed or not) sorted according to their indexing in the metric statistics vector.
+        """
+        raise NotImplementedError(NumberOfEdgesTypes.not_implemented_error_message)
+
     def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None):
         self.exogenous_attr = exogenous_attr
 
@@ -737,10 +748,10 @@ class NumberOfEdgesTypes(Metric):
         self._indices_from_user = indices_from_user.copy() if indices_from_user is not None else None
         super().__init__()
 
+        self.does_support_mask = True
+
         self._effective_feature_count = self._get_effective_feature_count()
         self._indices_to_ignore_up_to_idx = np.cumsum(self._indices_to_ignore)
-
-        self._is_directed = True
 
         self.indices_of_types = {}
         for i, t in enumerate(self.exogenous_attr):
@@ -750,7 +761,7 @@ class NumberOfEdgesTypes(Metric):
                 self.indices_of_types[t].append(i)
 
         self.sorted_type_pairs = get_sorted_type_pairs(self.unique_types)
-        self._calc_type_paris_indices()
+        self._calc_type_pairs_indices()
 
         self._calc_edge_type_idx_assignment()
 
@@ -779,23 +790,32 @@ class NumberOfEdgesTypes(Metric):
 
         self._edge_type_idx_assignment += 1  # Increment by 1 to avoid 0-indexing (the index 0 will be kept for non-existing edges)
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
+    def calculate_for_sample(self, networks_sample: np.ndarray, mask: npt.NDArray[bool] | None = None):
         sample_size = networks_sample.shape[2]
         stats = np.zeros((self._get_effective_feature_count(), sample_size))
         num_ignored = 0
-        for i, type_pair in enumerate(self.sorted_type_pairs):
-            if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
+        mask = None if mask is None else reshape_flattened_off_diagonal_elements_to_square(mask, self._is_directed)
+        for type_pair in self.sorted_type_pairs:
+            if (
+                    self._indices_to_ignore is not None and
+                    self._indices_to_ignore[self._sorted_type_pairs_indices[type_pair]]
+            ):
                 num_ignored += 1
                 continue
-            stats[self._sorted_type_pairs_indices[type_pair] - num_ignored] += networks_sample[
-                np.ix_(self.indices_of_types[type_pair[0]], self.indices_of_types[type_pair[1]])
-            ].sum(axis=(0, 1))
+            ix_grid = np.ix_(self.indices_of_types[type_pair[0]], self.indices_of_types[type_pair[1]])
+            sub_array = networks_sample[ix_grid]
+            if mask is None:
+                stat = sub_array.sum(axis=(0, 1))
+            else:
+                mask_for_types = mask[ix_grid]
+                stat = np.einsum("ijk,ij->k", sub_array, mask_for_types)
+            stats[self._sorted_type_pairs_indices[type_pair] - num_ignored] += stat
         return stats / self._get_num_edges_in_mat_factor()
 
     # TODO: when we finally make calculate_for_sample the mandatory abstract method in Metric and remove calculate
     #  entirely or return the first matrix returned by calculate_for_sample, change this accordingly as well.
-    def calculate(self, network: np.ndarray):
-        return self.calculate_for_sample(expand_net_dims(network))[..., -1]
+    def calculate(self, network: np.ndarray, mask: npt.NDArray[bool] | None = None):
+        return self.calculate_for_sample(expand_net_dims(network), mask=mask)[..., -1]
 
     def update_indices_to_ignore(self, indices_to_ignore):
         super().update_indices_to_ignore(indices_to_ignore)
@@ -828,26 +848,22 @@ class NumberOfEdgesTypes(Metric):
             self,
             Xs_out: np.ndarray,
             feature_col_indices: npt.NDArray[np.int64],
+            edge_indices_mask: npt.NDArray[bool],
             observed_network=None,
-            edges_indices_lims: tuple[int, int] | None = None,
     ):
-        edges_indices_lims = self._validate_calc_mple_regressors_args(Xs_out, feature_col_indices, edges_indices_lims)
-
         # Get the type pair (edge type) index for every entry in the matrix, formatted as Xs (as if the matrix is
         # flattened).
         flattened_edge_type_idx_assignment = self._get_flattened_edge_type_idx_assignment()
-        start, end = edges_indices_lims
-        edge_lim_range = np.arange(start, end)
         # For each row in Xs (which denotes and entry in the adjacency matrix), update the right column (columns
         # correspond to entries in the feature vector) - the column with the index of the corresponding type pair (the
         # pair of nodes of this entry in the adjacency matrix) in the list of type pairs.
-        type_pair_indices_in_metric_cols = flattened_edge_type_idx_assignment[edge_lim_range]
+        type_pair_indices_in_metric_cols = flattened_edge_type_idx_assignment[edge_indices_mask]
         # Sum up ignored indices up to each type pair, to subtract the number of ignored indices up to each idx when
         # populating the full Xs that is already indexed such that ignored indices are absent.
         if self._indices_to_ignore is not None:
             ignored_indices_compensation = np.cumsum(self._indices_to_ignore).astype(int)
         else:
-            ignored_indices_compensation = np.zeros(type_pair_indices_in_metric_cols.size, dtype=int)
+            ignored_indices_compensation = np.zeros(self._get_total_feature_count(), dtype=int)
 
         # Compensate for ignored indices - transform the indexing from the full metric to the metric with ignored
         # indices by subtracting the number of ignored indices up to each entry
@@ -861,8 +877,8 @@ class NumberOfEdgesTypes(Metric):
         non_ignored_mask = type_pair_indices_in_metric_cols_ignored_idx_comp >= 0
         type_pair_indices_in_metric_collection_Xs_cols = feature_col_indices[
             type_pair_indices_in_metric_cols_ignored_idx_comp[non_ignored_mask]
-            ]
-        Xs_out[np.arange(0, end - start)[non_ignored_mask], type_pair_indices_in_metric_collection_Xs_cols] = 1
+        ]
+        Xs_out[non_ignored_mask, type_pair_indices_in_metric_collection_Xs_cols] = 1
 
 
 class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
@@ -873,6 +889,10 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
     def _get_num_edges_in_mat_factor():
         return 2
 
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None):
+        super().__init__(exogenous_attr, indices_from_user)
+        self._is_directed = False
+
     def _get_total_feature_count(self):
         num_unique_types = len(self.unique_types)
         return num_unique_types * (num_unique_types + 1) // 2
@@ -880,7 +900,7 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
     def _get_sorted_canonical_type_pairs(self):
         return [p for p in self.sorted_type_pairs if p == tuple(sorted(p))]
 
-    def _calc_type_paris_indices(self):
+    def _calc_type_pairs_indices(self):
         self._sorted_type_pairs_indices = {}
 
         sorted_canonical_type_paris = self._get_sorted_canonical_type_pairs()
@@ -946,11 +966,18 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
     def __str__(self):
         return "num_edges_between_types_directed"
 
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None):
+        super().__init__(exogenous_attr, indices_from_user)
+        self._is_directed = True
+
     @staticmethod
     def _get_num_edges_in_mat_factor():
         return 1
 
-    def _calc_type_paris_indices(self):
+    def _get_sorted_canonical_type_pairs(self):
+        return self.sorted_type_pairs
+
+    def _calc_type_pairs_indices(self):
         self._sorted_type_pairs_indices = {pair: i for i, pair in enumerate(self.sorted_type_pairs)}
 
     def _get_total_feature_count(self):
@@ -1153,6 +1180,7 @@ class MetricsCollection:
                  is_collinearity_distributed=False,
                  # TODO: For tests only, find a better solution
                  do_copy_metrics=True,
+                 mask: npt.NDArray[bool] | None = None,
                  **kwargs):
         print("in MetricsCollection constructor")
         sys.stdout.flush()
@@ -1166,12 +1194,20 @@ class MetricsCollection:
             m.initialize_indices_to_ignore()
 
         self.is_directed = is_directed
+        self.mask = None
+        if mask is not None:
+            if mask.ndim != 1:
+                raise ValueError(f"MetricsCollection expects flattened masks (1D). Got {mask.ndim}D")
+            self.mask = mask.copy()
         for x in self.metrics:
             if (x._is_directed is not None) and (x._is_directed != self.is_directed):
                 model_is_directed_str = "a directed" if self.is_directed else "an undirected"
                 metric_is_directed_str = "a directed" if x._is_directed else "an undirected"
                 raise ValueError(f"Trying to initialize {model_is_directed_str} model with {metric_is_directed_str} "
                                  f"metric `{str(x)}`!")
+            if self.mask is not None and not x.does_support_mask:
+                raise ValueError(f"Trying to initialize a masked model with metric `{str(x)}` which does not support "
+                                 f"masks!")
         self.n_nodes = n_nodes
         node_feature_name_to_dim = {m.metric_node_feature: m.feature_dim for m in self.metrics if
                                     m._metric_type == 'node'}
@@ -1440,7 +1476,7 @@ class MetricsCollection:
 
         return statistics
 
-    def calc_change_scores(self, current_network: np.ndarray, edge_flip_info: dict, node_flip_info={}):
+    def calc_change_scores(self, current_network: np.ndarray, edge_flip_info: dict, node_flip_info={}) -> np.ndarray:
         """
         Calculates the vector of change scores, namely g(net_2) - g(net_1)
 
@@ -1460,15 +1496,15 @@ class MetricsCollection:
 
             if metric.requires_graph:  # it cannot require graph and also have _metric_type='node'
                 input = G1
-                change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input,
-                                                                                                           edge_flip_info[
-                                                                                                               'edge'])
+                change_scores[feature_idx:feature_idx + n_features_from_metric] = (
+                    metric.calc_change_score(input, edge_flip_info['edge'])
+                )
             else:
                 if metric._metric_type in ['binary_edge', 'non_binary_edge']:
                     input = current_network[:self.n_nodes, :self.n_nodes]
-                    change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input,
-                                                                                                               edge_flip_info[
-                                                                                                                   'edge'])
+                    change_scores[feature_idx:feature_idx + n_features_from_metric] = (
+                        metric.calc_change_score(input, edge_flip_info['edge'])
+                    )
                 elif metric._metric_type == 'node':
                     feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
                                                                           list(np.arange(self.n_node_features)))
@@ -1476,19 +1512,22 @@ class MetricsCollection:
                     if node_flip_info['feature'] not in feature_indices_to_pass:
                         continue
                     input = current_network[:, feature_indices_to_pass]
-                    change_scores[feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(input,
-                                                                                                               current_network[
-                                                                                                               :,
-                                                                                                               feature_indices_to_pass],
-                                                                                                               node_flip_info[
-                                                                                                                   'node'],
-                                                                                                               node_flip_info[
-                                                                                                                   'new_category'])
+                    change_scores[feature_idx:feature_idx + n_features_from_metric] = (
+                        metric.calc_change_score(
+                            input,
+                            current_network[:, feature_indices_to_pass],
+                            node_flip_info['node'],
+                            node_flip_info['new_category'],
+                        )
+                    )
             feature_idx += n_features_from_metric
 
         return change_scores
 
-    def calculate_sample_statistics(self, networks_sample: np.ndarray) -> np.ndarray:
+    def calculate_sample_statistics(
+            self,
+            networks_sample: np.ndarray,
+    ) -> np.ndarray:
         """
         Calculate the statistics over a sample of networks
 
@@ -1538,7 +1577,10 @@ class MetricsCollection:
                     feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
                     networks = networks_sample[:, feature_indices_to_pass]
 
-            features = metric.calculate_for_sample(networks)
+            calc_for_sample_kwargs = {'networks_sample': networks}
+            if self.mask is not None:
+                calc_for_sample_kwargs |= {'mask': self.mask}
+            features = metric.calculate_for_sample(**calc_for_sample_kwargs)
 
             if isinstance(features, torch.Tensor):
                 if features.is_sparse:
@@ -1605,17 +1647,42 @@ class MetricsCollection:
 
         return change_scores
 
+    def _get_mple_data_chunk_mask(
+            self,
+            edge_indices_lims: tuple[int, int] | None,
+    ) -> npt.NDArray[bool]:
+        full_net_size = self.n_nodes * self.n_nodes - self.n_nodes
+        if not self.is_directed:
+            full_net_size //= 2
+        data_chunk_mask = np.zeros(full_net_size, dtype=bool)
+        global_mask = self.mask if self.mask is not None else np.ones(full_net_size, dtype=bool)
+        if edge_indices_lims is None:
+            edge_indices_lims = (0, global_mask.sum())
+        if (
+                edge_indices_lims[0] < 0 or edge_indices_lims[1] < 0 or
+                edge_indices_lims[0] > global_mask.sum() or edge_indices_lims[1] > global_mask.sum() or
+                edge_indices_lims[0] >= edge_indices_lims[1]
+        ):
+            raise ValueError(
+                'edge_indices_lims out of bounds. expected strictly monotonic increasing limits between 0 '
+                'and the number of considered edges (the size of the dataset for MPLE optimization), which is '
+                f'{global_mask.sum()}. Got {edge_indices_lims}')
+        # First constraint to the "universe" of edge indices to consider by the global mask, then slice according to the
+        # limits within the subset of considered edges.
+        data_chunk_mask[np.where(global_mask)[0][edge_indices_lims[0]:edge_indices_lims[1]]] = True
+        return data_chunk_mask
+
     @profile
     def prepare_mple_regressors(
             self,
             observed_network: np.ndarray | None = None,
-            edges_indices_lims: tuple[int, int] | None = None,
-    ):
+            edge_indices_lims: tuple[int, int] | None = None,
+    ) -> np.ndarray:
         if self.requires_graph:
             G1 = connectivity_matrix_to_G(observed_network[:self.n_nodes, :self.n_nodes], directed=self.is_directed)
 
-        edges_indices_lims = get_edges_indices_lims(edges_indices_lims, self.n_nodes, self.is_directed)
-        Xs = np.zeros((edges_indices_lims[1] - edges_indices_lims[0], self.num_of_features))
+        data_chunk_mask = self._get_mple_data_chunk_mask(edge_indices_lims)
+        Xs = np.zeros((data_chunk_mask.sum(), self.num_of_features))
 
         feature_idx = 0
         for metric in self.metrics:
@@ -1638,24 +1705,23 @@ class MetricsCollection:
                 Xs_out=Xs,
                 feature_col_indices=np.arange(feature_idx, feature_idx + n_features_from_metric, dtype=int),
                 observed_network=input,
-                edges_indices_lims=edges_indices_lims,
+                edge_indices_mask=data_chunk_mask,
             )
             feature_idx += n_features_from_metric
         return Xs
 
-    def prepare_mple_labels(self, observed_networks: np.ndarray, edges_indices_lims: tuple[int, int] | None = None):
+    def prepare_mple_labels(
+            self,
+            observed_networks: np.ndarray,
+            edge_indices_lims: tuple[int, int] | None = None,
+    ) -> np.ndarray:
         observed_networks = expand_net_dims(observed_networks)
-        n_nodes = observed_networks.shape[0]
-        edges_indices_lims = get_edges_indices_lims(edges_indices_lims, n_nodes, self.is_directed)
-        ys = np.zeros((edges_indices_lims[1] - edges_indices_lims[0], 1))
+        chunk_mask = self._get_mple_data_chunk_mask(edge_indices_lims)
+        ys = np.zeros((chunk_mask.sum(), 1))
         num_nets = observed_networks.shape[-1]
         for net_idx in range(num_nets):
             net = observed_networks[..., net_idx]
-            if self.is_directed:
-                ys += net[~np.eye(n_nodes, dtype=bool)].flatten()[
-                      edges_indices_lims[0]:edges_indices_lims[1], None]
-            else:
-                ys += net[np.triu_indices(n_nodes, 1)][edges_indices_lims[0]:edges_indices_lims[1], None]
+            ys += flatten_square_matrix_to_edge_list(net, self.is_directed)[chunk_mask].reshape(-1, 1)
         return ys / num_nets
 
     def prepare_mple_reciprocity_regressors(self):
@@ -1687,7 +1753,7 @@ class MetricsCollection:
             return 'MCMLE'
         if not self._has_dyadic_dependent_metrics:
             return 'MPLE'
-        # The only edge dependence comes from reciprocal egdes
+        # The only edge dependence comes from reciprocal edges
         if not any(
                 [not x._is_dyadic_independent for x in self.metrics if
                  str(x) not in ['total_reciprocity', 'reciprocity']]):

@@ -2,6 +2,7 @@ import itertools
 from collections import Counter
 from typing import Collection
 import numpy as np
+from numpy import typing as npt
 import networkx as nx
 from numba import njit
 from scipy.spatial.distance import mahalanobis
@@ -568,16 +569,24 @@ def generate_binomial_tensor(net_size, node_features_size, num_samples, p=0.5):
     return np.random.binomial(1, p, (net_size, net_size + node_features_size, num_samples)).astype(np.int8)
 
 
-def sample_from_independent_probabilities_matrix(probability_matrix, sample_size, is_directed):
+def sample_from_independent_probabilities_matrix(
+        probability_matrix: npt.NDArray[np.floating],
+        sample_size: int,
+        is_directed: bool
+) -> npt.NDArray[np.floating]:
     """
-    Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j)
+    Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j).
+    Note - if the probability matrix contains np.nan values (that designate masked entries), the output sample will have
+    np.nans in corresponding coordinates.
+    (i.e., if np.isnan(probability_matrix[i, j]) then np.all(np.isnan(returned_sample[i, j, ...))).
     """
     n_nodes = probability_matrix.shape[0]
-    sample = np.zeros((n_nodes, n_nodes, sample_size))
+    sample = np.full((n_nodes, n_nodes, sample_size), np.nan)
+    sample[np.diag_indices(n_nodes)] = 0
 
     for i in range(n_nodes):
         for j in range(n_nodes):
-            if i == j:
+            if i == j or np.isnan(probability_matrix[i, j]):
                 continue
             elif not is_directed and i > j:
                 sample[i, j, :] = sample[j, i, :]
@@ -604,13 +613,22 @@ def split_network_for_bootstrapping(net_size: int, first_part_size: int, splitti
     return first_part_indices, second_part_indices
 
 
-def num_dyads_to_num_nodes(num_dyads):
+def num_dyads_to_num_nodes(num_dyads: int) -> int:
     """
     x = num_dyads
     n(n-1) = 2*x
     n^2-n-2x=0 --> n = \\frac{1+\\sqrt{1-4\\cdot(-2x)}}{2}
     """
     return np.round((1 + np.sqrt(1 + 8 * num_dyads)) / 2).astype(int)
+
+
+def num_edges_to_num_nodes(num_edges: int, is_directed: bool) -> int:
+    """
+    x = num_edges
+    x = n(n-1) OR n(n-1) / 2, depending on directionality
+    this function extracts n
+    """
+    return num_dyads_to_num_nodes(num_edges // 2 if is_directed else num_edges)
 
 
 def convert_connectivity_to_dyad_states(connectivity: np.ndarray):
@@ -688,27 +706,54 @@ def get_exact_marginals_from_dyads_distrubution(dyads_distributions):
     return exact_marginals
 
 
-def remove_main_diagonal_flatten(square_mat):
-    # TODO: there are multiple places we can use that that currently duplicate this logic.
+def flatten_square_matrix_to_edge_list(square_mat: np.ndarray, is_directed: bool) -> np.ndarray:
+    # TODO: there are multiple places where we can use this function to spare code duplications.
     if square_mat.ndim != 2 or square_mat.shape[0] != square_mat.shape[1]:
         raise ValueError("The input must be a square matrix")
-    return square_mat[~np.eye(square_mat.shape[0], dtype=bool)].flatten()
+    if is_directed:
+        return square_mat[~np.eye(square_mat.shape[0], dtype=bool)].flatten()
+    else:
+        if np.any(square_mat != square_mat.T):
+            raise ValueError("Got an asymmetric matrix as an undirected network to flatten")
+        return square_mat[np.triu_indices_from(square_mat, k=1)]
 
 
 def set_off_diagonal_elements_from_array(square_mat, values_to_set):
     values_to_set = values_to_set.flatten()
-    if values_to_set.size != square_mat.size - square_mat.shape[0]:
-        raise ValueError("The size of the array must be compatible the size of the square matrix")
-    square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set
+    if values_to_set.size == square_mat.size - square_mat.shape[0]:
+        square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set
+    elif values_to_set.size == (square_mat.size - square_mat.shape[0]) // 2:
+        square_mat[np.triu_indices(square_mat.shape[0], k=1)] = values_to_set
+        square_mat[np.tril_indices(square_mat.shape[0], k=-1)] = square_mat.T[
+            np.tril_indices(square_mat.shape[0], k=-1)
+        ]
+    else:
+        raise ValueError(
+            "The size of the array must be compatible the size of the square matrix, "
+            "i.e. either (n ** 2 - n) for directed networks or ((n ** 2 - n) / 2) for undirected networks. "
+            f"got: {values_to_set.size}")
 
 
-def get_edges_indices_lims(edges_indices_lims: tuple[int, int] | None, n_nodes: int, is_directed: bool):
-    if edges_indices_lims is None:
-        num_edges_to_take = n_nodes * n_nodes - n_nodes
-        if not is_directed:
-            num_edges_to_take = num_edges_to_take // 2
-        edges_indices_lims = (0, num_edges_to_take)
-    return edges_indices_lims
+def reshape_flattened_off_diagonal_elements_to_square(
+        flattened_array: np.ndarray,
+        is_directed: bool,
+        flat_mask: npt.NDArray[bool] | None = None
+) -> np.ndarray:
+    if flat_mask is not None:
+        if flat_mask.sum() != flattened_array.size:
+            raise ValueError(
+                f"Received incompatible flattened_array and mask. flat_mask.sum(): "
+                f"{flat_mask.sum()}, flattened_array.size: {flattened_array.size}, but should be equal."
+            )
+        full_array = np.full_like(flat_mask, fill_value=np.nan)
+        full_array[flat_mask] = flattened_array
+        num_nodes = num_edges_to_num_nodes(flat_mask.size, is_directed)
+    else:
+        full_array = flattened_array
+        num_nodes = num_edges_to_num_nodes(flattened_array.size, is_directed)
+    reshaped = np.zeros((num_nodes, num_nodes), dtype=flattened_array.dtype)
+    set_off_diagonal_elements_from_array(reshaped, full_array)
+    return reshaped
 
 
 def expand_net_dims(net: np.ndarray) -> np.ndarray:
@@ -725,15 +770,22 @@ def profiled_pickle_dump(out_path: str, obj):
     with open(out_path, "wb") as f:
         pickle.dump(obj, f)
 
+
 def calc_entropy_independent_probability_matrix(
         prob_mat: np.ndarray,
+        is_directed: bool,
         reduction: str = 'sum',
         eps: float = 1e-10
 ) -> float | np.ndarray:
-    flattened_clipped_no_diag_mat = np.clip(remove_main_diagonal_flatten(prob_mat), a_min=eps, a_max=1 - eps)
+    flat_clipped_no_diag_probs = np.clip(
+        flatten_square_matrix_to_edge_list(prob_mat, is_directed), a_min=eps, a_max=1 - eps
+    )
+    not_nan_mask = ~np.isnan(flat_clipped_no_diag_probs)
+    flat_clipped_no_diag_probs = flat_clipped_no_diag_probs[not_nan_mask]
+
     entropy_per_entry = -(
-            flattened_clipped_no_diag_mat * np.log2(flattened_clipped_no_diag_mat) +
-            (1 - flattened_clipped_no_diag_mat) * np.log2(1 - flattened_clipped_no_diag_mat)
+            flat_clipped_no_diag_probs * np.log2(flat_clipped_no_diag_probs) +
+            (1 - flat_clipped_no_diag_probs) * np.log2(1 - flat_clipped_no_diag_probs)
     )
     if reduction == 'none':
         return entropy_per_entry
