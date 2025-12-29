@@ -1652,7 +1652,7 @@ class MetricsCollection:
         full_net_size = self.n_nodes * self.n_nodes - self.n_nodes
         if not self.is_directed:
             full_net_size //= 2
-        per_metric_mask = np.zeros(full_net_size, dtype=bool)
+        data_chunk_mask = np.zeros(full_net_size, dtype=bool)
         global_mask = self.mask if self.mask is not None else np.ones(full_net_size, dtype=bool)
         if edge_indices_lims is None:
             edge_indices_lims = (0, global_mask.sum())
@@ -1667,8 +1667,8 @@ class MetricsCollection:
                 f'{global_mask.sum()}. Got {edge_indices_lims}')
         # First constraint to the "universe" of edge indices to consider by the global mask, then slice according to the
         # limits within the subset of considered edges.
-        per_metric_mask[np.where(global_mask)[0][edge_indices_lims[0]:edge_indices_lims[1]]] = True
-        return per_metric_mask
+        data_chunk_mask[np.where(global_mask)[0][edge_indices_lims[0]:edge_indices_lims[1]]] = True
+        return data_chunk_mask
 
     @profile
     def prepare_mple_regressors(
@@ -1714,7 +1714,6 @@ class MetricsCollection:
             edge_indices_lims: tuple[int, int] | None = None,
     ) -> np.ndarray:
         observed_networks = expand_net_dims(observed_networks)
-        n_nodes = observed_networks.shape[0]
         chunk_mask = self._get_mple_data_chunk_mask(edge_indices_lims)
         ys = np.zeros((chunk_mask.sum(), 1))
         num_nets = observed_networks.shape[-1]
