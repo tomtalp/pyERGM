@@ -9,8 +9,6 @@ from scipy.spatial.distance import pdist, squareform
 from pyERGM.utils import *
 from pyERGM.cluster_utils import *
 
-from memory_profiler import profile
-
 
 class Metric(ABC):
     def __init__(self, requires_graph=False, metric_type='binary_edge', metric_node_feature=None):
@@ -224,7 +222,6 @@ class NumberOfEdges(Metric):
     def __str__(self):
         raise NotImplementedError
 
-    @profile
     def __init__(self):
         super().__init__(requires_graph=False)
         self._is_dyadic_independent = True
@@ -1256,7 +1253,6 @@ class MetricsCollection:
             else:
                 cum_sum_num_feats += next_met_num_feats
 
-    @profile
     def calc_statistics_for_binomial_tensor_local(self, tensor_size, p=0.5):
         sample = generate_binomial_tensor(self.n_nodes, self.n_node_features, tensor_size, p=p)
 
@@ -1283,7 +1279,7 @@ class MetricsCollection:
         with open((data_path / 'metric_collection.pkl').resolve(), 'wb') as f:
             pickle.dump(self, f)
 
-        cmd_line_for_bsub = (f'python -m memory_profiler ./sample_statistics_distributed_calcs.py '
+        cmd_line_for_bsub = (f'python ./sample_statistics_distributed_calcs.py '
                              f'--out_dir_path {out_dir_path} '
                              f'--num_samples_per_job {num_samples_per_job} '
                              f'--p {p}')
@@ -1605,7 +1601,6 @@ class MetricsCollection:
 
         return change_scores
 
-    @profile
     def prepare_mple_regressors(
             self,
             observed_network: np.ndarray | None = None,
