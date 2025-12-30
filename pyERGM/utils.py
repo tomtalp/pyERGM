@@ -763,11 +763,6 @@ def expand_net_dims(net: np.ndarray) -> np.ndarray:
     return net
 
 
-def profiled_pickle_dump(out_path: str, obj):
-    with open(out_path, "wb") as f:
-        pickle.dump(obj, f)
-
-
 def calc_entropy_independent_probability_matrix(
         prob_mat: np.ndarray,
         is_directed: bool,

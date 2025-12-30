@@ -1,3 +1,4 @@
+import functools
 import os
 import numpy as np
 from pathlib import Path
@@ -154,7 +155,11 @@ def wait_for_distributed_children_outputs(num_jobs: int, out_paths: Sequence[Pat
         time.sleep(60)
 
 
-def sum_children_jobs_outputs(num_jobs: int, out_path: Path):
+def _aggregate_children_jobs_outputs(
+        num_jobs: int,
+        out_path: Path,
+        aggregation: Callable[[Sequence[np.ndarray | float]], np.ndarray | float],
+):
     measure = None
     for j in range(num_jobs):
         with open(os.path.join(out_path, f'{j}.pkl'), 'rb') as f:
@@ -162,26 +167,22 @@ def sum_children_jobs_outputs(num_jobs: int, out_path: Path):
             if measure is None:
                 measure = content
             else:
-                measure += content
+                measure = aggregation((measure, content))
     return measure
+
+
+def sum_children_jobs_outputs(num_jobs: int, out_path: Path):
+    return _aggregate_children_jobs_outputs(num_jobs, out_path, np.add.reduce)
 
 
 def cat_children_jobs_outputs(num_jobs: int, out_path: Path, axis: int = 0):
-    measure = None
-    for j in range(num_jobs):
-        with open(os.path.join(out_path, f'{j}.pkl'), 'rb') as f:
-            content = pickle.load(f)
-            if measure is None:
-                measure = content
-            else:
-                measure = np.concatenate((measure, content), axis=axis)
-    return measure
+    return _aggregate_children_jobs_outputs(num_jobs, out_path, functools.partial(np.concatenate, axis=axis))
 
 
 def should_check_output_files(job_array_ids: list, num_sent_jobs: int) -> npt.NDArray[np.bool_]:
     should_check_out_files = np.ones(num_sent_jobs, dtype=bool)
-    grep_pattern = r"\s|".join([str(jid) for jid in job_array_ids]) + r"\s"
-    cmd = f'bjobs -o "jobid stat job_name" -noheader | grep -E "{grep_pattern}"'
+    job_ids = [str(jid) for jid in job_array_ids]
+    cmd = ["bjobs", "-o", "jobid stat job_name", "-noheader"] + job_ids
 
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     lines = result.stdout.strip().splitlines()
