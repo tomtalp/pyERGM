@@ -1,6 +1,6 @@
-#BSUB -q schneidman
+#BSUB -q gsla-cpu
 #BSUB -R "span[hosts=1]"
-#BSUB -R rusage[mem=4000]
+#BSUB -R rusage[mem=200000]
 #BSUB -o ../logs/outs.%J.%I.log
 #BSUB -e ../logs/errors.%J.%I.error.log
 #BSUB -C 1

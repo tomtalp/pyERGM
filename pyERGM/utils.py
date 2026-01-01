@@ -2,28 +2,14 @@ import itertools
 from collections import Counter
 from typing import Collection
 import numpy as np
+from numpy import typing as npt
 import networkx as nx
-from numba import njit, objmode
+from numba import njit
 from scipy.spatial.distance import mahalanobis
-from scipy.optimize import minimize, OptimizeResult
-from scipy.special import softmax
 import torch
 import random
-import time
-from pathlib import Path
-import os
+
 import pickle
-import shutil
-import subprocess
-import sys
-
-# Indices of columns in the output of bjobs -A
-JOB_ARRAY_ID_IDX = 0
-ARRAY_SPEC_IDX = 1
-DONE_IDX = 5
-EXIT_IDX = 7
-
-LSF_ID_LIST_LEN_LIMIT = 100
 
 # Dyad states indexing convention
 EMPTY_IDX = 0
@@ -574,540 +560,6 @@ def calc_hotelling_statistic_for_sample(observed_features: np.ndarray, sample_fe
     return hotelling_t_as_f
 
 
-@njit
-def sigmoid(x: np.ndarray | float):
-    return 1 / (1 + np.exp(-x))
-
-
-@njit
-def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
-    """
-    Calculate the predictions of a Logistic Regression model with input Xs and parameters thetas
-    Parameters
-    ----------
-    Xs
-        The input to the model (the regressors), of shape (num_samples X num_features)
-    thetas
-        The parameters of the model, of shape (num_features X 1)
-    Returns
-        sigmoid(Xs @ thetas)
-    -------
-    """
-    return sigmoid(Xs @ thetas)
-
-
-@njit
-def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray, eps=1e-10,
-                                                        reduction: str = 'sum', log_base: float = np.exp(1)):
-    """
-    Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
-    Parameters
-    ----------
-    predictions
-        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
-        labeled 1). Of shape (num_samples X 1)
-    ys
-        The labeled data (probability for each feature vector). The values are floats between 0 and 1 (and are
-        calculated as the fraction of networks in the observed ensemble where an edge exists. If training on a single
-        network, labels are binary). Of shape (num_samples X 1)
-    Returns
-    -------
-    The probability to observe the vector `ys` under the distribution induced by `predictions`.
-    """
-    trimmed_predictions = np.clip(predictions, eps, 1 - eps)
-    minus_binary_cross_entropy_per_edge = (ys * np.log(trimmed_predictions) + (1 - ys) * np.log(
-        1 - trimmed_predictions)) / np.log(log_base)
-    if reduction == 'none':
-        return minus_binary_cross_entropy_per_edge
-    # The wrapping into a numpy array and reshape to 2D is necessary for numba to compile the function properly
-    # (returned types must be unified).
-    elif reduction == 'sum':
-        return np.array([minus_binary_cross_entropy_per_edge.sum()]).reshape(1, 1)
-    elif reduction == 'mean':
-        return np.array([minus_binary_cross_entropy_per_edge.mean()]).reshape(1, 1)
-    else:
-        raise ValueError(f"{reduction} is an unsupported reduction method, options are 'none', 'sum', or 'mean'")
-
-
-@njit
-def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np.ndarray, ys: np.ndarray):
-    """
-    Calculates the gradient of the log-likelihood of labeled data with regard to the predictions of a Logistic
-    Regression model.
-    Parameters
-    ----------
-    Xs
-        The input to the model (the regressors), of shape (num_samples X num_features)
-    predictions
-        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
-        labeled 1). Of shape (num_samples X 1)
-    ys
-         The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
-    Returns
-    -------
-    The gradient (partial derivatives with relation to thetas - the model parameters) of the log-likelihood of the data
-    given the model. Of shape (num_features X 1)
-    """
-    return Xs.T @ (ys - predictions)
-
-
-@njit
-def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions: np.ndarray):
-    """
-    Calculates the hessian of the log-likelihood of labeled data with regard to the predictions of a Logistic
-    Regression model.
-    Parameters
-    ----------
-    Xs
-        The input to the model (the regressors), of shape (num_samples X num_features)
-    predictions
-        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
-        labeled 1). Of shape (num_samples X 1)
-    Returns
-    -------
-    The hessian (partial second derivatives with relation to thetas - the model parameters) of the log-likelihood of the
-    data given the model. Of shape (num_features X num_features)
-    """
-    return Xs.T @ (predictions * (1 - predictions) * Xs)
-
-
-def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas: np.ndarray, ys: np.ndarray):
-    """
-    Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
-    Parameters
-    ----------
-    Xs
-        The input to the model (the regressors), of shape (num_samples X num_features)
-    thetas
-        The parameters of the model, of shape (num_features X 1)
-    ys
-        The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
-    Returns
-    -------
-    The probability to observe the vector `ys` under the distribution induced by the model.
-    """
-    return (-np.log(1 + np.exp(-Xs @ thetas)) + (ys - 1) * Xs @ thetas).sum()
-
-
-def analytical_minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10):
-    pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
-    return -calc_logistic_regression_predictions_log_likelihood(pred, ys)[0][0]
-
-
-@njit
-def numerically_stable_minus_log_like_and_grad_local(thetas, Xs, ys):
-    linear_pred = Xs @ thetas
-
-    # Magic numbers are taken from sklearn:
-    # https://github.com/scikit-learn/scikit-learn/blob/72b35a46684c0ecf4182500d3320836607d1f17c/sklearn/_loss/_loss.pyx.tp#L728
-    rng_1_idx = np.where(linear_pred <= -37)[0]
-    rng_2_idx = np.where((-37 < linear_pred) & (linear_pred <= -2))[0]
-    rng_3_idx = np.where((-2 < linear_pred) & (linear_pred <= 18))[0]
-    rng_4_idx = np.where(linear_pred > 18)[0]
-
-    minus_log_like = 0
-    minus_log_like_der_per_sample = np.zeros(linear_pred.size)
-    if rng_1_idx.size > 0:
-        exp_rng_1 = np.exp(linear_pred[rng_1_idx])
-        minus_log_like += (exp_rng_1 - ys[rng_1_idx, 0] * linear_pred[rng_1_idx]).sum()
-        minus_log_like_der_per_sample[:rng_1_idx.size] = exp_rng_1 - ys[rng_1_idx, 0]
-    if rng_2_idx.size > 0:
-        exp_rng_2 = np.exp(linear_pred[rng_2_idx])
-        minus_log_like += (
-                np.log(1 + exp_rng_2) - ys[rng_2_idx, 0] * linear_pred[rng_2_idx]).sum()
-        minus_log_like_der_per_sample[rng_1_idx.size:rng_1_idx.size + rng_2_idx.size] = ((1 - ys[
-            rng_2_idx, 0]) * exp_rng_2 - ys[rng_2_idx, 0]) / (1 + exp_rng_2)
-    if rng_3_idx.size > 0:
-        exp_rng_3 = np.exp(-linear_pred[rng_3_idx])
-        minus_log_like += (
-                np.log(1 + exp_rng_3) + (1 - ys[rng_3_idx, 0]) * linear_pred[rng_3_idx]).sum()
-        minus_log_like_der_per_sample[
-        rng_1_idx.size + rng_2_idx.size: minus_log_like_der_per_sample.size - rng_4_idx.size
-        ] = ((1 - ys[rng_3_idx, 0]) - ys[rng_3_idx, 0] * exp_rng_3) / (1 + exp_rng_3)
-    if rng_4_idx.size > 0:
-        exp_rng_4 = np.exp(-linear_pred[rng_4_idx])
-        minus_log_like += (exp_rng_4 + (1 - ys[rng_4_idx, 0]) * linear_pred[rng_4_idx]).sum()
-        minus_log_like_der_per_sample[minus_log_like_der_per_sample.size - rng_4_idx.size:
-        ] = ((1 - ys[rng_4_idx, 0]) - ys[rng_4_idx, 0] * exp_rng_4) / (1 + exp_rng_4)
-
-    return minus_log_like, Xs.T @ minus_log_like_der_per_sample
-
-
-def analytical_minus_log_likelihood_distributed(thetas, data_path, num_edges_per_job):
-    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                              'log_likelihood', num_edges_per_job)
-
-
-def analytical_logistic_regression_predictions_distributed(thetas, data_path, num_edges_per_job):
-    return distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                             'predictions', num_edges_per_job)
-
-
-def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10):
-    pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
-    return -calc_logistic_regression_log_likelihood_grad(Xs, pred, ys).reshape(thetas.size, )
-
-
-def analytical_minus_log_like_grad_distributed(thetas, data_path, num_edges_per_job):
-    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                              'log_likelihood_gradient',
-                                                              num_edges_per_job).reshape(thetas.size, )
-
-
-def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10):
-    pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
-    return -calc_logistic_regression_log_likelihood_hessian(Xs, pred)
-
-
-def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_edges_per_job):
-    return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                              'log_likelihood_hessian',
-                                                              num_edges_per_job)
-
-
-def mple_logistic_regression_optimization(metrics_collection, observed_networks: np.ndarray,
-                                          initial_thetas: np.ndarray | None = None,
-                                          is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
-                                          **kwargs):
-    """
-    Optimize the parameters of a Logistic Regression model by maximizing the likelihood using scipy.optimize.minimize.
-    Parameters
-    ----------
-    metrics_collection
-        The `MetricsCollection` with relation to which the optimization is carried out.
-        # TODO: we can't add a type hint for this, due to circular import (utils can't import from metrics, as metrics
-            already imports from utils). This might suggest that this isn't the right place for this function.
-    observed_networks
-        The observed network used as data for the optimization, or an array of observed networks.
-    initial_thetas
-        The initial vector of parameters. If `None`, the initial state is randomly sampled from (0,1)
-    is_distributed
-        Whether the calculations are carried locally or distributed over many compute nodes of an IBM LSF cluster.
-    optimization_method
-        The optimization method to use. Currently only 'L-BFGS-B' and 'Newton-CG' are supported.
-    num_edges_per_job
-        The number of graph edges (representing data points in this optimization) to consider for each job. Relevant
-        only for distributed optimization.
-    
-    Returns
-    -------
-    thetas: np.ndarray
-        The optimized parameters of the model
-    pred: np.ndarray
-        The predictions of the model on the observed network
-    success: bool
-        Whether the optimization was successful
-    """
-
-    # TODO: this code is duplicated, but the scoping of the nonlocal variables makes it not trivial to export out of
-    #  the scope of each function using it.
-    def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
-        nonlocal iteration
-        iteration += 1
-        cur_time = time.time()
-        print(f'iteration: {iteration}, time from start '
-              f'training: {cur_time - start_time} '
-              f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
-        sys.stdout.flush()
-
-    iteration = 0
-    start_time = time.time()
-    print("optimization started")
-    sys.stdout.flush()
-
-    observed_networks = expand_net_dims(observed_networks)
-    if not is_distributed:
-        Xs = metrics_collection.prepare_mple_regressors(observed_networks[..., 0])
-        ys = metrics_collection.prepare_mple_labels(observed_networks)
-    else:
-        out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
-        data_path = (out_dir_path / "data").resolve()
-        os.makedirs(data_path, exist_ok=True)
-
-        # Copy the `MetricsCollection` and the observed network to provide its path to children jobs, so they will be
-        # able to access it.
-        metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
-        with open(metric_collection_path, 'wb') as f:
-            pickle.dump(metrics_collection, f)
-        observed_nets_path = os.path.join(data_path, 'observed_networks.pkl')
-        with open(observed_nets_path, 'wb') as f:
-            pickle.dump(observed_networks, f)
-
-    num_features = metrics_collection.calc_num_of_features()
-    if initial_thetas is None:
-        thetas = np.random.rand(num_features)
-    else:
-        thetas = initial_thetas.copy()
-
-    if not is_distributed:
-        if optimization_method == "Newton-CG":
-            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
-                           jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
-                           callback=_after_optim_iteration_callback, method="Newton-CG")
-        elif optimization_method == "L-BFGS-B":
-            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
-                           jac=analytical_minus_log_like_grad_local, method="L-BFGS-B",
-                           callback=_after_optim_iteration_callback)
-        else:
-            raise ValueError(
-                f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
-        pred = calc_logistic_regression_predictions(Xs, res.x.reshape(-1, 1)).flatten()
-    else:
-        # TODO: support L-BFGS-B as an optimization method, and implement a numerically stable version for distributed
-        #  calculations as well.
-        num_edges_per_job = kwargs.get('num_edges_per_job', 100000)
-        if optimization_method == "Newton-CG":
-            res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path, num_edges_per_job),
-                           jac=analytical_minus_log_like_grad_distributed,
-                           hess=analytical_minus_log_likelihood_hessian_distributed,
-                           callback=_after_optim_iteration_callback, method="Newton-CG")
-        else:
-            raise ValueError(
-                f"Unsupported optimization method: {optimization_method} for distributed optimization. "
-                f"Options are: Newton-CG")
-        pred = analytical_logistic_regression_predictions_distributed(res.x.reshape(-1, 1), data_path,
-                                                                      num_edges_per_job).flatten()
-
-    print(res)
-    sys.stdout.flush()
-    return res.x, pred, res.success
-
-
-def distributed_logistic_regression_optimization_step(data_path, thetas, func_to_calc, num_edges_per_job=5000):
-    # TODO: support calculating multiple functions in a single job array, maybe by getting an array of function
-    #  names rather than a single function as func_to_calc. This will enable passing jac=True to scipy.optimize.minimize
-    #  when the optimization method is L-BFGS-B, and calculating both log-likelihood and gradient in a single job array,
-    #  reducing the number of sent jobs significantly.
-
-    # Arrange files and send the children jobs
-    num_jobs, out_path, job_array_ids = _run_distributed_logistic_regression_children_jobs(data_path, thetas,
-                                                                                           func_to_calc,
-                                                                                           num_edges_per_job)
-
-    # Wait for all jobs to finish.
-    chunks_path = (out_path / func_to_calc).resolve()
-    os.makedirs(chunks_path, exist_ok=True)
-    wait_for_distributed_children_outputs(num_jobs, chunks_path, job_array_ids, func_to_calc)
-    # Clean current scripts
-    shutil.rmtree((out_path / "scripts").resolve())
-
-    # Aggregate results
-    if func_to_calc == "predictions":
-        aggregated_func = cat_children_jobs_outputs(num_jobs, (out_path / func_to_calc).resolve())
-    else:
-        aggregated_func = _sum_children_jobs_outputs(num_jobs, (out_path / func_to_calc).resolve())
-
-    # Clean current outputs
-    shutil.rmtree((out_path / func_to_calc).resolve())
-    return aggregated_func
-
-
-def _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas, func_to_calculate, num_edges_per_job):
-    # Construct a string with the current thetas, to pass using the command line to children jobs.
-    thetas_str = ''
-    for t in cur_thetas:
-        thetas_str += f'{t[0]} '
-    thetas_str = thetas_str[:-1]
-
-    cmd_line_for_bsub = (f'python ./logistic_regression_distributed_calcs.py '
-                         f'--out_dir_path {out_path} '
-                         f'--num_edges_per_job {num_edges_per_job} '
-                         f'--function {func_to_calculate} '
-                         f'--thetas {thetas_str}')
-    return cmd_line_for_bsub
-
-
-def run_distributed_children_jobs(out_path, cmd_line_single_batch, single_batch_template_file_name, num_jobs,
-                                  array_name):
-    # Create current bash scripts to send distributed calculations
-    scripts_path = (out_path / "scripts").resolve()
-    os.makedirs(scripts_path, exist_ok=True)
-    single_batch_bash_path = os.path.join(scripts_path, "single_batch.sh")
-    shutil.copyfile(os.path.join(os.getcwd(), "ClusterScripts", single_batch_template_file_name),
-                    single_batch_bash_path)
-    with open(single_batch_bash_path, 'a') as f:
-        f.write(cmd_line_single_batch)
-
-    multiple_batches_bash_path = os.path.join(scripts_path, "multiple_batches.sh")
-    with open(multiple_batches_bash_path, 'w') as f:
-        num_rows = 1
-        while (num_rows - 1) * 2000 < num_jobs:
-            f.write(f'bsub < $1 -J {array_name}'
-                    f'[{(num_rows - 1) * 2000 + 1}-{min(num_rows * 2000, num_jobs)}]\n')
-            num_rows += 1
-
-    # Make sure the logs directory for the children jobs exists and delete previous logs.
-    with open(single_batch_bash_path, 'r') as f:
-        single_batch_bash_txt = f.read()
-    logs_rel_dir_start = single_batch_bash_txt.find('-o') + 3
-    log_rel_dir_end = single_batch_bash_txt.find('outs.%J.%I.log')
-    logs_rel_dir = single_batch_bash_txt[logs_rel_dir_start:log_rel_dir_end]
-    logs_dir = os.path.join(os.getcwd(), logs_rel_dir)
-    os.makedirs(logs_dir, exist_ok=True)
-    for file_name in os.listdir(logs_dir):
-        os.unlink(os.path.join(logs_dir, file_name))
-
-    # Send the jobs
-    send_jobs_command = f'bash {multiple_batches_bash_path} {single_batch_bash_path}'
-    jobs_sending_res = subprocess.run(send_jobs_command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-    job_array_ids = _parse_sent_job_array_ids(jobs_sending_res.stdout)
-
-    return job_array_ids
-
-
-def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, func_to_calculate, num_edges_per_job):
-    out_path = data_path.parent
-
-    cmd_line_single_batch = _construct_single_batch_bash_cmd_logistic_regression(out_path, cur_thetas,
-                                                                                 func_to_calculate, num_edges_per_job)
-
-    with open(os.path.join(data_path, "observed_networks.pkl"), 'rb') as f:
-        observed_networks = pickle.load(f)
-
-    num_nodes = observed_networks.shape[0]
-    num_data_points = num_nodes * num_nodes - num_nodes
-    num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
-
-    job_array_ids = run_distributed_children_jobs(out_path, cmd_line_single_batch, "distributed_logistic_regression.sh",
-                                                  num_jobs, func_to_calculate)
-    return num_jobs, out_path, job_array_ids
-
-
-def wait_for_distributed_children_outputs(num_jobs: int, out_path: Path, job_array_ids: list, array_name: str):
-    is_all_done = False
-    time_of_last_job_status_check = time.time()
-    num_jobs_to_listen_to = num_jobs
-    are_there_missing_jobs = True
-    # Wait that all output files will be there (all jobs finished successfully).
-    while are_there_missing_jobs:
-        # Wait for the current running jobs to finish
-        while not is_all_done:
-            if time.time() - time_of_last_job_status_check > 60:
-                is_all_done = _check_if_all_done(job_array_ids, num_jobs_to_listen_to)
-                time_of_last_job_status_check = time.time()
-        print("is_all_done is True")
-        sys.stdout.flush()
-
-        # Reset the ids of arrays and number of jobs to listen to, as previous ones are done.
-        job_array_ids = []
-        num_jobs_to_listen_to = 0
-
-        # Identify missing output files
-        out_dir_files_list = os.listdir(out_path)
-        missing_jobs = [i for i in range(num_jobs) if f'{i}.pkl' not in out_dir_files_list]
-        are_there_missing_jobs = (len(missing_jobs) > 0)
-        if are_there_missing_jobs:
-            resent_job_array_ids = _resend_failed_jobs(out_path.parent, missing_jobs, array_name)
-            print(f"sent missing jobs: {missing_jobs}")
-            sys.stdout.flush()
-            job_array_ids += resent_job_array_ids
-            num_jobs_to_listen_to += len(missing_jobs)
-            is_all_done = False
-    print("All output files exist")
-    sys.stdout.flush()
-
-
-def _sum_children_jobs_outputs(num_jobs: int, out_path: Path):
-    measure = None
-    for j in range(num_jobs):
-        with open(os.path.join(out_path, f'{j}.pkl'), 'rb') as f:
-            content = pickle.load(f)
-            if measure is None:
-                measure = content
-            else:
-                measure += content
-    return measure
-
-
-def cat_children_jobs_outputs(num_jobs: int, out_path: Path, axis: int = 0):
-    measure = None
-    for j in range(num_jobs):
-        with open(os.path.join(out_path, f'{j}.pkl'), 'rb') as f:
-            content = pickle.load(f)
-            if measure is None:
-                measure = content
-            else:
-                measure = np.concatenate((measure, content), axis=axis)
-    return measure
-
-
-def _check_if_all_done(job_array_ids: list, num_sent_jobs: int) -> bool:
-    job_stats_res = subprocess.run(['bjobs', '-A'], stdout=subprocess.PIPE)
-    job_stats = job_stats_res.stdout
-
-    # split into different lines, without the header line (and the last empty line which is an artifact of the
-    # splitting).
-    lines = job_stats.split(b'\n')[1:-1]
-
-    # remove retry lines
-    indices_to_remove = []
-    for i in range(len(lines)):
-        if b'Batch system concurrent query limit exceeded' in lines[i]:
-            indices_to_remove.append(i)
-    for i in indices_to_remove:
-        lines.remove(lines[i])
-
-    # clean spaces
-    for i, line in enumerate(lines):
-        lines[i] = [c for c in line.split(b' ') if c != b'']
-
-    # Count finished jobs in relevant lines
-    num_finished_jobs = 0
-    counted_finish_per_line = {}
-    array_ids_from_output = [int(lines[i][JOB_ARRAY_ID_IDX]) for i in range(len(lines))]
-    for job_arr_id in job_array_ids:
-        try:
-            relevant_line_idx_in_output = array_ids_from_output.index(job_arr_id)
-        except ValueError:
-            # There is no line matching this array id in the output of bjobs -A, so it probably hasn't been sent
-            # yet.
-            print(f"job array {job_arr_id} is not found in bjobs -A output, found ids: {array_ids_from_output}."
-                  f"returning False from _check_if_all_done")
-            sys.stdout.flush()
-            return False
-        num_done = int(lines[relevant_line_idx_in_output][DONE_IDX])
-        num_exit = int(lines[relevant_line_idx_in_output][EXIT_IDX])
-        num_finished_jobs += num_done
-        num_finished_jobs += num_exit
-        counted_finish_per_line[job_arr_id] = {'done': num_done, 'exit': num_exit}
-
-    if num_finished_jobs < num_sent_jobs:
-        return False
-    elif num_finished_jobs == num_sent_jobs:
-        return True
-    else:
-        raise ValueError(f"The number of finished jobs {num_finished_jobs} is larger than the total number of "
-                         f"sent jobs {num_sent_jobs}, wrong counting!\ncounts per line: {counted_finish_per_line}")
-
-
-def _resend_failed_jobs(out_path: Path, job_indices: list, array_name: str) -> list:
-    num_failed_jobs = len(job_indices)
-    job_array_ids = []
-
-    for i in range(num_failed_jobs // LSF_ID_LIST_LEN_LIMIT + 1):
-        cur_job_indices_str = ''
-        for j_idx_in_list in range(i * LSF_ID_LIST_LEN_LIMIT, min((i + 1) * LSF_ID_LIST_LEN_LIMIT, num_failed_jobs)):
-            cur_job_indices_str += f'{job_indices[j_idx_in_list] + 1},'
-        cur_job_indices_str = cur_job_indices_str[:-1]
-        single_batch_bash_path = os.path.join(out_path, "scripts", "single_batch.sh")
-        resend_job_command = f'bsub -J {array_name}[{cur_job_indices_str}]'
-        jobs_sending_res = subprocess.run(resend_job_command.split(), stdin=open(single_batch_bash_path, 'r'),
-                                          stdout=subprocess.PIPE)
-        job_array_ids += _parse_sent_job_array_ids(jobs_sending_res.stdout)
-
-    return job_array_ids
-
-
-def _parse_sent_job_array_ids(process_stdout) -> list:
-    split_array_lines = process_stdout.split(b'\n')[:-1]
-    job_array_ids = []
-    for line in split_array_lines:
-        array_id = int(line.split(b'<')[1].split(b'>')[0])
-        job_array_ids.append(array_id)
-    return job_array_ids
-
-
 def generate_binomial_tensor(net_size, node_features_size, num_samples, p=0.5):
     """
     Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
@@ -1115,16 +567,24 @@ def generate_binomial_tensor(net_size, node_features_size, num_samples, p=0.5):
     return np.random.binomial(1, p, (net_size, net_size + node_features_size, num_samples)).astype(np.int8)
 
 
-def sample_from_independent_probabilities_matrix(probability_matrix, sample_size, is_directed):
+def sample_from_independent_probabilities_matrix(
+        probability_matrix: npt.NDArray[np.floating],
+        sample_size: int,
+        is_directed: bool
+) -> npt.NDArray[np.floating]:
     """
-    Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j)
+    Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j).
+    Note - if the probability matrix contains np.nan values (that designate masked entries), the output sample will have
+    np.nans in corresponding coordinates.
+    (i.e., if np.isnan(probability_matrix[i, j]) then np.all(np.isnan(returned_sample[i, j, ...))).
     """
     n_nodes = probability_matrix.shape[0]
-    sample = np.zeros((n_nodes, n_nodes, sample_size))
+    sample = np.full((n_nodes, n_nodes, sample_size), np.nan)
+    sample[np.diag_indices(n_nodes)] = 0
 
     for i in range(n_nodes):
         for j in range(n_nodes):
-            if i == j:
+            if i == j or np.isnan(probability_matrix[i, j]):
                 continue
             elif not is_directed and i > j:
                 sample[i, j, :] = sample[j, i, :]
@@ -1151,78 +611,22 @@ def split_network_for_bootstrapping(net_size: int, first_part_size: int, splitti
     return first_part_indices, second_part_indices
 
 
-def predict_multi_class_logistic_regression(Xs, thetas):
-    return softmax(Xs @ thetas, axis=1)
-
-
-def log_likelihood_multi_class_logistic_regression(true_labels, predictions, reduction='sum', log_base=np.exp(1), eps=1e-10):
-    predictions = np.maximum(predictions, eps)
-    individual_data_samples_minus_cross_ent = ((np.log(predictions) / np.log(log_base)) * true_labels).sum(axis=1)
-    if reduction == 'none':
-        return individual_data_samples_minus_cross_ent
-    elif reduction == 'sum':
-        return individual_data_samples_minus_cross_ent.sum()
-    elif reduction == 'mean':
-        return individual_data_samples_minus_cross_ent.mean()
-    else:
-        raise ValueError(f"reduction {reduction} not supported, options are 'none', 'sum', or 'mean'")
-
-
-def minus_log_likelihood_multi_class_logistic_regression(thetas, Xs, ys):
-    return -log_likelihood_multi_class_logistic_regression(ys, predict_multi_class_logistic_regression(Xs, thetas))
-
-
-def minus_log_likelihood_gradient_multi_class_logistic_regression(thetas, Xs, ys):
-    prediction = predict_multi_class_logistic_regression(Xs, thetas)
-    num_features = Xs.shape[-1]
-    return -(ys - prediction).flatten() @ Xs.reshape(-1, num_features)
-
-
-def mple_reciprocity_logistic_regression_optimization(metrics_collection, observed_networks: np.ndarray,
-                                                      initial_thetas: np.ndarray | None = None,
-                                                      optimization_method: str = 'L-BFGS-B'):
-    def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
-        nonlocal iteration
-        iteration += 1
-        cur_time = time.time()
-        print(f'iteration: {iteration}, time from start '
-              f'training: {cur_time - start_time} '
-              f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
-        sys.stdout.flush()
-
-    iteration = 0
-    start_time = time.time()
-    print("optimization started")
-    sys.stdout.flush()
-
-    observed_networks = expand_net_dims(observed_networks)
-    Xs = metrics_collection.prepare_mple_reciprocity_regressors()
-    ys = metrics_collection.prepare_mple_reciprocity_labels(observed_networks)
-
-    num_features = metrics_collection.calc_num_of_features()
-    if initial_thetas is None:
-        thetas = np.random.rand(num_features)
-    else:
-        thetas = initial_thetas.copy()
-
-    if optimization_method == "L-BFGS-B":
-        res = minimize(minus_log_likelihood_multi_class_logistic_regression, thetas, args=(Xs, ys),
-                       jac=minus_log_likelihood_gradient_multi_class_logistic_regression, method="L-BFGS-B",
-                       callback=_after_optim_iteration_callback)
-    else:
-        raise ValueError(
-            f"Unsupported optimization method: {optimization_method}. Options are: L-BFGS-B")
-    pred = predict_multi_class_logistic_regression(Xs, res.x)
-    return res.x, pred, res.success
-
-
-def num_dyads_to_num_nodes(num_dyads):
+def num_dyads_to_num_nodes(num_dyads: int) -> int:
     """
     x = num_dyads
     n(n-1) = 2*x
     n^2-n-2x=0 --> n = \\frac{1+\\sqrt{1-4\\cdot(-2x)}}{2}
     """
     return np.round((1 + np.sqrt(1 + 8 * num_dyads)) / 2).astype(int)
+
+
+def num_edges_to_num_nodes(num_edges: int, is_directed: bool) -> int:
+    """
+    x = num_edges
+    x = n(n-1) OR n(n-1) / 2, depending on directionality
+    this function extracts n
+    """
+    return num_dyads_to_num_nodes(num_edges // 2 if is_directed else num_edges)
 
 
 def convert_connectivity_to_dyad_states(connectivity: np.ndarray):
@@ -1300,27 +704,54 @@ def get_exact_marginals_from_dyads_distrubution(dyads_distributions):
     return exact_marginals
 
 
-def remove_main_diagonal_flatten(square_mat):
-    # TODO: there are multiple places we can use that that currently duplicate this logic.
+def flatten_square_matrix_to_edge_list(square_mat: np.ndarray, is_directed: bool) -> np.ndarray:
+    # TODO: there are multiple places where we can use this function to spare code duplications.
     if square_mat.ndim != 2 or square_mat.shape[0] != square_mat.shape[1]:
         raise ValueError("The input must be a square matrix")
-    return square_mat[~np.eye(square_mat.shape[0], dtype=bool)].flatten()
+    if is_directed:
+        return square_mat[~np.eye(square_mat.shape[0], dtype=bool)].flatten()
+    else:
+        if np.any(square_mat != square_mat.T):
+            raise ValueError("Got an asymmetric matrix as an undirected network to flatten")
+        return square_mat[np.triu_indices_from(square_mat, k=1)]
 
 
 def set_off_diagonal_elements_from_array(square_mat, values_to_set):
     values_to_set = values_to_set.flatten()
-    if values_to_set.size != square_mat.size - square_mat.shape[0]:
-        raise ValueError("The size of the array must be compatible the size of the square matrix")
-    square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set
+    if values_to_set.size == square_mat.size - square_mat.shape[0]:
+        square_mat[~np.eye(square_mat.shape[0], dtype=bool)] = values_to_set
+    elif values_to_set.size == (square_mat.size - square_mat.shape[0]) // 2:
+        square_mat[np.triu_indices(square_mat.shape[0], k=1)] = values_to_set
+        square_mat[np.tril_indices(square_mat.shape[0], k=-1)] = square_mat.T[
+            np.tril_indices(square_mat.shape[0], k=-1)
+        ]
+    else:
+        raise ValueError(
+            "The size of the array must be compatible the size of the square matrix, "
+            "i.e. either (n ** 2 - n) for directed networks or ((n ** 2 - n) / 2) for undirected networks. "
+            f"got: {values_to_set.size}")
 
 
-def get_edges_indices_lims(edges_indices_lims: tuple[int, int] | None, n_nodes: int, is_directed: bool):
-    if edges_indices_lims is None:
-        num_edges_to_take = n_nodes * n_nodes - n_nodes
-        if not is_directed:
-            num_edges_to_take = num_edges_to_take // 2
-        edges_indices_lims = (0, num_edges_to_take)
-    return edges_indices_lims
+def reshape_flattened_off_diagonal_elements_to_square(
+        flattened_array: np.ndarray,
+        is_directed: bool,
+        flat_mask: npt.NDArray[bool] | None = None
+) -> np.ndarray:
+    if flat_mask is not None:
+        if flat_mask.sum() != flattened_array.size:
+            raise ValueError(
+                f"Received incompatible flattened_array and mask. flat_mask.sum(): "
+                f"{flat_mask.sum()}, flattened_array.size: {flattened_array.size}, but should be equal."
+            )
+        full_array = np.full_like(flat_mask, fill_value=np.nan)
+        full_array[flat_mask] = flattened_array
+        num_nodes = num_edges_to_num_nodes(flat_mask.size, is_directed)
+    else:
+        full_array = flattened_array
+        num_nodes = num_edges_to_num_nodes(flattened_array.size, is_directed)
+    reshaped = np.zeros((num_nodes, num_nodes), dtype=flattened_array.dtype)
+    set_off_diagonal_elements_from_array(reshaped, full_array)
+    return reshaped
 
 
 def expand_net_dims(net: np.ndarray) -> np.ndarray:
@@ -1334,13 +765,19 @@ def expand_net_dims(net: np.ndarray) -> np.ndarray:
 
 def calc_entropy_independent_probability_matrix(
         prob_mat: np.ndarray,
+        is_directed: bool,
         reduction: str = 'sum',
         eps: float = 1e-10
 ) -> float | np.ndarray:
-    flattened_clipped_no_diag_mat = np.clip(remove_main_diagonal_flatten(prob_mat), a_min=eps, a_max=1 - eps)
+    flat_clipped_no_diag_probs = np.clip(
+        flatten_square_matrix_to_edge_list(prob_mat, is_directed), a_min=eps, a_max=1 - eps
+    )
+    not_nan_mask = ~np.isnan(flat_clipped_no_diag_probs)
+    flat_clipped_no_diag_probs = flat_clipped_no_diag_probs[not_nan_mask]
+
     entropy_per_entry = -(
-            flattened_clipped_no_diag_mat * np.log2(flattened_clipped_no_diag_mat) +
-            (1 - flattened_clipped_no_diag_mat) * np.log2(1 - flattened_clipped_no_diag_mat)
+            flat_clipped_no_diag_probs * np.log2(flat_clipped_no_diag_probs) +
+            (1 - flat_clipped_no_diag_probs) * np.log2(1 - flat_clipped_no_diag_probs)
     )
     if reduction == 'none':
         return entropy_per_entry
