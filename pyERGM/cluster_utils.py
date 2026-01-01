@@ -182,10 +182,15 @@ def cat_children_jobs_outputs(num_jobs: int, out_path: Path, axis: int = 0):
 def should_check_output_files(job_array_ids: list, num_sent_jobs: int) -> npt.NDArray[np.bool_]:
     should_check_out_files = np.ones(num_sent_jobs, dtype=bool)
     grep_pattern = r"\s|".join([str(jid) for jid in job_array_ids]) + r"\s"
-    cmd = f'bjobs -o "jobid stat job_name" -noheader | grep -E "{grep_pattern}"'
+    output_file = "bjobs_output.txt"
+    cmd = f'bjobs -o "jobid stat job_name" -noheader | grep -E "{grep_pattern}" > {output_file}'
 
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    lines = result.stdout.strip().splitlines()
+    subprocess.run(cmd, shell=True)
+    with open(output_file, 'r') as f:
+        lines = [line.strip() for line in f.readlines()]
+
+    os.unlink(output_file)
+
     kill_cmd = ['bkill']
     for i, line in enumerate(lines):
         parts = line.split(None, 2)
