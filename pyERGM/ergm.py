@@ -297,24 +297,15 @@ class ERGM():
         # TODO: support getting a flag of `replace` which will enable sampling with no replacements (generating samples
         #  of different networks).
         auto_optimization_scheme = self._metrics_collection.choose_optimization_scheme()
-        if auto_optimization_scheme == 'MCMLE':
-            # TODO: Actually we can sample for node metrics that are independent, but this is anyhow not implemented
-            #  right now, deal with that in the future.
-            raise ValueError(
-                "Cannot sample exactly from a model that has dependence that not comes from reciprocity or "
-                "has node features!")
-        if self._exact_average_mat is None and self._exact_dyadic_distributions is None:
-            raise ValueError("Cannot sample exactly from a model that is not trained! Call `model.fit()` and pass an "
-                             "observed network!")
 
         if auto_optimization_scheme == 'MPLE':
             return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size, self._is_directed)
         elif auto_optimization_scheme == 'MPLE_RECIPROCITY':
             return sample_from_dyads_distribution(self._exact_dyadic_distributions, sample_size)
         else:
-            raise ValueError(f"Received an unrecognized optimization scheme from "
-                             f"MetricsCollection.choose_optimization_scheme(): {auto_optimization_scheme}. "
-                             f"Options are supposed to be MPLE, MPLE_RECIPROCITY, MCMLE.")
+            raise ValueError(
+                "Cannot sample exactly from a model that has dependence that not comes from reciprocity"
+            )
 
     def get_mple_reciprocity_prediction(self):
         if self._metrics_collection.choose_optimization_scheme() == 'MPLE_RECIPROCITY':
@@ -329,17 +320,23 @@ class ERGM():
                                   log_base: float = np.exp(1)):
         if observed_network.ndim != 2 or observed_network.shape[0] != observed_network.shape[1] or \
                 observed_network.shape[0] != self._n_nodes:
-            raise ValueError(f"Got a connectivity data of dimensions {observed_network.shape}")
+            raise ValueError(f"Got a connectivity data of dimensions {observed_network.shape}, "
+                             f"expected: {(self._n_nodes, self._n_nodes)}")
         if not np.all(np.unique(observed_network) == np.array([0, 1])):
             raise ValueError("Got a non binary connectivity data! Should contain only zeros or ones")
         model_type = self._metrics_collection.choose_optimization_scheme()
         if model_type == 'MPLE':
-            if self._exact_average_mat is None:
-                raise RuntimeError("Cannot calculate the likelihood of data before properly fitting the model. Call "
-                                   "`model.fit()` and try again.")
             mask = self._mask if self._mask is not None else ...
+            if self._exact_average_mat is not None:
+                preds = flatten_square_matrix_to_edge_list(
+                    self._exact_average_mat, self._is_directed
+                )[mask].reshape(-1, 1)
+            else:
+                Xs = self._metrics_collection.prepare_mple_regressors()
+                preds = calc_logistic_regression_predictions(Xs, self._thetas).flatten()
+                self._exact_average_mat = self._rearrange_prediction_to_av_mat(preds)
             log_like = calc_logistic_regression_predictions_log_likelihood(
-                flatten_square_matrix_to_edge_list(self._exact_average_mat, self._is_directed)[mask].reshape(-1, 1),
+                preds,
                 flatten_square_matrix_to_edge_list(observed_network, self._is_directed)[mask].reshape(-1, 1),
                 reduction=reduction,
                 log_base=log_base)
@@ -357,8 +354,8 @@ class ERGM():
 
         elif model_type == 'MPLE_RECIPROCITY':
             if self._exact_dyadic_distributions is None:
-                raise RuntimeError("Cannot calculate the likelihood of data before properly fitting the model. Call "
-                                   "`model.fit()` and try again.")
+                Xs = self._metrics_collection.prepare_mple_reciprocity_regressors()
+                self._exact_dyadic_distributions = predict_multi_class_logistic_regression(Xs, self._thetas)
             return log_likelihood_multi_class_logistic_regression(
                 convert_connectivity_to_dyad_states(observed_network),
                 self._exact_dyadic_distributions,
