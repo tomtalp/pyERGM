@@ -9,12 +9,13 @@ class TestClusterUtils(unittest.TestCase):
             os.chdir(str(Path.cwd().parent))
 
     @patch("subprocess.run")
-    def test_should_check_output_files_marks_false_for_running_jobs(self, mock_run):
+    @patch("pyERGM.cluster_utils._read_bjobs_output_file")
+    def test_should_check_output_files_marks_false_for_running_jobs(self, mock_read_bjobs_output_file, mock_run):
         # Simulate bjobs output: JOBID USER STAT QUEUE ... JOB_NAME ...
-        mock_run.return_value.stdout = (
-            "87920 RUN *leNets[1]\n"
-            "87920 DONE *leNets[2]\n"
-        )
+        mock_read_bjobs_output_file.return_value = [
+            "87920 RUN *leNets[1]\n",
+            "87920 DONE *leNets[2]\n",
+        ]
 
         res = should_check_output_files(["87920"], 2)
 
@@ -24,11 +25,12 @@ class TestClusterUtils(unittest.TestCase):
         np.testing.assert_array_equal(res, expected)
 
     @patch("subprocess.run")
-    def test_should_check_output_files_all_done(self, mock_run):
-        mock_run.return_value.stdout = (
-            "87920 DONE *leNets[1]\n"
-            "87920 EXIT *leNets[2]\n"
-        )
+    @patch("pyERGM.cluster_utils._read_bjobs_output_file")
+    def test_should_check_output_files_all_done(self, mock_read_bjobs_output_file, mock_run):
+        mock_read_bjobs_output_file.return_value = [
+                "87920 DONE *leNets[1]\n",
+                "87920 EXIT *leNets[2]\n",
+        ]
 
         res = should_check_output_files(["87920"], 2)
 

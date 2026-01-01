@@ -179,6 +179,15 @@ def cat_children_jobs_outputs(num_jobs: int, out_path: Path, axis: int = 0):
     return _aggregate_children_jobs_outputs(num_jobs, out_path, functools.partial(np.concatenate, axis=axis))
 
 
+def _read_bjobs_output_file(output_file: str) -> list[str]:
+    with open(output_file, 'r') as f:
+        lines = [line.strip() for line in f.readlines()]
+
+    os.unlink(output_file)
+    return lines
+
+
+
 def should_check_output_files(job_array_ids: list, num_sent_jobs: int) -> npt.NDArray[np.bool_]:
     should_check_out_files = np.ones(num_sent_jobs, dtype=bool)
     grep_pattern = r"\s|".join([str(jid) for jid in job_array_ids]) + r"\s"
@@ -186,10 +195,7 @@ def should_check_output_files(job_array_ids: list, num_sent_jobs: int) -> npt.ND
     cmd = f'bjobs -o "jobid stat job_name" -noheader | grep -E "{grep_pattern}" > {output_file}'
 
     subprocess.run(cmd, shell=True)
-    with open(output_file, 'r') as f:
-        lines = [line.strip() for line in f.readlines()]
-
-    os.unlink(output_file)
+    lines = _read_bjobs_output_file(output_file)
 
     kill_cmd = ['bkill']
     for i, line in enumerate(lines):
