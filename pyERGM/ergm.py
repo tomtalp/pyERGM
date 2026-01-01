@@ -297,24 +297,15 @@ class ERGM():
         # TODO: support getting a flag of `replace` which will enable sampling with no replacements (generating samples
         #  of different networks).
         auto_optimization_scheme = self._metrics_collection.choose_optimization_scheme()
-        if auto_optimization_scheme == 'MCMLE':
-            # TODO: Actually we can sample for node metrics that are independent, but this is anyhow not implemented
-            #  right now, deal with that in the future.
-            raise ValueError(
-                "Cannot sample exactly from a model that has dependence that not comes from reciprocity or "
-                "has node features!")
-        if self._exact_average_mat is None and self._exact_dyadic_distributions is None:
-            raise ValueError("Cannot sample exactly from a model that is not trained! Call `model.fit()` and pass an "
-                             "observed network!")
 
         if auto_optimization_scheme == 'MPLE':
             return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size, self._is_directed)
         elif auto_optimization_scheme == 'MPLE_RECIPROCITY':
             return sample_from_dyads_distribution(self._exact_dyadic_distributions, sample_size)
         else:
-            raise ValueError(f"Received an unrecognized optimization scheme from "
-                             f"MetricsCollection.choose_optimization_scheme(): {auto_optimization_scheme}. "
-                             f"Options are supposed to be MPLE, MPLE_RECIPROCITY, MCMLE.")
+            raise ValueError(
+                "Cannot sample exactly from a model that has dependence that not comes from reciprocity"
+            )
 
     def get_mple_reciprocity_prediction(self):
         if self._metrics_collection.choose_optimization_scheme() == 'MPLE_RECIPROCITY':
