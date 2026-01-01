@@ -181,8 +181,8 @@ def cat_children_jobs_outputs(num_jobs: int, out_path: Path, axis: int = 0):
 
 def should_check_output_files(job_array_ids: list, num_sent_jobs: int) -> npt.NDArray[np.bool_]:
     should_check_out_files = np.ones(num_sent_jobs, dtype=bool)
-    job_ids = [str(jid) for jid in job_array_ids]
-    cmd = ["bjobs", "-o", "jobid stat job_name", "-noheader"] + job_ids
+    grep_pattern = r"\s|".join([str(jid) for jid in job_array_ids]) + r"\s"
+    cmd = f'bjobs -o "jobid stat job_name" -noheader | grep -E "{grep_pattern}"'
 
     result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     lines = result.stdout.strip().splitlines()

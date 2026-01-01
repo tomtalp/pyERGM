@@ -258,7 +258,8 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         pred = analytical_logistic_regression_predictions_distributed(res.x.reshape(-1, 1), data_path).flatten()
 
         # Clean up MPLE data (metrics_collection, observed_networks and Xs,ys chunks).
-        shutil.rmtree(os.path.join(data_path))
+        shutil.rmtree(data_path)
+        shutil.rmtree((data_path.parent / 'mple_data_paged_chunks').resolve())
 
     print(res)
     sys.stdout.flush()
@@ -325,9 +326,8 @@ def distributed_mple_data_chunks_calculations(
     with open(observed_networks_path, 'wb') as f:
         pickle.dump(observed_networks, f)
     print("dumped observed networks")
-    out_path = Path(data_path).parent
     cmd_line_single_batch = (f'python ./mple_data_distributed_paging.py '
-                             f'--out_dir_path={out_path} '
+                             f'--out_dir_path={out_dir_path} '
                              f'--num_edges_per_job={num_edges_per_job} ')
 
     num_nodes = observed_networks.shape[0]
@@ -337,14 +337,13 @@ def distributed_mple_data_chunks_calculations(
     print("sending children jobs to calculate MPLE data chunks")
     sys.stdout.flush()
     job_array_ids, children_logs_dir = run_distributed_children_jobs(
-        out_path,
+        out_dir_path,
         cmd_line_single_batch,
         "distributed_mple_data_paging.sh",
         num_jobs, 'data_paging',
     )
 
-    # Wait for all jobs to finish.
-    chunks_path = (out_path / 'mple_data_paged_chunks').resolve()
+    chunks_path = (out_dir_path / 'mple_data_paged_chunks').resolve()
     os.makedirs(chunks_path, exist_ok=True)
 
     print("start waiting for children jobs in MPLE data paging")
@@ -354,7 +353,7 @@ def distributed_mple_data_chunks_calculations(
     print("done waiting for children jobs in MPLE data paging")
     sys.stdout.flush()
     # Clean current scripts
-    shutil.rmtree((out_path / "scripts").resolve())
+    shutil.rmtree((out_dir_path / "scripts").resolve())
     return data_path
 
 
