@@ -1,3 +1,4 @@
+import enum
 from abc import ABC, abstractmethod
 from typing import Collection, Callable, Sequence, Any
 from copy import deepcopy
@@ -5,6 +6,7 @@ import numpy as np
 import pandas as pd
 import sys
 from scipy.spatial.distance import pdist, squareform
+from enum import Enum
 
 from pyERGM.utils import *
 from pyERGM.cluster_utils import *
@@ -348,15 +350,65 @@ class BaseDegreeVector(Metric):
     which indices the calculation ignores.
     """
 
-    def __init__(self, is_directed: bool, indices_from_user=None):
+    class SummationAxis(Enum):
+        ROWS = 0
+        COLUMNS = 1
+        # This implicitly assumes that there will be either 2 (matrix) or 3 (matrices sample) dimensions in the input.
+        # Thus, no matter its dimensionality, the summation would be over one of the 2 first axes (it doesn't matter
+        # which one of them).
+        # It's beneficial to have a distinct value for each element here, because otherwise they will be aliases of the
+        # same entity, which would result in == operator returning True.
+        EITHER = -2
+
+    def __init__(
+            self,
+            is_directed: bool,
+            summation_axis: SummationAxis,
+            indices_from_user: Sequence[int] | None = None,
+    ):
         super().__init__(requires_graph=False)
 
         self._indices_from_user = indices_from_user.copy() if indices_from_user is not None else None
 
         self._is_directed = is_directed
 
+        self._is_dyadic_independent = True
+
+        self._summation_axis = summation_axis
+
+    def _get_change_score_indices_from_summation_axis(
+            self,
+            edge_indices: tuple[int, int],
+    ) -> tuple[int, ...]:
+        # In degree - summing over rows, the statistic of the second node (target in edge) changes.
+        if self._summation_axis == BaseDegreeVector.SummationAxis.ROWS:
+            return (edge_indices[1],)
+        # Out degree - summing over columns, the statistic of the first node (source in edge) changes.
+        elif self._summation_axis == BaseDegreeVector.SummationAxis.COLUMNS:
+            return (edge_indices[0],)
+        # Undirected degree - summing over either, the statistic of both nodes changes.
+        else:
+            return edge_indices
+
     def _get_total_feature_count(self):
         return self._n_nodes
+
+    def calculate(self, W: np.ndarray):
+        return self.calculate_for_sample(W)
+
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple[int, int]):
+        n = current_network.shape[0]
+        diff = np.zeros(n)
+        i, j = indices
+
+        sign = -1 if current_network[i, j] else 1
+
+        for changed_idx in self._get_change_score_indices_from_summation_axis(indices):
+            diff[changed_idx] = sign
+        return self._handle_indices_to_ignore(diff)
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return self._handle_indices_to_ignore(networks_sample.sum(axis=self._summation_axis.value))
 
     def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
                                         second_halves_to_use: np.ndarray,
@@ -415,34 +467,11 @@ class InDegree(BaseDegreeVector):
         return "indegree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(is_directed=True, indices_from_user=indices_from_user)
-        self._is_dyadic_independent = True
-
-    def calculate(self, W: np.ndarray):
-        return self._handle_indices_to_ignore(W.sum(axis=0))
-
-    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
-        n = current_network.shape[0]
-        diff = np.zeros(n)
-        i, j = indices
-
-        sign = -1 if current_network[i, j] else 1
-
-        diff[j] = sign
-        return self._handle_indices_to_ignore(diff)
-
-    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
-        summed_tensor = networks_sample.sum(axis=0)
-
-        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
-            n_nodes = networks_sample.shape[0]
-            n_samples = networks_sample.shape[2]
-
-            indices = self._handle_indices_to_ignore(summed_tensor.indices(), axis=1)
-            values = self._handle_indices_to_ignore(summed_tensor.values())
-            return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
-        else:
-            return self._handle_indices_to_ignore(summed_tensor)
+        super().__init__(
+            is_directed=True,
+            summation_axis=BaseDegreeVector.SummationAxis.ROWS,
+            indices_from_user=indices_from_user,
+        )
 
 
 class OutDegree(BaseDegreeVector):
@@ -454,34 +483,11 @@ class OutDegree(BaseDegreeVector):
         return "outdegree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(is_directed=True, indices_from_user=indices_from_user)
-        self._is_dyadic_independent = True
-
-    def calculate(self, W: np.ndarray):
-        return self._handle_indices_to_ignore(W.sum(axis=1))
-
-    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
-        n = current_network.shape[0]
-        diff = np.zeros(n)
-        i, j = indices
-
-        sign = -1 if current_network[i, j] else 1
-
-        diff[i] = sign
-        return self._handle_indices_to_ignore(diff)
-
-    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
-        summed_tensor = networks_sample.sum(axis=1)
-
-        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
-            n_nodes = networks_sample.shape[0]
-            n_samples = networks_sample.shape[2]
-
-            indices = self._handle_indices_to_ignore(summed_tensor.indices(), axis=1)
-            values = self._handle_indices_to_ignore(summed_tensor.values())
-            return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
-        else:
-            return self._handle_indices_to_ignore(summed_tensor)
+        super().__init__(
+            is_directed=True,
+            summation_axis=BaseDegreeVector.SummationAxis.COLUMNS,
+            indices_from_user=indices_from_user,
+        )
 
 
 class UndirectedDegree(BaseDegreeVector):
@@ -493,14 +499,11 @@ class UndirectedDegree(BaseDegreeVector):
         return "undirected_degree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(is_directed=False, indices_from_user=indices_from_user)
-        self._is_dyadic_independent = True
-
-    def calculate(self, W: np.ndarray):
-        return self._handle_indices_to_ignore(W.sum(axis=0))
-
-    def calculate_for_sample(self, networks_sample: np.ndarray):
-        return self._handle_indices_to_ignore(networks_sample.sum(axis=0))
+        super().__init__(
+            is_directed=False,
+            summation_axis=BaseDegreeVector.SummationAxis.EITHER,
+            indices_from_user=indices_from_user,
+        )
 
 
 class Reciprocity(Metric):
