@@ -873,7 +873,7 @@ class NumberOfEdgesTypes(Metric):
             if mask is None:
                 stat = sub_array.sum(axis=(0, 1))
             else:
-                mask_for_types = mask[ix_grid]
+                mask_for_types = mask[ix_grid].astype(float)
                 stat = np.einsum("ijk,ij->k", sub_array, mask_for_types)
             stats[self._sorted_type_pairs_indices[type_pair] - num_ignored] += stat
         return stats / self._get_num_edges_in_mat_factor()
