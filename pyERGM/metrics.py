@@ -1,3 +1,4 @@
+import abc
 import enum
 from abc import ABC, abstractmethod
 from typing import Collection, Callable, Sequence, Any
@@ -343,7 +344,7 @@ class NumberOfTriangles(Metric):
         return np.einsum('ijk,jlk,lik->k', networks_sample, networks_sample, networks_sample) // (3 * 2)
 
 
-class BaseDegreeVector(Metric):
+class BaseDegreeVector(Metric, abc.ABC):
     """
     A base class for calculating a degree vector for a network.
     To avoid multicollinearity with other features, an optional parameter `indices_to_ignore` can be used to specify
@@ -353,12 +354,6 @@ class BaseDegreeVector(Metric):
     class SummationAxis(Enum):
         ROWS = 0
         COLUMNS = 1
-        # This implicitly assumes that there will be either 2 (matrix) or 3 (matrices sample) dimensions in the input.
-        # Thus, no matter its dimensionality, the summation would be over one of the 2 first axes (it doesn't matter
-        # which one of them).
-        # It's beneficial to have a distinct value for each element here, because otherwise they will be aliases of the
-        # same entity, which would result in == operator returning True.
-        EITHER = -2
 
     def __init__(
             self,
@@ -376,19 +371,14 @@ class BaseDegreeVector(Metric):
 
         self._summation_axis = summation_axis
 
+    @abc.abstractmethod
     def _get_change_score_indices_from_summation_axis(
             self,
             edge_indices: tuple[int, int],
     ) -> tuple[int, ...]:
-        # In degree - summing over rows, the statistic of the second node (target in edge) changes.
-        if self._summation_axis == BaseDegreeVector.SummationAxis.ROWS:
-            return (edge_indices[1],)
-        # Out degree - summing over columns, the statistic of the first node (source in edge) changes.
-        elif self._summation_axis == BaseDegreeVector.SummationAxis.COLUMNS:
-            return (edge_indices[0],)
-        # Undirected degree - summing over either, the statistic of both nodes changes.
-        else:
-            return edge_indices
+        raise NotImplementedError(
+            "This class is abstract by nature, please use one of InDegree, OutDegree, UndirectedDegree"
+        )
 
     def _get_total_feature_count(self):
         return self._n_nodes
@@ -473,6 +463,13 @@ class InDegree(BaseDegreeVector):
             indices_from_user=indices_from_user,
         )
 
+    def _get_change_score_indices_from_summation_axis(
+            self,
+            edge_indices: tuple[int, int],
+    ) -> tuple[int, ...]:
+        # In degree - summing over rows, the statistic of the second node (target in edge) changes.
+        return (edge_indices[1],)
+
 
 class OutDegree(BaseDegreeVector):
     """
@@ -489,6 +486,13 @@ class OutDegree(BaseDegreeVector):
             indices_from_user=indices_from_user,
         )
 
+    def _get_change_score_indices_from_summation_axis(
+            self,
+            edge_indices: tuple[int, int],
+    ) -> tuple[int, ...]:
+        # Out degree - summing over columns, the statistic of the first node (source in edge) changes.
+        return (edge_indices[0],)
+
 
 class UndirectedDegree(BaseDegreeVector):
     """
@@ -501,9 +505,16 @@ class UndirectedDegree(BaseDegreeVector):
     def __init__(self, indices_from_user=None):
         super().__init__(
             is_directed=False,
-            summation_axis=BaseDegreeVector.SummationAxis.EITHER,
+            summation_axis=BaseDegreeVector.SummationAxis.ROWS, # it doesn't matter over which axis to sum
             indices_from_user=indices_from_user,
         )
+
+    def _get_change_score_indices_from_summation_axis(
+            self,
+            edge_indices: tuple[int, int],
+    ) -> tuple[int, ...]:
+        # Undirected degree - the statistic of both nodes changes.
+        return edge_indices
 
 
 class Reciprocity(Metric):
