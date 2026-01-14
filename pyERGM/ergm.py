@@ -262,7 +262,7 @@ class ERGM():
     #  average matrix of the model, so should be computed once and stored. If the model is dyadic dependent, this is an
     #  approximation, and the degree to which changes in the observed_network will change the prediction depend on the
     #  metrics and the specific networks, it can not be pre-determined.
-    def get_mple_prediction(self, observed_networks: np.ndarray, **kwargs):
+    def get_mple_prediction(self, observed_networks: np.ndarray | None = None, **kwargs):
         print("MPLE_PREDICTION")
         sys.stdout.flush()
         if observed_networks.ndim == 3:
@@ -299,9 +299,13 @@ class ERGM():
         auto_optimization_scheme = self._metrics_collection.choose_optimization_scheme()
 
         if auto_optimization_scheme == 'MPLE':
-            return sample_from_independent_probabilities_matrix(self._exact_average_mat, sample_size, self._is_directed)
+            return sample_from_independent_probabilities_matrix(
+                self.get_mple_prediction(),
+                sample_size,
+                self._is_directed,
+            )
         elif auto_optimization_scheme == 'MPLE_RECIPROCITY':
-            return sample_from_dyads_distribution(self._exact_dyadic_distributions, sample_size)
+            return sample_from_dyads_distribution(self.get_mple_reciprocity_prediction(), sample_size)
         else:
             raise ValueError(
                 "Cannot sample exactly from a model that has dependence that not comes from reciprocity"
@@ -309,12 +313,15 @@ class ERGM():
 
     def get_mple_reciprocity_prediction(self):
         if self._metrics_collection.choose_optimization_scheme() == 'MPLE_RECIPROCITY':
-            Xs = self._metrics_collection.prepare_mple_reciprocity_regressors()
-            mple_reciprocity_prediction = predict_multi_class_logistic_regression(Xs, self._thetas)
-            return mple_reciprocity_prediction
+            if self._exact_dyadic_distributions is None:
+                Xs = self._metrics_collection.prepare_mple_reciprocity_regressors()
+                self._exact_dyadic_distributions = predict_multi_class_logistic_regression(Xs, self._thetas)
+            return self._exact_dyadic_distributions
         else:
             raise NotImplementedError(
-                "get_mple_reciprocity_prediction can only be used for models containing reciprocity, and are otherwise dyadic independent.")
+                "get_mple_reciprocity_prediction can only be used for models containing reciprocity, and are otherwise "
+                "dyadic independent."
+            )
 
     def calc_model_log_likelihood(self, observed_network: np.ndarray, reduction: str = 'sum',
                                   log_base: float = np.exp(1)):

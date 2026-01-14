@@ -260,19 +260,19 @@ class TestDegreeMetrics(unittest.TestCase):
         ])
 
         G = nx.from_numpy_array(W, create_using=nx.DiGraph)
-        expected_in_degrees = list(dict(G.in_degree()).values())
+        expected_in_degrees = np.array(list(dict(G.in_degree()).values()))
 
         receiver = InDegree()
         indegree = receiver.calculate(W)
 
-        self.assertTrue(all(indegree == expected_in_degrees))
+        self.assertTrue(np.all(indegree == expected_in_degrees))
 
-        expected_out_degrees = list(dict(G.out_degree()).values())
+        expected_out_degrees = np.array(list(dict(G.out_degree()).values()))
 
         sender = OutDegree()
         outdegree = sender.calculate(W)
 
-        self.assertTrue(all(outdegree == expected_out_degrees))
+        self.assertTrue(np.all(outdegree == expected_out_degrees))
 
         undirected_degree = UndirectedDegree()
         W = np.array([
@@ -285,8 +285,278 @@ class TestDegreeMetrics(unittest.TestCase):
         G = nx.from_numpy_array(W)
 
         degrees = undirected_degree.calculate(W)
-        expected_degrees = list(dict(G.degree()).values())
-        self.assertTrue(all(degrees == expected_degrees))
+        expected_degrees = np.array(list(dict(G.degree()).values()))
+        self.assertTrue(np.all(degrees == expected_degrees))
+
+    def test_out_degree_on_sample(self):
+        metric = OutDegree()
+        n = 4
+        sample_size = 2
+
+        # W1 row sums: [2, 1, 3, 0]
+        W1 = np.array([
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [1, 1, 0, 1],
+            [0, 0, 0, 0]
+        ])
+        # W2 row sums: [1, 2, 0, 2]
+        W2 = np.array([
+            [0, 0, 0, 1],
+            [1, 0, 1, 0],
+            [0, 0, 0, 0],
+            [1, 1, 0, 0]
+        ])
+
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
+        sample[:, :, 1] = W2
+
+        # Case 1: No Mask
+        # Expected: Shape (4, 2) -> Rows are nodes, Columns are samples
+        result = metric.calculate_for_sample(sample)
+        expected_result = np.array([
+            [2, 1],  # Node 0
+            [1, 2],  # Node 1
+            [3, 0],  # Node 2
+            [0, 2]  # Node 3
+        ])
+        self.assertTrue(np.all(result == expected_result))
+
+        # Case 2: With Mask
+        # Mask out the last column (index 3).
+        mask_mat = np.ones((n, n), dtype=bool)
+        mask_mat[:, 3] = False
+
+        mask = flatten_square_matrix_to_edge_list(mask_mat, True)
+
+        result = metric.calculate_for_sample(sample, mask)
+        # W1 row sums without col 3: [2, 0, 2, 0]
+        # W2 row sums without col 3: [0, 2, 0, 2]
+        expected_masked = np.array([
+            [2, 0],
+            [0, 2],
+            [2, 0],
+            [0, 2]
+        ])
+        self.assertTrue(np.all(result == expected_masked))
+
+    def test_in_degree_on_sample(self):
+        metric = InDegree()
+        n = 4
+        sample_size = 2
+
+        # W1 col sums: [1, 2, 1, 2]
+        W1 = np.array([
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [1, 1, 0, 1],
+            [0, 0, 0, 0]
+        ])
+        # W2 col sums: [2, 1, 1, 1]
+        W2 = np.array([
+            [0, 0, 0, 1],
+            [1, 0, 1, 0],
+            [0, 0, 0, 0],
+            [1, 1, 0, 0]
+        ])
+
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
+        sample[:, :, 1] = W2
+
+        # Case 1: No Mask
+        result = metric.calculate_for_sample(sample)
+        expected_result = np.array([
+            [1, 2],  # Node 0 in-degree
+            [2, 1],  # Node 1 in-degree
+            [1, 1],  # Node 2 in-degree
+            [2, 1]  # Node 3 in-degree
+        ])
+        self.assertTrue(np.all(result == expected_result))
+
+        # Case 2: With Mask
+        # Mask out the first row (index 0).
+        mask_mat = np.ones((n, n), dtype=bool)
+        mask_mat[0, :] = False
+
+        mask = flatten_square_matrix_to_edge_list(mask_mat, True)
+
+        result = metric.calculate_for_sample(sample, mask)
+        # W1 col sums without row 0: [1, 1, 0, 2]
+        # W2 col sums without row 0: [2, 1, 1, 0]
+        expected_masked = np.array([
+            [1, 2],
+            [1, 1],
+            [0, 1],
+            [2, 0]
+        ])
+        self.assertTrue(np.all(result == expected_masked))
+
+    def test_undirected_degree_on_sample(self):
+        metric = UndirectedDegree()
+        n = 4
+        sample_size = 2
+
+        # W1 is symmetric. Row/Col sums: [2, 2, 2, 2]
+        W1 = np.array([
+            [0, 1, 1, 0],
+            [1, 0, 0, 1],
+            [1, 0, 0, 1],
+            [0, 1, 1, 0]
+        ])
+        # W2 is symmetric. Row/Col sums: [1, 2, 2, 1]
+        W2 = np.array([
+            [0, 1, 0, 0],
+            [1, 0, 1, 0],
+            [0, 1, 0, 1],
+            [0, 0, 1, 0]
+        ])
+
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
+        sample[:, :, 1] = W2
+
+        # Case 1: No Mask
+        # Expected result shape: (nodes, sample_size) -> (4, 2)
+        result = metric.calculate_for_sample(sample)
+        expected_result = np.array([
+            [2, 1],  # Node 0 degree
+            [2, 2],  # Node 1 degree
+            [2, 2],  # Node 2 degree
+            [2, 1]  # Node 3 degree
+        ])
+        self.assertTrue(np.all(result == expected_result))
+
+        # Case 2: With Symmetric Mask
+        # Mask edge between Node 0 and Node 1.
+        mask_mat = np.ones((n, n), dtype=bool)
+        mask_mat[0, 1] = False
+        mask_mat[1, 0] = False
+
+        mask = flatten_square_matrix_to_edge_list(mask_mat, is_directed=False)
+
+        result = metric.calculate_for_sample(sample, mask)
+
+        # W1: Edge (0,1) removed. Node 0 sum: 2->1. Node 1 sum: 2->1.
+        # W2: Edge (0,1) removed. Node 0 sum: 1->0. Node 1 sum: 2->1.
+        expected_masked = np.array([
+            [1, 0],  # Node 0
+            [1, 1],  # Node 1
+            [2, 2],  # Node 2 (unaffected)
+            [2, 1]  # Node 3 (unaffected)
+        ])
+
+        self.assertTrue(np.all(result == expected_masked))
+
+    @staticmethod
+    def get_expected_Xs_in_out_degs(n, metric):
+        zero_network = np.zeros((n, n))
+        expected_Xs = np.zeros((n ** 2 - n, n))
+        idx = 0
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    continue
+                expected_Xs[idx] = metric.calc_change_score(zero_network, (i, j))
+                idx += 1
+        return expected_Xs
+
+    @staticmethod
+    def get_expected_Xs_undirected_degs(n):
+        metric = UndirectedDegree()
+        zero_network = np.zeros((n, n))
+        expected_Xs = np.zeros(((n ** 2 - n) // 2, n))
+        idx = 0
+        for i in range(n - 1):
+            for j in range(i + 1, n):
+                expected_Xs[idx] = metric.calc_change_score(zero_network, (i, j))
+                idx += 1
+        return expected_Xs
+
+    def test_calculate_mple_regressors(self):
+        n = 50
+        mask = flatten_square_matrix_to_edge_list(np.ones((n, n), dtype=bool), True).reshape(-1, 1)
+        Xs = np.zeros((n ** 2 - n, n))
+
+        in_degree = InDegree()
+        in_degree.calculate_mple_regressors(Xs, np.arange(n, dtype=int), mask, None)
+        self.assertTrue(np.allclose(Xs, self.get_expected_Xs_in_out_degs(n, in_degree)))
+
+        out_degree = OutDegree()
+        out_degree.calculate_mple_regressors(Xs, np.arange(n, dtype=int), mask, None)
+        self.assertTrue(np.allclose(Xs, self.get_expected_Xs_in_out_degs(n, out_degree)))
+
+        undirected_degree = UndirectedDegree()
+        mask = flatten_square_matrix_to_edge_list(np.ones((n, n), dtype=bool), False).reshape(-1, 1)
+        Xs = np.zeros(((n ** 2 - n) // 2, n))
+        undirected_degree.calculate_mple_regressors(Xs, np.arange(n, dtype=int), mask, None)
+        self.assertTrue(np.allclose(Xs, self.get_expected_Xs_undirected_degs(n)))
+
+    def test_in_degree_mple_regressors_masked_ignored_indices(self):
+        n = 50
+        ignored_indices = [0, 5, 11, 23]
+        set_seed(348976)
+        in_degree_ignored_indices = InDegree(indices_from_user=ignored_indices)
+        global_mask = flatten_square_matrix_to_edge_list(
+            generate_binomial_tensor(
+                net_size=n, node_features_size=0, num_samples=1
+            )[..., -1],
+            True,
+        ).astype(bool)
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[in_degree_ignored_indices], is_directed=True, n_nodes=n, mask=global_mask, fix_collinearity=False,
+        )
+        edge_indices_lims = (5, 22)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(edge_indices_lims)
+        Xs = dummy_metrics_collection.prepare_mple_regressors(edge_indices_lims=edge_indices_lims)
+
+        expected_xs = self.get_expected_Xs_in_out_degs(n, InDegree())
+        expected_xs = expected_xs[mask][:, [i for i in range(n) if i not in ignored_indices]]
+        self.assertTrue(np.allclose(Xs, expected_xs))
+
+    def test_out_degree_mple_regressors_masked_ignored_indices(self):
+        n = 50
+        ignored_indices = [17, 29, 34, 46, 47]
+        set_seed(94538)
+        out_degree_ignored_indices = OutDegree(indices_from_user=ignored_indices)
+        global_mask = flatten_square_matrix_to_edge_list(
+            generate_binomial_tensor(
+                net_size=n, node_features_size=0, num_samples=1
+            )[..., -1],
+            True,
+        ).astype(bool)
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[out_degree_ignored_indices], is_directed=True, n_nodes=n, mask=global_mask,
+            fix_collinearity=False,
+        )
+        edge_indices_lims = (112, 1024)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(edge_indices_lims)
+        Xs = dummy_metrics_collection.prepare_mple_regressors(edge_indices_lims=edge_indices_lims)
+
+        expected_xs = self.get_expected_Xs_in_out_degs(n, OutDegree())
+        expected_xs = expected_xs[mask][:, [i for i in range(n) if i not in ignored_indices]]
+        self.assertTrue(np.allclose(Xs, expected_xs))
+
+    def test_undirected_degree_mple_regressors_masked_ignored_indices(self):
+        n = 50
+        set_seed(384976)
+        ignored_indices = np.random.choice(n, 12, replace=False)
+        undirected_degree_ignored_indices = UndirectedDegree(indices_from_user=ignored_indices)
+        global_mask = generate_binomial_tensor(net_size=n, node_features_size=0, num_samples=1)[..., -1]
+        global_mask = (global_mask + global_mask.T) // 2
+        global_mask = flatten_square_matrix_to_edge_list(global_mask, False).astype(bool)
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[undirected_degree_ignored_indices], is_directed=False, n_nodes=n, mask=global_mask,
+            fix_collinearity=False,
+        )
+        edge_indices_lims = (58, 132)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(edge_indices_lims)
+        Xs = dummy_metrics_collection.prepare_mple_regressors(edge_indices_lims=edge_indices_lims)
+
+        expected_xs = self.get_expected_Xs_undirected_degs(n)
+        expected_xs = expected_xs[mask][:, [i for i in range(n) if i not in ignored_indices]]
+        self.assertTrue(np.allclose(Xs, expected_xs))
 
 
 class TestNumberOfEdgesTypesDirected(unittest.TestCase):
@@ -1640,16 +1910,17 @@ class TestMetricsCollection(unittest.TestCase):
         # Deleting the 1+idx_to_ignore because the first entry is the NumberOfEdgesDirected metric
         expected_mple_regressors_ignored_features = np.delete(expected_mple_regressors, 1 + idx_to_ignore, axis=1)
         self.assertTrue(np.all(expected_mple_regressors_ignored_features == Xs_full))
-        self.assertTrue(np.all(expected_mple_regressors_ignored_features[:expected_mple_regressors.shape[0] // 2] == Xs_half))
+        self.assertTrue(
+            np.all(expected_mple_regressors_ignored_features[:expected_mple_regressors.shape[0] // 2] == Xs_half))
         self.assertTrue(np.all(expected_flattened_mat == ys_full))
         self.assertTrue(np.all(expected_flattened_mat[:expected_mple_regressors.shape[0] // 2] == ys_half))
 
         mask = flatten_square_matrix_to_edge_list(
             np.array([
-                    [False, True, False, True],
-                    [False, False, True, False],
-                    [True, True, False, False],
-                    [False, True, True, False]
+                [False, True, False, True],
+                [False, False, True, False],
+                [True, True, False, False],
+                [False, True, True, False]
             ]),
             True,
         )
@@ -1679,7 +1950,6 @@ class TestMetricsCollection(unittest.TestCase):
             np.all(expected_mple_regressors_ignored_features[:mask.sum() // 2] == Xs_half))
         self.assertTrue(np.all(expected_flattened_mat[mask] == ys_full))
         self.assertTrue(np.all(expected_flattened_mat[mask][:mask.sum() // 2] == ys_half))
-
 
     def test_prepare_mple_reciprocity_data(self):
         W = np.array([

@@ -1,3 +1,5 @@
+import abc
+import enum
 from abc import ABC, abstractmethod
 from typing import Collection, Callable, Sequence, Any
 from copy import deepcopy
@@ -5,6 +7,7 @@ import numpy as np
 import pandas as pd
 import sys
 from scipy.spatial.distance import pdist, squareform
+from enum import Enum
 
 from pyERGM.utils import *
 from pyERGM.cluster_utils import *
@@ -341,22 +344,66 @@ class NumberOfTriangles(Metric):
         return np.einsum('ijk,jlk,lik->k', networks_sample, networks_sample, networks_sample) // (3 * 2)
 
 
-class BaseDegreeVector(Metric):
+class BaseDegreeVector(Metric, abc.ABC):
     """
     A base class for calculating a degree vector for a network.
     To avoid multicollinearity with other features, an optional parameter `indices_to_ignore` can be used to specify
     which indices the calculation ignores.
     """
 
-    def __init__(self, is_directed: bool, indices_from_user=None):
+    class SummationAxis(Enum):
+        ROWS = 0
+        COLUMNS = 1
+
+    def __init__(
+            self,
+            is_directed: bool,
+            summation_axis: SummationAxis,
+            indices_from_user: Sequence[int] | None = None,
+    ):
         super().__init__(requires_graph=False)
 
-        self._indices_from_user = indices_from_user.copy() if indices_from_user is not None else None
-
+        self._indices_from_user = np.array(indices_from_user, dtype=int).copy() if indices_from_user is not None else None
         self._is_directed = is_directed
+        self._is_dyadic_independent = True
+        self.does_support_mask = True
+
+        self._summation_axis = summation_axis
+
+    @abc.abstractmethod
+    def _get_change_score_indices_from_summation_axis(
+            self,
+            edge_indices: tuple[int, int],
+    ) -> tuple[int, ...]:
+        raise NotImplementedError(
+            "This class is abstract by nature, please use one of InDegree, OutDegree, UndirectedDegree"
+        )
 
     def _get_total_feature_count(self):
         return self._n_nodes
+
+    def calculate(self, W: np.ndarray):
+        return self.calculate_for_sample(W)
+
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple[int, int]):
+        n = current_network.shape[0]
+        diff = np.zeros(n)
+        i, j = indices
+
+        sign = -1 if current_network[i, j] else 1
+
+        for changed_idx in self._get_change_score_indices_from_summation_axis(indices):
+            diff[changed_idx] = sign
+        return self._handle_indices_to_ignore(diff)
+
+    def calculate_for_sample(self, networks_sample: np.ndarray, mask: npt.NDArray[bool] | None = None):
+        if mask is None:
+            all_degrees = np.sum(networks_sample, axis=self._summation_axis.value)
+        else:
+            square_mask = reshape_flattened_off_diagonal_elements_to_square(mask, self._is_directed).astype(float)
+            einsum_result = 'jk' if self._summation_axis == BaseDegreeVector.SummationAxis.ROWS else 'ik'
+            all_degrees = np.einsum(f'ijk,ij->{einsum_result}', networks_sample, square_mask)
+        return self._handle_indices_to_ignore(all_degrees)
 
     def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
                                         second_halves_to_use: np.ndarray,
@@ -415,34 +462,33 @@ class InDegree(BaseDegreeVector):
         return "indegree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(is_directed=True, indices_from_user=indices_from_user)
-        self._is_dyadic_independent = True
+        super().__init__(
+            is_directed=True,
+            summation_axis=BaseDegreeVector.SummationAxis.ROWS,
+            indices_from_user=indices_from_user,
+        )
 
-    def calculate(self, W: np.ndarray):
-        return self._handle_indices_to_ignore(W.sum(axis=0))
+    def _get_change_score_indices_from_summation_axis(
+            self,
+            edge_indices: tuple[int, int],
+    ) -> tuple[int, ...]:
+        # In degree - summing over rows, the statistic of the second node (target in edge) changes.
+        return (edge_indices[1],)
 
-    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
-        n = current_network.shape[0]
-        diff = np.zeros(n)
-        i, j = indices
-
-        sign = -1 if current_network[i, j] else 1
-
-        diff[j] = sign
-        return self._handle_indices_to_ignore(diff)
-
-    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
-        summed_tensor = networks_sample.sum(axis=0)
-
-        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
-            n_nodes = networks_sample.shape[0]
-            n_samples = networks_sample.shape[2]
-
-            indices = self._handle_indices_to_ignore(summed_tensor.indices(), axis=1)
-            values = self._handle_indices_to_ignore(summed_tensor.values())
-            return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
-        else:
-            return self._handle_indices_to_ignore(summed_tensor)
+    def calculate_mple_regressors(
+            self,
+            Xs_out: np.ndarray,
+            feature_col_indices: npt.NDArray[np.int64],
+            edge_indices_mask: npt.NDArray[bool],
+            observed_network: np.ndarray | nx.Graph,
+    ) -> None:
+        num_neurons = num_edges_to_num_nodes(edge_indices_mask.size, is_directed=True)
+        in_deg_xs = np.tile(np.eye(num_neurons), (num_neurons, 1))[~np.eye(num_neurons, dtype=bool).flatten()]
+        in_deg_xs = self._handle_indices_to_ignore(in_deg_xs, axis=1)
+        # Looping rather than setting with the full mask directly is negligible for small arrays but much faster for
+        # large arrays due too under-the-hood copies of large arrays.
+        for masked_idx, non_masked_idx in enumerate(np.where(edge_indices_mask)[0]):
+            Xs_out[masked_idx, feature_col_indices] = in_deg_xs[non_masked_idx]
 
 
 class OutDegree(BaseDegreeVector):
@@ -454,35 +500,32 @@ class OutDegree(BaseDegreeVector):
         return "outdegree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(is_directed=True, indices_from_user=indices_from_user)
-        self._is_dyadic_independent = True
+        super().__init__(
+            is_directed=True,
+            summation_axis=BaseDegreeVector.SummationAxis.COLUMNS,
+            indices_from_user=indices_from_user,
+        )
 
-    def calculate(self, W: np.ndarray):
-        return self._handle_indices_to_ignore(W.sum(axis=1))
+    def _get_change_score_indices_from_summation_axis(
+            self,
+            edge_indices: tuple[int, int],
+    ) -> tuple[int, ...]:
+        # Out degree - summing over columns, the statistic of the first node (source in edge) changes.
+        return (edge_indices[0],)
 
-    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
-        n = current_network.shape[0]
-        diff = np.zeros(n)
-        i, j = indices
-
-        sign = -1 if current_network[i, j] else 1
-
-        diff[i] = sign
-        return self._handle_indices_to_ignore(diff)
-
-    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
-        summed_tensor = networks_sample.sum(axis=1)
-
-        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
-            n_nodes = networks_sample.shape[0]
-            n_samples = networks_sample.shape[2]
-
-            indices = self._handle_indices_to_ignore(summed_tensor.indices(), axis=1)
-            values = self._handle_indices_to_ignore(summed_tensor.values())
-            return torch.sparse_coo_tensor(indices, values, (n_nodes, n_samples))
-        else:
-            return self._handle_indices_to_ignore(summed_tensor)
-
+    def calculate_mple_regressors(
+            self,
+            Xs_out: np.ndarray,
+            feature_col_indices: npt.NDArray[np.int64],
+            edge_indices_mask: npt.NDArray[bool],
+            observed_network: np.ndarray | nx.Graph,
+    ) -> None:
+        num_neurons = num_edges_to_num_nodes(edge_indices_mask.size, is_directed=True)
+        out_deg_xs = np.repeat(np.eye(num_neurons), num_neurons-1, axis=0)
+        out_deg_xs = self._handle_indices_to_ignore(out_deg_xs, axis=1)
+        # See comment in InDegree.calculate_mple_regressors on loop performance.
+        for masked_idx, non_masked_idx in enumerate(np.where(edge_indices_mask)[0]):
+            Xs_out[masked_idx, feature_col_indices] = out_deg_xs[non_masked_idx]
 
 class UndirectedDegree(BaseDegreeVector):
     """
@@ -493,14 +536,37 @@ class UndirectedDegree(BaseDegreeVector):
         return "undirected_degree"
 
     def __init__(self, indices_from_user=None):
-        super().__init__(is_directed=False, indices_from_user=indices_from_user)
-        self._is_dyadic_independent = True
+        super().__init__(
+            is_directed=False,
+            summation_axis=BaseDegreeVector.SummationAxis.ROWS, # it doesn't matter over which axis to sum
+            indices_from_user=indices_from_user,
+        )
 
-    def calculate(self, W: np.ndarray):
-        return self._handle_indices_to_ignore(W.sum(axis=0))
+    def _get_change_score_indices_from_summation_axis(
+            self,
+            edge_indices: tuple[int, int],
+    ) -> tuple[int, ...]:
+        # Undirected degree - the statistic of both nodes changes.
+        return edge_indices
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
-        return self._handle_indices_to_ignore(networks_sample.sum(axis=0))
+    def calculate_mple_regressors(
+            self,
+            Xs_out: np.ndarray,
+            feature_col_indices: npt.NDArray[np.int64],
+            edge_indices_mask: npt.NDArray[bool],
+            observed_network: np.ndarray | nx.Graph,
+    ) -> None:
+        num_node_pairs = edge_indices_mask.size
+        num_nodes = num_edges_to_num_nodes(num_node_pairs, is_directed=False)
+        deg_xs = np.zeros((num_node_pairs, num_nodes))
+        row_selector = np.arange(num_node_pairs, dtype=int)
+        i_indices, j_indices = np.triu_indices(num_nodes, k=1)
+        deg_xs[row_selector, i_indices] = 1
+        deg_xs[row_selector, j_indices] = 1
+        deg_xs = self._handle_indices_to_ignore(deg_xs, axis=1)
+        # See comment in InDegree.calculate_mple_regressors on loop performance.
+        for masked_idx, non_masked_idx in enumerate(np.where(edge_indices_mask)[0]):
+            Xs_out[masked_idx, feature_col_indices] = deg_xs[non_masked_idx]
 
 
 class Reciprocity(Metric):
@@ -685,12 +751,15 @@ class ExWeightNumEdges(Metric):
         # (n_nodes**2 - n_nodes, num_weight_mats)
         num_nodes = len(self.exogenous_attr)
         if self._is_directed:
-            Xs_out[:, feature_col_indices] = self.edge_weights[:, np.eye(
-                num_nodes) == 0].transpose()[edge_indices_mask]
+            ex_weight_num_edges_xs = self.edge_weights[:, np.eye(
+                num_nodes) == 0].transpose()
         else:
             up_triangle_indices = np.triu_indices(num_nodes, k=1)
-            Xs_out[:, feature_col_indices] = self.edge_weights[:, up_triangle_indices[0],
-                                             up_triangle_indices[1]].transpose()[edge_indices_mask]
+            ex_weight_num_edges_xs = self.edge_weights[:, up_triangle_indices[0],
+                                             up_triangle_indices[1]].transpose()
+        # See comment in InDegree.calculate_mple_regressors on loop performance.
+        for masked_idx, non_masked_idx in enumerate(np.where(edge_indices_mask)[0]):
+            Xs_out[masked_idx, feature_col_indices] = ex_weight_num_edges_xs[non_masked_idx]
 
 
 class NumberOfEdgesTypes(Metric):
@@ -804,7 +873,7 @@ class NumberOfEdgesTypes(Metric):
             if mask is None:
                 stat = sub_array.sum(axis=(0, 1))
             else:
-                mask_for_types = mask[ix_grid]
+                mask_for_types = mask[ix_grid].astype(float)
                 stat = np.einsum("ijk,ij->k", sub_array, mask_for_types)
             stats[self._sorted_type_pairs_indices[type_pair] - num_ignored] += stat
         return stats / self._get_num_edges_in_mat_factor()

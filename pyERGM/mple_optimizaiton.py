@@ -384,7 +384,7 @@ def predict_multi_class_logistic_regression(Xs, thetas):
 def log_likelihood_multi_class_logistic_regression(true_labels, predictions, reduction='sum', log_base=np.exp(1),
                                                    eps: float = 1e-10):
     predictions = np.maximum(predictions, eps)
-    individual_data_samples_minus_cross_ent = ((np.log(predictions) / np.log(log_base)) * true_labels).sum(axis=0)
+    individual_data_samples_minus_cross_ent = ((np.log(predictions) / np.log(log_base)) * true_labels).sum(axis=1)
     if reduction == 'none':
         return individual_data_samples_minus_cross_ent
     elif reduction == 'sum':
@@ -443,4 +443,6 @@ def mple_reciprocity_logistic_regression_optimization(
         raise ValueError(
             f"Unsupported optimization method: {optimization_method}. Options are: L-BFGS-B")
     pred = predict_multi_class_logistic_regression(Xs, res.x)
+    print(res)
+    sys.stdout.flush()
     return res.x, pred, res.success
