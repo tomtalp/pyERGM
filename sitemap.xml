@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+    <url>
+         <loc>https://tomtalp.github.io/pyERGM/</loc>
+         <lastmod>2026-01-20</lastmod>
+    </url>
+    <url>
+         <loc>https://tomtalp.github.io/pyERGM/custom_metrics/</loc>
+         <lastmod>2026-01-20</lastmod>
+    </url>
+    <url>
+         <loc>https://tomtalp.github.io/pyERGM/evaluating/</loc>
+         <lastmod>2026-01-20</lastmod>
+    </url>
+    <url>
+         <loc>https://tomtalp.github.io/pyERGM/fitting/</loc>
+         <lastmod>2026-01-20</lastmod>
+    </url>
+    <url>
+         <loc>https://tomtalp.github.io/pyERGM/metrics/</loc>
+         <lastmod>2026-01-20</lastmod>
+    </url>
+    <url>
+         <loc>https://tomtalp.github.io/pyERGM/overview/</loc>
+         <lastmod>2026-01-20</lastmod>
+    </url>
+</urlset>
