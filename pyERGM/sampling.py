@@ -8,11 +8,22 @@ from scipy.special import softmax
 
 
 class Sampler():
+    """
+    Abstract base class for ERGM network samplers.
+
+    Parameters
+    ----------
+    thetas : np.ndarray
+        ERGM model parameters (coefficients).
+    metrics_collection : MetricsCollection
+        Collection of metrics defining the ERGM model.
+    """
     def __init__(self, thetas, metrics_collection: MetricsCollection):
         self.thetas = deepcopy(thetas)
         self.metrics_collection = deepcopy(metrics_collection)
 
     def sample(self, initial_state, n_iterations):
+        """Generate network samples. Must be implemented by subclasses."""
         pass
 
 
@@ -37,6 +48,14 @@ class NaiveMetropolisHastings(Sampler):
         self._edge_proposal_dists = {}
 
     def set_thetas(self, thetas):
+        """
+        Update the model parameters.
+
+        Parameters
+        ----------
+        thetas : np.ndarray
+            New ERGM coefficients.
+        """
         self.thetas = deepcopy(thetas)
 
     def _calculate_weighted_change_score(self, current_network, edge_flip_info: dict, node_flip_info={}):

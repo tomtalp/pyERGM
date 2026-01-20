@@ -25,6 +25,16 @@ def _numba_seed(seed):
 
 
 def set_seed(seed):
+    """
+    Set random seed for reproducibility across all libraries.
+
+    Sets seeds for numpy, torch, Python's random module, and numba-jitted functions.
+
+    Parameters
+    ----------
+    seed : int
+        Random seed value.
+    """
     np.random.seed(seed)
     torch.manual_seed(seed)
     random.seed(seed)
@@ -32,6 +42,27 @@ def set_seed(seed):
 
 
 def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
+    """
+    Create a copy of a network with one edge modified.
+
+    Parameters
+    ----------
+    network : np.ndarray
+        Original network adjacency matrix.
+    value : int or float
+        New value for the edge.
+    i : int
+        Source node index.
+    j : int
+        Target node index.
+    is_directed : bool
+        Whether the network is directed.
+
+    Returns
+    -------
+    np.ndarray
+        Modified network adjacency matrix.
+    """
     perturbed_net = network.copy()
     perturbed_net[i, j] = value
     if not is_directed:
@@ -81,6 +112,26 @@ def get_random_nondiagonal_matrix_entry(n: int):
 
 
 def construct_adj_mat_from_int(int_code: int, num_nodes: int, is_directed: bool) -> np.ndarray:
+    """
+    Convert an integer to its corresponding adjacency matrix.
+
+    Used for exhaustive enumeration in BruteForceERGM. Each integer represents
+    a unique network configuration via binary encoding.
+
+    Parameters
+    ----------
+    int_code : int
+        Integer encoding of the network (0 to 2^(n*(n-1)) for directed networks).
+    num_nodes : int
+        Number of nodes in the network.
+    is_directed : bool
+        Whether the network is directed.
+
+    Returns
+    -------
+    np.ndarray
+        Adjacency matrix of shape (num_nodes, num_nodes).
+    """
     num_pos_connects = num_nodes * (num_nodes - 1)
     if not is_directed:
         num_pos_connects //= 2
@@ -98,6 +149,28 @@ def construct_adj_mat_from_int(int_code: int, num_nodes: int, is_directed: bool)
 
 
 def construct_int_from_adj_mat(adj_mat: np.ndarray, is_directed: bool) -> int:
+    """
+    Convert an adjacency matrix to its integer encoding.
+
+    Inverse operation of construct_adj_mat_from_int.
+
+    Parameters
+    ----------
+    adj_mat : np.ndarray
+        Adjacency matrix of shape (n, n).
+    is_directed : bool
+        Whether the network is directed.
+
+    Returns
+    -------
+    int
+        Integer encoding of the network.
+
+    Raises
+    ------
+    ValueError
+        If adjacency matrix dimensions are invalid.
+    """
     if len(adj_mat.shape) != 2 or adj_mat.shape[0] != adj_mat.shape[1]:
         raise ValueError(f"The dimensions of the given adjacency matrix {adj_mat.shape} are not valid for an "
                          f"adjacency matrix (should be a 2D squared matrix)")
@@ -610,6 +683,25 @@ def num_edges_to_num_nodes(num_edges: int, is_directed: bool) -> int:
 
 
 def convert_connectivity_to_dyad_states(connectivity: np.ndarray):
+    """
+    Convert directed network to one-hot encoded dyadic states.
+
+    Each dyad (pair of nodes) can be in one of 4 states:
+    - EMPTY (0): No edges
+    - UPPER (1): Edge i -> j only
+    - LOWER (2): Edge j -> i only
+    - RECIPROCAL (3): Both edges exist
+
+    Parameters
+    ----------
+    connectivity : np.ndarray
+        Directed adjacency matrix of shape (n, n).
+
+    Returns
+    -------
+    np.ndarray
+        One-hot encoded dyadic states of shape (n_choose_2, 4).
+    """
     n_nodes = connectivity.shape[0]
     dyads_states = np.zeros(((n_nodes ** 2 - n_nodes) // 2, 4))
     idx = 0
@@ -659,6 +751,23 @@ def convert_dyads_state_indices_to_connectivity(dyads_states_indices):
 
 
 def sample_from_dyads_distribution(dyads_distributions, sample_size):
+    """
+    Sample networks from dyadic state probability distributions.
+
+    Used for exact sampling from MPLE_RECIPROCITY models.
+
+    Parameters
+    ----------
+    dyads_distributions : np.ndarray
+        Probability distributions over dyadic states, shape (n_choose_2, 4).
+    sample_size : int
+        Number of networks to sample.
+
+    Returns
+    -------
+    np.ndarray
+        Sampled networks of shape (n, n, sample_size).
+    """
     num_dyads = dyads_distributions.shape[0]
     n_nodes = num_dyads_to_num_nodes(num_dyads)
     dyads_states_indices_sample = np.zeros((num_dyads, sample_size))
@@ -735,6 +844,26 @@ def reshape_flattened_off_diagonal_elements_to_square(
 
 
 def expand_net_dims(net: np.ndarray) -> np.ndarray:
+    """
+    Ensure network array has 3 dimensions (n, n, num_networks).
+
+    Adds a singleton dimension if the input is 2D.
+
+    Parameters
+    ----------
+    net : np.ndarray
+        Network array of shape (n, n) or (n, n, num_networks).
+
+    Returns
+    -------
+    np.ndarray
+        Network array of shape (n, n, num_networks).
+
+    Raises
+    ------
+    ValueError
+        If array is not 2D or 3D.
+    """
     if net.ndim == 2:
         # a single network
         return net[..., np.newaxis]
