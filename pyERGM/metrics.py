@@ -15,6 +15,23 @@ from pyERGM.cluster_utils import *
 
 
 class Metric(ABC):
+    """
+    Abstract base class for all network metrics in the ERGM framework.
+
+    This class defines the interface for computing statistics on networks, including
+    methods for calculating metrics, change scores, and handling sampling operations.
+    All concrete metric implementations must inherit from this class.
+
+    Parameters
+    ----------
+    requires_graph : bool, optional
+        If True, the metric requires a NetworkX graph object as input.
+        If False, the metric can work directly with adjacency matrices. Default is False.
+    metric_type : str, optional
+        Type of metric: 'node', 'binary_edge', or 'non_binary_edge'. Default is 'binary_edge'.
+    metric_node_feature : str, optional
+        Name of the node feature this metric operates on. Only relevant if metric_type='node'.
+    """
     def __init__(self, requires_graph=False, metric_type='binary_edge', metric_node_feature=None):
         self.requires_graph = requires_graph
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
@@ -33,6 +50,12 @@ class Metric(ABC):
         self.does_support_mask = False
 
     def initialize_indices_to_ignore(self):
+        """
+        Initialize the array tracking which feature indices should be ignored.
+
+        This method creates a boolean array to track features that should be excluded
+        from calculations, typically to avoid multicollinearity issues.
+        """
         self._indices_to_ignore = np.array([False] * self._get_total_feature_count())
 
         if hasattr(self, "_indices_from_user") and self._indices_from_user is not None:
@@ -67,6 +90,14 @@ class Metric(ABC):
         return 1
 
     def update_indices_to_ignore(self, indices_to_ignore):
+        """
+        Mark specific feature indices to be ignored in metric calculations.
+
+        Parameters
+        ----------
+        indices_to_ignore : array-like
+            Indices of features that should be excluded from calculations.
+        """
         self._indices_to_ignore[indices_to_ignore] = True
 
     def calc_change_score(self, current_network: np.ndarray | nx.Graph, indices: tuple):
@@ -99,6 +130,19 @@ class Metric(ABC):
         return proposed_network_stat - current_network_stat
 
     def calculate_for_sample(self, networks_sample: np.ndarray | Collection[nx.Graph]):
+        """
+        Calculate metric statistics for a sample of networks.
+
+        Parameters
+        ----------
+        networks_sample : np.ndarray or Collection[nx.Graph]
+            A collection of networks. If array, shape is (n, n, sample_size).
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape (num_features, sample_size) containing statistics for each network.
+        """
         num_of_samples = networks_sample.shape[2]
 
         result = np.zeros((self._get_effective_feature_count(), num_of_samples))
@@ -114,6 +158,23 @@ class Metric(ABC):
             edge_indices_mask: npt.NDArray[bool],
             observed_network: np.ndarray | nx.Graph,
     ) -> None:
+        """
+        Calculate the design matrix (regressors) for Maximum Pseudo-Likelihood Estimation.
+
+        This method populates the design matrix for MPLE optimization by computing
+        change scores for each potential edge in the network.
+
+        Parameters
+        ----------
+        Xs_out : np.ndarray
+            Output array to populate with regressor values. Modified in-place.
+        feature_col_indices : np.ndarray
+            Column indices in Xs_out corresponding to this metric's features.
+        edge_indices_mask : np.ndarray
+            Boolean mask indicating which edges to include in the calculation.
+        observed_network : np.ndarray or nx.Graph
+            The observed network data.
+        """
         edge_idx_in_full_xs = 0
         edge_idx_in_masked_xs = 0
 
@@ -206,6 +267,12 @@ class Metric(ABC):
 
 
 class NumberOfEdges(Metric):
+    """
+    Abstract base class for counting edges in a network.
+
+    This metric counts the total number of edges present in a network.
+    Use NumberOfEdgesDirected or NumberOfEdgesUndirected for concrete implementations.
+    """
     def __str__(self):
         raise NotImplementedError
 
@@ -287,6 +354,12 @@ class NumberOfEdges(Metric):
 
 
 class NumberOfEdgesUndirected(NumberOfEdges):
+    """
+    Metric for counting edges in an undirected network.
+
+    In an undirected network, each edge is counted once (even though it appears
+    twice in the adjacency matrix due to symmetry).
+    """
     def __str__(self):
         return "num_edges_undirected"
 
@@ -300,6 +373,12 @@ class NumberOfEdgesUndirected(NumberOfEdges):
 
 
 class NumberOfEdgesDirected(NumberOfEdges):
+    """
+    Metric for counting edges in a directed network.
+
+    In a directed network, each directed edge (i -> j) is counted separately
+    from its reverse (j -> i).
+    """
     def __str__(self):
         return "num_edges_directed"
 
@@ -314,6 +393,17 @@ class NumberOfEdgesDirected(NumberOfEdges):
 
 # TODO: change the name of this one to undirected and implement also a directed version?
 class NumberOfTriangles(Metric):
+    """
+    Metric for counting triangles in an undirected network.
+
+    A triangle is a set of three nodes where each pair is connected by an edge.
+    This is a measure of network clustering and transitivity.
+
+    Notes
+    -----
+    Currently only implemented for undirected networks. The count is computed
+    using matrix multiplication: tr(W^3) / 6, where W is the adjacency matrix.
+    """
     def __str__(self):
         return "num_triangles"
 
@@ -347,9 +437,24 @@ class NumberOfTriangles(Metric):
 
 class BaseDegreeVector(Metric, abc.ABC):
     """
-    A base class for calculating a degree vector for a network.
-    To avoid multicollinearity with other features, an optional parameter `indices_to_ignore` can be used to specify
-    which indices the calculation ignores.
+    Abstract base class for calculating degree vectors in networks.
+
+    This class provides the foundation for degree-based metrics, which count
+    the number of connections for each node. The specific degree type (in-degree,
+    out-degree, or undirected degree) is determined by the summation axis.
+
+    To avoid multicollinearity with other features, an optional parameter
+    `indices_from_user` can be used to specify which node indices should be
+    ignored in the calculation.
+
+    Parameters
+    ----------
+    is_directed : bool
+        Whether the network is directed.
+    summation_axis : SummationAxis
+        Axis along which to sum the adjacency matrix (ROWS for in-degree, COLUMNS for out-degree).
+    indices_from_user : Sequence[int], optional
+        Indices of nodes whose degrees should be excluded from the feature vector.
     """
 
     class SummationAxis(Enum):
@@ -457,6 +562,16 @@ class BaseDegreeVector(Metric, abc.ABC):
 class InDegree(BaseDegreeVector):
     """
     Calculate the in-degree of each node in a directed graph.
+
+    In-degree is the number of incoming edges to a node. This metric produces
+    a feature vector of length n (number of nodes), where each element represents
+    the in-degree of the corresponding node.
+
+    Parameters
+    ----------
+    indices_from_user : array-like, optional
+        Indices of nodes whose in-degrees should be excluded from the feature vector
+        to avoid multicollinearity.
     """
 
     def __str__(self):
@@ -495,6 +610,16 @@ class InDegree(BaseDegreeVector):
 class OutDegree(BaseDegreeVector):
     """
     Calculate the out-degree of each node in a directed graph.
+
+    Out-degree is the number of outgoing edges from a node. This metric produces
+    a feature vector of length n (number of nodes), where each element represents
+    the out-degree of the corresponding node.
+
+    Parameters
+    ----------
+    indices_from_user : array-like, optional
+        Indices of nodes whose out-degrees should be excluded from the feature vector
+        to avoid multicollinearity.
     """
 
     def __str__(self):
@@ -531,6 +656,16 @@ class OutDegree(BaseDegreeVector):
 class UndirectedDegree(BaseDegreeVector):
     """
     Calculate the degree of each node in an undirected graph.
+
+    Degree is the number of edges connected to a node. This metric produces
+    a feature vector of length n (number of nodes), where each element represents
+    the degree of the corresponding node.
+
+    Parameters
+    ----------
+    indices_from_user : array-like, optional
+        Indices of nodes whose degrees should be excluded from the feature vector
+        to avoid multicollinearity.
     """
 
     def __str__(self):
@@ -572,9 +707,15 @@ class UndirectedDegree(BaseDegreeVector):
 
 class Reciprocity(Metric):
     """
-    The Reciprocity metric takes the connectivity matrix of a directed graph, and returns a vector
-    of size n-choose-2 indicating whether nodes i,j are connected. i.e. $ y_{i, j} \\cdot y_{j, i} $
-    for every possible pair of nodes   
+    Calculate reciprocity indicators for all node pairs in a directed graph.
+
+    This metric produces a feature vector of size n-choose-2, where each element
+    indicates whether a pair of nodes (i, j) has reciprocal connections, i.e.,
+    both i -> j and j -> i edges exist. Formally: y_{i,j} * y_{j,i} for all pairs.
+
+    Returns
+    -------
+    The metric returns a vector where 1 indicates reciprocal connection and 0 otherwise.
     """
 
     def __str__(self):
@@ -610,7 +751,16 @@ class Reciprocity(Metric):
 
 class TotalReciprocity(Metric):
     """
-    Calculates how many reciprocal connections exist in a network  
+    Calculate the total number of reciprocal connections in a directed network.
+
+    This metric counts the number of node pairs (i, j) where both i -> j and j -> i
+    edges exist. Unlike the Reciprocity metric which returns a vector for each pair,
+    this returns a single scalar value representing the total count.
+
+    Returns
+    -------
+    float
+        The total number of reciprocal dyads in the network.
     """
 
     def __str__(self):
@@ -679,7 +829,16 @@ class TotalReciprocity(Metric):
 
 class ExWeightNumEdges(Metric):
     """
-    Weighted sum of the number of edges, based on exogenous attributes.
+    Abstract base class for edge metrics weighted by exogenous node attributes.
+
+    This class provides functionality for calculating weighted sums of edges,
+    where edge weights are derived from exogenous attributes of the nodes.
+    Concrete implementations must define how edge weights are calculated.
+
+    Parameters
+    ----------
+    exogenous_attr : Collection
+        Exogenous attributes for each node in the network.
     """
 
     # TODO: Collection doesn't necessarily support __getitem__, find a typing hint of a sized Iterable that does.
@@ -1082,6 +1241,20 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
 
 
 class NodeAttrSum(ExWeightNumEdges):
+    """
+    Sum of node attributes for all edges in the network.
+
+    For each edge (i, j), this metric weights it by the sum of the attributes
+    of nodes i and j. The total statistic is the sum of these weights across
+    all edges.
+
+    Parameters
+    ----------
+    exogenous_attr : Collection
+        Numeric attribute values for each node.
+    is_directed : bool
+        Whether the network is directed.
+    """
     def __init__(self, exogenous_attr: Collection, is_directed: bool):
         super().__init__(exogenous_attr)
         self._is_directed = is_directed
@@ -1103,6 +1276,17 @@ class NodeAttrSum(ExWeightNumEdges):
 
 
 class NodeAttrSumOut(ExWeightNumEdges):
+    """
+    Sum of sender node attributes for all edges in a directed network.
+
+    For each edge (i, j), this metric weights it by the attribute of the source
+    node i. This is useful for modeling sender effects in directed networks.
+
+    Parameters
+    ----------
+    exogenous_attr : Collection
+        Numeric attribute values for each node.
+    """
     def __init__(self, exogenous_attr: Collection):
         super().__init__(exogenous_attr)
         self._is_directed = True
@@ -1122,6 +1306,17 @@ class NodeAttrSumOut(ExWeightNumEdges):
 
 
 class NodeAttrSumIn(ExWeightNumEdges):
+    """
+    Sum of receiver node attributes for all edges in a directed network.
+
+    For each edge (i, j), this metric weights it by the attribute of the target
+    node j. This is useful for modeling receiver effects in directed networks.
+
+    Parameters
+    ----------
+    exogenous_attr : Collection
+        Numeric attribute values for each node.
+    """
     def __init__(self, exogenous_attr: Collection):
         super().__init__(exogenous_attr)
         self._is_directed = True
@@ -1142,8 +1337,18 @@ class NodeAttrSumIn(ExWeightNumEdges):
 
 class SumDistancesConnectedNeurons(ExWeightNumEdges):
     """
-    This class calculates the sum of Euclidean distances between all pairs of connected neurons.
-    rows = samples, columns = axes
+    Sum of Euclidean distances between all connected node pairs.
+
+    This metric weights each edge by the Euclidean distance between the spatial
+    positions of the connected nodes. Useful for modeling spatial effects in networks.
+
+    Parameters
+    ----------
+    exogenous_attr : pd.DataFrame, pd.Series, np.ndarray, list, or tuple
+        Spatial coordinates for each node. If 1D, interpreted as positions on a line.
+        If 2D, each row represents a node and columns represent coordinate dimensions.
+    is_directed : bool
+        Whether the network is directed.
     """
 
     def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool):
@@ -1177,6 +1382,22 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
 
 
 class NumberOfNodesPerType(Metric):
+    """
+    Count the number of nodes in each category.
+
+    This metric operates on node features (rather than edges) and counts how many
+    nodes belong to each category. Returns n_categories - 1 features to avoid
+    multicollinearity (the last category is redundant given the total node count).
+
+    Parameters
+    ----------
+    metric_node_feature : str
+        Name of the node feature to operate on.
+    n_node_categories : int
+        Total number of categories that nodes can belong to.
+    feature_dim : int, optional
+        Dimensionality of the node feature. Default is 1.
+    """
     def __str__(self):
         return "num_nodes_per_type"
 
@@ -1234,6 +1455,36 @@ class NumberOfNodesPerType(Metric):
 
 
 class MetricsCollection:
+    """
+    A collection of metrics for ERGM models.
+
+    This class manages multiple metrics, handles feature calculations across samples,
+    prepares data for MPLE optimization, and automatically detects and removes
+    collinear features.
+
+    Parameters
+    ----------
+    metrics : Collection[Metric]
+        Collection of Metric instances to include in the model.
+    is_directed : bool
+        Whether the network is directed.
+    n_nodes : int
+        Number of nodes in the network.
+    fix_collinearity : bool, optional
+        If True, automatically detect and remove collinear features. Default is True.
+    use_sparse_matrix : bool, optional
+        If True, use sparse matrix representations for efficiency. Default is False.
+    collinearity_fixer_sample_size : int, optional
+        Number of random networks to sample for collinearity detection. Default is 1000.
+    is_collinearity_distributed : bool, optional
+        If True, distribute collinearity fixing computation. Default is False.
+    do_copy_metrics : bool, optional
+        If True, create deep copies of input metrics. Default is True.
+    mask : np.ndarray, optional
+        Boolean mask indicating which edges to consider (1D flattened). Default is None.
+    **kwargs
+        Additional keyword arguments for collinearity fixer configuration.
+    """
 
     def __init__(self,
                  metrics: Collection[Metric],
@@ -1812,6 +2063,20 @@ class MetricsCollection:
         return ys / num_nets
 
     def choose_optimization_scheme(self):
+        """
+        Automatically select the appropriate optimization scheme for the model.
+
+        Returns
+        -------
+        str
+            One of 'MPLE', 'MPLE_RECIPROCITY', or 'MCMLE' depending on the metrics.
+
+        Notes
+        -----
+        - 'MPLE': Maximum Pseudo-Likelihood Estimation, for dyadic independent metrics
+        - 'MPLE_RECIPROCITY': Extended MPLE for models with only reciprocity dependence
+        - 'MCMLE': Monte Carlo Maximum Likelihood Estimation, for complex dependencies
+        """
         if self.n_node_features > 0:
             return 'MCMLE'
         if not self._has_dyadic_dependent_metrics:
@@ -1835,6 +2100,14 @@ class MetricsCollection:
         return parameter_names
 
     def get_ignored_features(self):
+        """
+        Get the names of features that have been ignored due to collinearity.
+
+        Returns
+        -------
+        tuple
+            Names of ignored features across all metrics in the collection.
+        """
         parameter_names = tuple()
 
         for metric in self.metrics:
