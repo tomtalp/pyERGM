@@ -62,7 +62,7 @@ class GeneralUtilsTester(unittest.TestCase):
         sampled_networks = p1_sampson_model.generate_networks_for_sample(sampling_method="exact",
                                                                          sample_size=sample_size)
         sample_mean = sampled_networks.mean(axis=-1)
-        exact_marginals = get_exact_marginals_from_dyads_distrubution(p1_sampson_model._exact_dyadic_distributions)
+        exact_marginals = get_exact_marginals_from_dyads_distribution(p1_sampson_model._exact_dyadic_distributions)
 
         self.assertEqual(sampled_networks.shape, (n_nodes, n_nodes, sample_size))
         self.assertEqual(convergence_result["success"], True)

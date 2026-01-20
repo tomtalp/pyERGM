@@ -1,5 +1,6 @@
 from copy import deepcopy
 import numpy as np
+from pyERGM.logging_config import logger
 from pyERGM.utils import *
 from pyERGM.metrics import MetricsCollection
 import time
@@ -254,7 +255,7 @@ class NaiveMetropolisHastings(Sampler):
                     networks_count += 1
                     t2 = time.time()
                     if networks_count % 100 == 0:
-                        print(f"Sampled {networks_count}/{num_of_nets} networks, time taken: {t2-t1}")
+                        logger.debug(f"Sampled {networks_count}/{num_of_nets} networks, time taken: {t2-t1:.2f}s")
 
             mcmc_iter_count += 1
         return sampled_networks

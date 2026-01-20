@@ -3,6 +3,7 @@ from scipy.optimize import minimize, OptimizeResult
 from scipy.special import softmax
 import glob
 
+from pyERGM.logging_config import logger
 from pyERGM.metrics import *
 
 
@@ -199,10 +200,9 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         nonlocal iteration
         iteration += 1
         cur_time = time.time()
-        print(f'iteration: {iteration}, time from start '
-              f'training: {cur_time - start_time} '
-              f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
-        sys.stdout.flush()
+        logger.info(f'iteration: {iteration}, time from start '
+              f'training: {cur_time - start_time:.2f} '
+              f'log10 likelihood: {-intermediate_result.fun / np.log(10):.4f}')
         if is_distributed:
             checkpoint_path_getter = lambda idx: (
                     Path.cwd().parent / "OptimizationIntermediateCalculations" / f"checkpoint_iter_{idx}.pkl"
@@ -214,8 +214,7 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
 
     iteration = 0
     start_time = time.time()
-    print("optimization started")
-    sys.stdout.flush()
+    logger.info("MPLE optimization started")
 
     observed_networks = expand_net_dims(observed_networks)
 
@@ -261,8 +260,7 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         shutil.rmtree(data_path)
         shutil.rmtree((data_path.parent / 'mple_data_paged_chunks').resolve())
 
-    print(res)
-    sys.stdout.flush()
+    logger.debug(f"Optimization result: {res}")
 
     return res.x, pred, res.success
 
@@ -280,11 +278,11 @@ def distributed_logistic_regression_optimization_step(data_path, thetas, funcs_t
     for chunks_path in chunks_paths:
         os.makedirs(chunks_path, exist_ok=True)
 
-    print("start waiting for children jobs in MPLE optimization")
+    logger.debug("Start waiting for children jobs in MPLE optimization")
     sys.stdout.flush()
     wait_for_distributed_children_outputs(num_jobs, chunks_paths, job_array_ids, "__".join(funcs_to_calc),
                                           children_logs_dir)
-    print("done waiting for children jobs in MPLE optimization")
+    logger.debug("Done waiting for children jobs in MPLE optimization")
     sys.stdout.flush()
 
     aggregated_funcs = []
@@ -315,17 +313,17 @@ def distributed_mple_data_chunks_calculations(
     # Copy the `MetricsCollection` and the observed network to provide its path to children jobs, so they will be
     # able to access it.
     metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
-    print("dumping metrics collection")
+    logger.debug("Dumping metrics collection")
     sys.stdout.flush()
     with open(metric_collection_path, 'wb') as f:
         pickle.dump(metrics_collection, f)
-    print("dumped metrics collection")
+    logger.debug("Dumped metrics collection")
     sys.stdout.flush()
     observed_networks_path = os.path.join(data_path, 'observed_networks.pkl')
-    print("dumping observed networks")
+    logger.debug("Dumping observed networks")
     with open(observed_networks_path, 'wb') as f:
         pickle.dump(observed_networks, f)
-    print("dumped observed networks")
+    logger.debug("Dumped observed networks")
     cmd_line_single_batch = (f'python ./mple_data_distributed_paging.py '
                              f'--out_dir_path={out_dir_path} '
                              f'--num_edges_per_job={num_edges_per_job} ')
@@ -334,7 +332,7 @@ def distributed_mple_data_chunks_calculations(
     num_data_points = num_nodes * num_nodes - num_nodes
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
 
-    print("sending children jobs to calculate MPLE data chunks")
+    logger.debug("Sending children jobs to calculate MPLE data chunks")
     sys.stdout.flush()
     job_array_ids, children_logs_dir = run_distributed_children_jobs(
         out_dir_path,
@@ -346,11 +344,11 @@ def distributed_mple_data_chunks_calculations(
     chunks_path = (out_dir_path / 'mple_data_paged_chunks').resolve()
     os.makedirs(chunks_path, exist_ok=True)
 
-    print("start waiting for children jobs in MPLE data paging")
+    logger.debug("Start waiting for children jobs in MPLE data paging")
     sys.stdout.flush()
     wait_for_distributed_children_outputs(num_jobs, [chunks_path], job_array_ids, 'data_paging',
                                           children_logs_dir)
-    print("done waiting for children jobs in MPLE data paging")
+    logger.debug("Done waiting for children jobs in MPLE data paging")
     sys.stdout.flush()
     # Clean current scripts
     shutil.rmtree((out_dir_path / "scripts").resolve())
@@ -369,7 +367,7 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, fu
     paged_chunks_path = os.path.join(out_path, "mple_data_paged_chunks")
     num_jobs = len(glob.glob(f"{paged_chunks_path}/[0-9]*.npz"))
 
-    print("sending children jobs to calculate MPLE likelihood grad")
+    logger.debug("Sending children jobs to calculate MPLE likelihood grad")
     sys.stdout.flush()
     job_array_ids, children_logs_dir = run_distributed_children_jobs(out_path, cmd_line_single_batch,
                                                                      "distributed_logistic_regression.sh",
@@ -415,15 +413,13 @@ def mple_reciprocity_logistic_regression_optimization(
         nonlocal iteration
         iteration += 1
         cur_time = time.time()
-        print(f'iteration: {iteration}, time from start '
-              f'training: {cur_time - start_time} '
-              f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
-        sys.stdout.flush()
+        logger.info(f'iteration: {iteration}, time from start '
+              f'training: {cur_time - start_time:.2f} '
+              f'log10 likelihood: {-intermediate_result.fun / np.log(10):.4f}')
 
     iteration = 0
     start_time = time.time()
-    print("optimization started")
-    sys.stdout.flush()
+    logger.info("MPLE optimization started")
 
     observed_networks = expand_net_dims(observed_networks)
     Xs = metrics_collection.prepare_mple_reciprocity_regressors()
@@ -443,6 +439,5 @@ def mple_reciprocity_logistic_regression_optimization(
         raise ValueError(
             f"Unsupported optimization method: {optimization_method}. Options are: L-BFGS-B")
     pred = predict_multi_class_logistic_regression(Xs, res.x)
-    print(res)
-    sys.stdout.flush()
+    logger.debug(f"Optimization result: {res}")
     return res.x, pred, res.success

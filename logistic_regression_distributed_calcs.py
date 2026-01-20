@@ -1,5 +1,5 @@
 import argparse
-from pyERGM.mple_optimizaiton import *
+from pyERGM.mple_optimization import *
 
 
 def parse_cmd_args():

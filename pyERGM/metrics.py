@@ -9,6 +9,7 @@ import sys
 from scipy.spatial.distance import pdist, squareform
 from enum import Enum
 
+from pyERGM.logging_config import logger
 from pyERGM.utils import *
 from pyERGM.cluster_utils import *
 
@@ -23,9 +24,9 @@ class Metric(ABC):
         self._n_nodes = None
         self._indices_to_ignore = None
         self._metric_type = metric_type  # can have values "node", "binary_edge", "non_binary_edge"
-        if self._metric_type not in ['node', 'binary_edge', 'binary_edge']:
+        if self._metric_type not in ['node', 'binary_edge', 'non_binary_edge']:
             raise ValueError(
-                f"invalid metric type: {self._metric_type}. Should be one of: 'node', 'binary_edge', 'binary_edge'")
+                f"invalid metric type: {self._metric_type}. Should be one of: 'node', 'binary_edge', 'non_binary_edge'")
 
         self.metric_node_feature = metric_node_feature  # relevant only if metric_type='node'
 
@@ -1019,14 +1020,12 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
         yielding len(type)**2 features.
 
     Parameters
-    -----------
-        exogenous_attr : Collection
-            A collection of attributes assigned to each node in a graph with n nodes.
+    ----------
+    exogenous_attr : Collection
+        A collection of attributes assigned to each node in a graph with n nodes.
 
-            #TODO - len(exogenous_attr)==n is a requirement, right? Should we assert?
-
-        indices_to_ignore: list
-            # TODO - Specify the sorting convention
+    indices_from_user : list, optional
+        List of indices to ignore in the metric calculation.
     """
 
     def __str__(self):
@@ -1248,7 +1247,7 @@ class MetricsCollection:
                  do_copy_metrics=True,
                  mask: npt.NDArray[bool] | None = None,
                  **kwargs):
-        print("in MetricsCollection constructor")
+        logger.debug("Initializing MetricsCollection")
         sys.stdout.flush()
         if not do_copy_metrics:
             self.metrics = tuple([metric for metric in metrics])
@@ -1301,7 +1300,7 @@ class MetricsCollection:
         self._fix_collinearity = fix_collinearity
         self.collinearity_fixer_sample_size = collinearity_fixer_sample_size
         if self._fix_collinearity:
-            print("before collinearity fix")
+            logger.debug("Starting collinearity fix")
             self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
                                     is_distributed=is_collinearity_distributed,
                                     num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5),
@@ -1390,7 +1389,7 @@ class MetricsCollection:
                              f'--p {p}')
 
         num_jobs = int(np.ceil(tensor_size / num_samples_per_job))
-        print(f"sending children job array for collinearity fixer {num_jobs} jobs")
+        logger.debug(f"Sending {num_jobs} children job array for collinearity fixer")
         job_array_ids, children_logs_dir = run_distributed_children_jobs(out_dir_path, cmd_line_for_bsub,
                                                                          "distributed_binomial_tensor_statistics.sh",
                                                                          num_jobs, "sample_stats")
@@ -1416,12 +1415,12 @@ class MetricsCollection:
         metric_of_feat = self.get_metric_by_feat_idx(idx)
         is_trimmable = metric_of_feat._get_effective_feature_count() > 1
         if not is_trimmable:
-            print(f"Removing the metric {str(metric_of_feat)} from the collection")
+            logger.info(f"Removing the metric {str(metric_of_feat)} from the collection")
             sys.stdout.flush()
             self._delete_metric(metric=metric_of_feat)
         else:
             idx_to_delete_within_metric = self.get_feature_idx_within_metric(idx)
-            print(f"Removing the {idx_to_delete_within_metric} feature of {str(metric_of_feat)}")
+            logger.info(f"Removing the {idx_to_delete_within_metric} feature of {str(metric_of_feat)}")
             sys.stdout.flush()
             metric_of_feat.update_indices_to_ignore([idx_to_delete_within_metric])
         self.num_of_features = self.calc_num_of_features()
@@ -1444,7 +1443,7 @@ class MetricsCollection:
         if not is_distributed:
             sample_features = self.calc_statistics_for_binomial_tensor_local(sample_size)
         else:
-            print("starting distributed collinearity fixing")
+            logger.debug("Starting distributed collinearity fixing")
             sample_features = self.calc_statistics_for_binomial_tensor_distributed(sample_size,
                                                                                    num_samples_per_job=kwargs.get(
                                                                                        "num_samples_per_job", 5))
@@ -1463,7 +1462,7 @@ class MetricsCollection:
             if small_eigen_vals_indices.size == 0:
                 is_linearly_dependent = False
             else:
-                print("Collinearity detected, identifying features to remove")
+                logger.info("Collinearity detected, identifying features to remove")
                 sys.stdout.flush()
 
                 # For each linear dependency (corresponding to an eigen vector with a low value), mark the indices of

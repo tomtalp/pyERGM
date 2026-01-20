@@ -108,13 +108,6 @@ def construct_int_from_adj_mat(adj_mat: np.ndarray, is_directed: bool) -> int:
     return round((adj_mat_no_diag * 2 ** np.arange(adj_mat_no_diag.size - 1, -1, -1).astype(np.ulonglong)).sum())
 
 
-def _calc_line_slope_2_points(xs: np.ndarray, ys: np.ndarray):
-    if xs.size != 2 or ys.size != 2:
-        raise ValueError(
-            f"The sizes of xs and ys must be 2 to form a well defined line! Got {xs.size}, {ys.size} instead")
-    return (xs)
-
-
 def get_greatest_convex_minorant(xs: np.ndarray, ys: np.ndarray):
     if xs.size != ys.size:
         raise ValueError("Arrays must have the same size!")
@@ -298,18 +291,6 @@ def transpose_sparse_sample_matrices(sparse_tensor: torch.Tensor) -> torch.Tenso
     return torch.sparse_coo_tensor(transposed_indices, values, (n, n, k))
 
 
-def calc_for_sample_njit():
-    def wrapper(func):
-        def inner(sample):
-            if isinstance(sample, np.ndarray):
-                return njit(func)(sample)
-            return func(sample)
-
-        return inner
-
-    return wrapper
-
-
 def approximate_auto_correlation_function(features_of_net_samples: np.ndarray) -> np.ndarray:
     """
     This is gamma hat from Geyer's handbook of mcmc (1D) and Dai and Jones 2017 (multi-D).
@@ -384,7 +365,6 @@ def covariance_matrix_estimation(features_of_net_samples: np.ndarray, mean_featu
                 MCMC (there it is stated for the univariate case, but the generalization is straight forward).
             multivariate_initial_sequence
                 Following Dai and Jones 2017 - the first estimator in section 3.1 (denoted mIS).
-    TODO: implement a mechanism that allows to pass arguments that are customized for each method
 
     Returns
     -------
@@ -691,7 +671,7 @@ def sample_from_dyads_distribution(dyads_distributions, sample_size):
     return net_sample
 
 
-def get_exact_marginals_from_dyads_distrubution(dyads_distributions):
+def get_exact_marginals_from_dyads_distribution(dyads_distributions):
     num_dyads = dyads_distributions.shape[0]
     num_nodes = num_dyads_to_num_nodes(num_dyads)
     indices = np.triu_indices(num_nodes, k=1)
