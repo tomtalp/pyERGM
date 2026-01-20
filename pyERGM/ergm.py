@@ -164,6 +164,27 @@ class ERGM():
         logger.info(f"Is directed: {self._is_directed}")
 
     def calculate_weight(self, W: np.ndarray):
+        """
+        Calculate the unnormalized probability weight for a given network.
+
+        The weight is computed as exp(theta^T * g(W)), where theta are the model
+        parameters and g(W) are the sufficient statistics of the network.
+
+        Parameters
+        ----------
+        W : np.ndarray
+            Network adjacency matrix of shape (n, n) or (n, n+k) if node features are included.
+
+        Returns
+        -------
+        float
+            The unnormalized weight of the network under the current model parameters.
+
+        Raises
+        ------
+        ValueError
+            If the dimensions of W don't match the expected network size.
+        """
         if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] < self._n_nodes:
             raise ValueError(f"The dimensions of the given adjacency matrix, {W.shape}, don't comply with the number of"
                              f" nodes in the network: {self._n_nodes}")
@@ -188,6 +209,33 @@ class ERGM():
                                      edge_proposal_method='uniform',
                                      edge_node_flip_ratio=None
                                      ):
+        """
+        Generate a sample of networks from the current ERGM model.
+
+        Parameters
+        ----------
+        sample_size : int
+            Number of networks to generate.
+        seed_network : np.ndarray, optional
+            Initial network for MCMC sampling. If None, an Erdos-Renyi network is generated.
+        replace : bool, optional
+            Whether to sample with replacement. Default is True.
+        burn_in : int, optional
+            Number of MCMC steps to discard before sampling. Default is 10000.
+        mcmc_steps_per_sample : int, optional
+            Number of MCMC steps between samples. Default is 1000.
+        sampling_method : str, optional
+            Sampling method to use. Options: "metropolis_hastings" (default), "exact".
+        edge_proposal_method : str, optional
+            Edge proposal distribution for MCMC. Default is "uniform".
+        edge_node_flip_ratio : float, optional
+            Ratio of edge flips to node feature flips in MCMC. Default is None.
+
+        Returns
+        -------
+        np.ndarray
+            Array of sampled networks with shape (n, n+k, sample_size).
+        """
         if sampling_method == "metropolis_hastings":
             if seed_network is None:
                 G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
@@ -274,6 +322,24 @@ class ERGM():
     #  approximation, and the degree to which changes in the observed_network will change the prediction depend on the
     #  metrics and the specific networks, it can not be pre-determined.
     def get_mple_prediction(self, observed_networks: np.ndarray | None = None, **kwargs):
+        """
+        Get the MPLE-based edge probability predictions.
+
+        For dyadic independent models, returns the exact probability matrix.
+        This is cached after first computation.
+
+        Parameters
+        ----------
+        observed_networks : np.ndarray, optional
+            Observed network(s). Only needed for dyadic dependent models.
+        **kwargs
+            Additional keyword arguments (e.g., num_edges_per_job for distributed computation).
+
+        Returns
+        -------
+        np.ndarray
+            Matrix of edge probabilities of shape (n, n).
+        """
         logger.debug("Calculating MPLE prediction")
         sys.stdout.flush()
         if observed_networks.ndim == 3:
@@ -323,6 +389,22 @@ class ERGM():
             )
 
     def get_mple_reciprocity_prediction(self):
+        """
+        Get the dyadic state probability distributions for reciprocity models.
+
+        Returns the probability distribution over the four possible dyadic states
+        (no edges, i->j only, j->i only, or reciprocal) for each node pair.
+
+        Returns
+        -------
+        np.ndarray
+            Array of shape (n_choose_2, 4) with probability distributions.
+
+        Raises
+        ------
+        NotImplementedError
+            If the model is not a reciprocity-only model.
+        """
         if self._metrics_collection.choose_optimization_scheme() == 'MPLE_RECIPROCITY':
             if self._exact_dyadic_distributions is None:
                 Xs = self._metrics_collection.prepare_mple_reciprocity_regressors()
@@ -336,6 +418,35 @@ class ERGM():
 
     def calc_model_log_likelihood(self, observed_network: np.ndarray, reduction: str = 'sum',
                                   log_base: float = np.exp(1)):
+        """
+        Calculate the log-likelihood of observed network(s) under the fitted model.
+
+        This method computes the log-likelihood for models fitted with MPLE or MPLE_RECIPROCITY.
+        For dyadic independent models (MPLE), it uses the exact probability predictions.
+        For reciprocity models, it uses the dyadic state distributions.
+
+        Parameters
+        ----------
+        observed_network : np.ndarray
+            The observed network adjacency matrix of shape (n, n).
+        reduction : str, optional
+            How to aggregate likelihoods: 'sum' (default), 'mean', or 'none'.
+            If 'none', returns individual edge/dyad likelihoods.
+        log_base : float, optional
+            Base for logarithm. Default is e (natural log).
+
+        Returns
+        -------
+        float or np.ndarray
+            Log-likelihood value(s). If reduction='none', returns array of individual likelihoods.
+
+        Raises
+        ------
+        ValueError
+            If network dimensions are incorrect or network is non-binary.
+        NotImplementedError
+            If model has dependencies other than reciprocity.
+        """
         if observed_network.ndim != 2 or observed_network.shape[0] != observed_network.shape[1] or \
                 observed_network.shape[0] != self._n_nodes:
             raise ValueError(f"Got a connectivity data of dimensions {observed_network.shape}, "
@@ -384,6 +495,30 @@ class ERGM():
                                       "independent or with reciprocal synapses dependent")
 
     def calc_model_entropy(self, reduction: str = 'sum', eps: float = 1e-10):
+        """
+        Calculate the entropy of the fitted ERGM model.
+
+        Entropy measures the uncertainty in the model's probability distribution.
+        For dyadic independent models, computes entropy from edge probabilities.
+        For reciprocity models, computes entropy from dyadic state distributions.
+
+        Parameters
+        ----------
+        reduction : str, optional
+            How to aggregate entropy: 'sum' (default) or 'mean'.
+        eps : float, optional
+            Small constant to avoid log(0). Default is 1e-10.
+
+        Returns
+        -------
+        float
+            The entropy value (in nats if using natural log).
+
+        Raises
+        ------
+        NotImplementedError
+            If model has dependencies other than reciprocity.
+        """
         model_type = self._metrics_collection.choose_optimization_scheme()
         if model_type == "MPLE":
             # TODO: once calculating mple regressors doesn't require an input matrix, get rid of this.
@@ -825,18 +960,56 @@ class ERGM():
         return prob
 
     def get_model_parameters(self):
+        """
+        Get the fitted model parameters as a dictionary.
+
+        Returns
+        -------
+        dict
+            Dictionary mapping parameter names to their fitted values (theta coefficients).
+        """
         parameter_names = self._metrics_collection.get_parameter_names()
         return dict(zip(parameter_names, self._thetas))
 
     def get_ignored_features(self):
+        """
+        Get the names of features that were ignored due to collinearity.
+
+        Returns
+        -------
+        tuple
+            Names of features excluded from the model to avoid multicollinearity.
+        """
         return self._metrics_collection.get_ignored_features()
 
 
 class BruteForceERGM(ERGM):
     """
-    A class that implements ERGM by iterating over the entire space of networks and calculating stuff exactly (rather
-    than using statistical methods for approximating and sampling).
-    This is mainly for tests.
+    Exact ERGM implementation via exhaustive enumeration of all networks.
+
+    This class computes ERGM quantities exactly by enumerating all possible networks
+    and calculating statistics, weights, and normalization constants. This is only
+    tractable for very small networks (≤5 nodes directed, ≤7 nodes undirected).
+
+    Primarily used for testing and validation of approximate methods.
+
+    Parameters
+    ----------
+    n_nodes : int
+        Number of nodes. Must be ≤5 for directed or ≤7 for undirected networks.
+    metrics_collection : Collection[Metric]
+        Collection of metrics to compute.
+    is_directed : bool, optional
+        Whether the network is directed. Default is False.
+    initial_thetas : dict, optional
+        Initial parameter values. If None, randomly initialized.
+
+    Attributes
+    ----------
+    MAX_NODES_BRUTE_FORCE_DIRECTED : int
+        Maximum nodes for directed networks (5).
+    MAX_NODES_BRUTE_FORCE_NOT_DIRECTED : int
+        Maximum nodes for undirected networks (7).
     """
     # The maximum number of nodes that is allowed for carrying brute force calculations (i.e. iterating the whole space
     # of networks and calculating stuff exactly). This becomes not tractable above this limit.
@@ -894,12 +1067,36 @@ class BruteForceERGM(ERGM):
         return np.stack([construct_adj_mat_from_int(i, self._n_nodes, self._is_directed) for i in sampled_idx], axis=-1)
 
     def calc_expected_features(self):
+        """
+        Calculate the expected values of all features under the model.
+
+        Returns
+        -------
+        np.ndarray
+            Expected feature values (sufficient statistics) under the current model.
+        """
         all_probs = self._all_weights / self._normalization_factor
 
         expected_features = self.all_features_by_all_nets @ all_probs
         return expected_features
 
     def fit(self, observed_networks):
+        """
+        Fit the model parameters to observed network(s) using exact likelihood.
+
+        Uses scipy.optimize.minimize to maximize the exact log-likelihood by
+        enumerating all possible networks.
+
+        Parameters
+        ----------
+        observed_networks : np.ndarray
+            Observed network(s) of shape (n, n) or (n, n, num_networks).
+
+        Returns
+        -------
+        OptimizeResult
+            Optimization result object from scipy.optimize.minimize.
+        """
         def nll(thetas, observed_networks):
             model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
                                    initial_thetas={feat_name: thetas[i] for i, feat_name in
@@ -940,6 +1137,13 @@ class BruteForceERGM(ERGM):
 
 
 class ConvergenceTester:
+    """
+    Utilities for testing ERGM optimization convergence.
+
+    This class provides various statistical tests to determine whether an ERGM
+    optimization has converged, i.e., whether the model's distribution matches
+    the observed data.
+    """
     def __init__(self):
         pass
 
@@ -1031,10 +1235,33 @@ class ConvergenceTester:
             confidence=0.95,
             stds_away_thr=1):
         """
-        Repeatedly subsample from a sample of networks, and calculate the distance between the subsample mean
-        and the observed features. The distance is calculated using the Mahalanobis distance, with the covariance matrix
-        being an estimation of the observed covariance. The observed covariance can either be the real covariance of the data,
-        or an estimation of the covariance matrix (using methods like `Network splitting augmentation` or `Noise augmentation`).
+        Test convergence using bootstrapped Mahalanobis distance from observed features.
+
+        Repeatedly subsamples from model-generated networks and calculates Mahalanobis
+        distance to the observed features using the observed covariance matrix. Tests
+        whether the model distribution is within acceptable distance of the data.
+
+        Parameters
+        ----------
+        observed_features : np.ndarray
+            Observed network features.
+        sampled_networks_features : np.ndarray
+            Features from model-sampled networks.
+        inverted_observed_cov_matrix : np.ndarray
+            Inverse of the observed feature covariance matrix.
+        num_subsamples : int, optional
+            Number of bootstrap subsamples. Default is 100.
+        subsample_size : int, optional
+            Size of each subsample. Default is 1000.
+        confidence : float, optional
+            Confidence level for the test. Default is 0.95.
+        stds_away_thr : float, optional
+            Threshold in standard deviations. Default is 1.
+
+        Returns
+        -------
+        dict
+            Dictionary with keys 'success', 'statistic', and 'threshold'.
         """
         mahalanobis_dists = np.zeros(num_subsamples)
 
