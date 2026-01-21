@@ -1315,6 +1315,11 @@ class ConvergenceTester:
 
         stds_away_thr : float
             The desired threshold for the Mahalanobis distance, in units of std *Defaults to 1*.
+        
+        Returns
+        -------
+        dict
+            Dictionary with keys 'success', 'statistic', and 'threshold'.
         """
         mahalanobis_dists = np.zeros(num_subsamples)
 

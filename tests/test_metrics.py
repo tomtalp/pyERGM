@@ -763,6 +763,50 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
             )
         )
 
+    def test_directed_with_ignored_indices(self):
+        """Test NumberOfEdgesTypesDirected with ignored feature indices."""
+        neuronal_types = ['A', 'B', 'A', 'B']
+        W = np.array([
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+
+        metric = NumberOfEdgesTypesDirected(neuronal_types, indices_from_user=[0])
+        n = len(neuronal_types)
+        metric._n_nodes = n
+        metric.initialize_indices_to_ignore()
+
+        # Calculate features
+        result = metric.calculate(W)
+
+        # Should have fewer features due to ignored index
+        n_features = metric._get_effective_feature_count()
+        self.assertEqual(len(result), n_features)
+        self.assertLess(n_features, 4)  # Should be less than total possible types (2x2=4)
+
+    def test_directed_calc_change_score_with_ignored_indices(self):
+        """Test change score calculation with ignored indices."""
+        neuronal_types = ['A', 'B', 'A', 'B']
+        W = np.array([
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+
+        metric = NumberOfEdgesTypesDirected(neuronal_types, indices_from_user=[0])
+        n = len(neuronal_types)
+        metric._n_nodes = n
+        metric.initialize_indices_to_ignore()
+
+        # Calculate change score for adding an edge
+        change_score = metric.calc_change_score(W, (0, 1))
+        n_features = metric._get_effective_feature_count()
+        self.assertEqual(len(change_score), n_features)
+        self.assertLess(n_features, 4)
+
 
 class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
     def test_calc_edge_type_idx_assignment(self):
@@ -923,6 +967,50 @@ class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
                 expected_mple_regressors[global_mask][edge_indices_limits[0]:edge_indices_limits[1]] == mple_regressors
             )
         )
+
+    def test_undirected_with_ignored_indices(self):
+        """Test NumberOfEdgesTypesUndirected with ignored indices."""
+        neuronal_types = ['A', 'B', 'A', 'B']
+        W = np.array([
+            [0, 1, 1, 0],
+            [1, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+
+        metric = NumberOfEdgesTypesUndirected(neuronal_types, indices_from_user=[1])
+        n = len(neuronal_types)
+        metric._n_nodes = n
+        metric.initialize_indices_to_ignore()
+
+        # Calculate features
+        result = metric.calculate(W)
+
+        # Should have fewer features due to ignored index
+        n_features = metric._get_effective_feature_count()
+        self.assertEqual(len(result), n_features)
+        self.assertLess(n_features, 3)  # Should be less than total possible types for undirected
+
+    def test_undirected_calc_change_score_with_ignored_indices(self):
+        """Test change score calculation with ignored indices."""
+        neuronal_types = ['A', 'B', 'A', 'B']
+        W = np.array([
+            [0, 1, 1, 0],
+            [1, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+
+        metric = NumberOfEdgesTypesUndirected(neuronal_types, indices_from_user=[1])
+        n = len(neuronal_types)
+        metric._n_nodes = n
+        metric.initialize_indices_to_ignore()
+
+        # Calculate change score for adding an edge
+        change_score = metric.calc_change_score(W, (0, 1))
+        n_features = metric._get_effective_feature_count()
+        self.assertEqual(len(change_score), n_features)
+        self.assertLess(n_features, 3)
 
 
 class TestNodeAttrSums(unittest.TestCase):
@@ -1520,9 +1608,27 @@ class TestNumberOfNodesPerType(unittest.TestCase):
         expected_change_score = np.array([-1, 1, 0])
         self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
 
-        calculated_change_score = metric.calc_change_score(V2[:, [1]], idx=0, new_category=1)
-        expected_change_score = np.array([-1, 1, 0])
-        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
+    def test_update_indices_to_ignore(self):
+        """Test updating indices to ignore for NumberOfNodesPerType."""
+        V = np.array([[1], [2], [0], [1]])  # 4 nodes, 3 categories
+
+        metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
+        metric._n_nodes = 4
+        metric.initialize_indices_to_ignore()
+
+        # Initially, should have all features
+        initial_count = metric._get_effective_feature_count()
+        self.assertEqual(initial_count, 2)  # 3 categories - 1
+
+        # Now ignore first category
+        metric.update_indices_to_ignore([0])
+        updated_count = metric._get_effective_feature_count()
+        self.assertEqual(updated_count, 1)  # Only 1 feature left
+        self.assertLess(updated_count, initial_count)
+
+        # Calculate and verify result has correct shape
+        result = metric.calculate(V)
+        self.assertEqual(len(result), updated_count)
 
 
 class TestMetricsCollection(unittest.TestCase):
@@ -2134,8 +2240,8 @@ class TestMetricsCollection(unittest.TestCase):
         self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
 
 
-class TestTotalReciprocityComprehensive(unittest.TestCase):
-    """Comprehensive tests for TotalReciprocity metric methods."""
+class TestTotalReciprocity(unittest.TestCase):
+    """Tests for TotalReciprocity metric methods."""
 
     def test_total_reciprocity_calculate(self):
         """Test direct calculation of total reciprocity."""
@@ -2267,22 +2373,35 @@ class TestTotalReciprocityComprehensive(unittest.TestCase):
             [0, 1, 1, 0]
         ])
 
-        # Create mask and output array
+        # MPLE regressors indicate whether each edge would be reciprocated if it existed
         n_edges = n * (n - 1)
-        mask = np.ones(n_edges, dtype=bool).reshape(-1, 1)
         Xs = np.zeros((n_edges, 1))
         feature_indices = np.array([0])
+        mask = np.ones(n_edges, dtype=bool).reshape(-1, 1)
 
         metric.calculate_mple_regressors(Xs, feature_indices, mask, W)
 
-        # MPLE regressors should indicate change in reciprocity for each potential edge
         self.assertEqual(Xs.shape, (n_edges, 1))
-        # Values should be in {-1, 0, 1}
-        self.assertTrue(np.all(np.isin(Xs, [-1, 0, 1])))
 
 
-class TestReciprocityMissingMethods(unittest.TestCase):
-    """Tests for missing Reciprocity metric methods."""
+        # MPLE regressors = 1 if the reverse edge exists (would be reciprocal), 0 otherwise
+        # Xs[i, 0] corresponds to the i-th edge in the edge list order
+
+        # e.g., Xs[0, 0] is for edge (0,1): its reverse (1,0) exists in W, so regressor = 1
+        self.assertEqual(Xs[0, 0], 1, "Edge (0,1): W[1,0]=1, reverse edge (1,0) exists")
+        self.assertEqual(Xs[1, 0], 0, "Edge (0,2): W[2,0]=0, reverse edge (2,0) doesn't exist")
+        self.assertEqual(Xs[3, 0], 1, "Edge (1,0): W[0,1]=1, reverse edge (0,1) exists")
+        self.assertEqual(Xs[7, 0], 1, "Edge (2,1): W[1,2]=1, reverse edge (1,2) exists")
+        self.assertEqual(Xs[8, 0], 1, "Edge (2,3): W[3,2]=1, reverse edge (3,2) exists")
+        self.assertEqual(Xs[11, 0], 1, "Edge (3,2): W[2,3]=1, reverse edge (2,3) exists")
+        self.assertEqual(Xs[5, 0], 1, "Edge (1,3): W[3,1]=1, reverse edge (3,1) exists")
+
+        # All values should be in {0, 1} for MPLE regressors
+        self.assertTrue(np.all(np.isin(Xs, [0, 1])))
+
+
+class TestReciprocity(unittest.TestCase):
+    """Tests for Reciprocity metric methods."""
 
     def test_reciprocity_calc_change_score(self):
         """Test change score calculation for Reciprocity."""
@@ -2360,8 +2479,33 @@ class TestReciprocityMissingMethods(unittest.TestCase):
 
         metric.calculate_mple_regressors(Xs, feature_indices, mask, W)
 
-        # MPLE regressors indicate how each directed edge affects unordered pair reciprocity
+        # MPLE regressors: Xs[i, j] = 1 if directed edge i would make unordered pair j reciprocal
         self.assertEqual(Xs.shape, (n_edges, n_features))
+
+        # Edge list order (directed): (0,1), (0,2), (1,0), (1,2), (2,0), (2,1)
+        # Feature list (unordered pairs): pair(0,1), pair(0,2), pair(1,2)
+        # Current edges in W: (0,1), (1,2), (2,0)
+
+        # Xs[0, :] for edge (0,1): reverse (1,0) doesn't exist, so pair(0,1) would NOT be reciprocal
+        # But pair(0,2) and pair(1,2) are unaffected
+        self.assertEqual(Xs[0, 0], 0, "Edge (0,1): pair(0,1) not reciprocal (W[1,0]=0)")
+        self.assertEqual(Xs[0, 1], 0, "Edge (0,1): doesn't affect pair(0,2)")
+        self.assertEqual(Xs[0, 2], 0, "Edge (0,1): doesn't affect pair(1,2)")
+
+        # Xs[1, :] for edge (0,2): reverse (2,0) exists, so pair(0,2) WOULD be reciprocal
+        self.assertEqual(Xs[1, 0], 0, "Edge (0,2): doesn't affect pair(0,1)")
+        self.assertEqual(Xs[1, 1], 1, "Edge (0,2): pair(0,2) would be reciprocal (W[2,0]=1)")
+        self.assertEqual(Xs[1, 2], 0, "Edge (0,2): doesn't affect pair(1,2)")
+
+        # Xs[2, :] for edge (1,0): reverse (0,1) exists, so pair(0,1) WOULD be reciprocal
+        self.assertEqual(Xs[2, 0], 1, "Edge (1,0): pair(0,1) would be reciprocal (W[0,1]=1)")
+        self.assertEqual(Xs[2, 1], 0, "Edge (1,0): doesn't affect pair(0,2)")
+        self.assertEqual(Xs[2, 2], 0, "Edge (1,0): doesn't affect pair(1,2)")
+
+        # Xs[5, :] for edge (2,1): reverse (1,2) exists, so pair(1,2) WOULD be reciprocal
+        self.assertEqual(Xs[5, 0], 0, "Edge (2,1): doesn't affect pair(0,1)")
+        self.assertEqual(Xs[5, 1], 0, "Edge (2,1): doesn't affect pair(0,2)")
+        self.assertEqual(Xs[5, 2], 1, "Edge (2,1): pair(1,2) would be reciprocal (W[1,2]=1)")
 
 
 class TestNumberOfTrianglesMPLE(unittest.TestCase):
@@ -2392,114 +2536,6 @@ class TestNumberOfTrianglesMPLE(unittest.TestCase):
         self.assertEqual(Xs.shape, (n_edges, 1))
         # Values should be non-negative integers (number of triangles affected)
         self.assertTrue(np.all(Xs >= -3))  # Can't remove more than 3 triangles with one edge
-
-
-class TestNumberOfNodesPerTypeMissingMethods(unittest.TestCase):
-    """Tests for missing NumberOfNodesPerType methods."""
-
-    def test_nodes_per_type_update_indices_to_ignore(self):
-        """Test updating indices to ignore for NumberOfNodesPerType."""
-        V = np.array([[1], [2], [0], [1]])  # 4 nodes, 3 categories
-
-        metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
-        metric._n_nodes = 4
-        metric.initialize_indices_to_ignore()
-
-        # Initially, should have all features
-        initial_count = metric._get_effective_feature_count()
-        self.assertEqual(initial_count, 2)  # 3 categories - 1
-
-        # Now ignore first category
-        metric.update_indices_to_ignore([0])
-        updated_count = metric._get_effective_feature_count()
-        self.assertEqual(updated_count, 1)  # Only 1 feature left
-        self.assertLess(updated_count, initial_count)
-
-        # Calculate and verify result has correct shape
-        result = metric.calculate(V)
-        self.assertEqual(len(result), updated_count)
-
-
-class TestNumberOfEdgesTypesExtended(unittest.TestCase):
-    """Extended tests for NumberOfEdgesTypes with ignored indices and bootstrap."""
-
-    def test_edges_types_directed_with_ignored_indices(self):
-        """Test NumberOfEdgesTypesDirected with ignored feature indices."""
-        neuronal_types = ['A', 'B', 'A', 'B']
-        W = np.array([
-            [0, 1, 1, 0],
-            [0, 0, 0, 1],
-            [1, 0, 0, 0],
-            [0, 1, 0, 0]
-        ])
-
-        metric = NumberOfEdgesTypesDirected(neuronal_types, indices_from_user=[0])
-        n = len(neuronal_types)
-        metric._n_nodes = n
-        metric.initialize_indices_to_ignore()
-
-        # Calculate features
-        result = metric.calculate(W)
-
-        # Should have fewer features due to ignored index
-        n_features = metric._get_effective_feature_count()
-        self.assertEqual(len(result), n_features)
-        self.assertLess(n_features, 4)  # Should be less than total possible types (2x2=4)
-
-    def test_edges_types_undirected_with_ignored_indices(self):
-        """Test NumberOfEdgesTypesUndirected with ignored indices."""
-        neuronal_types = ['A', 'B', 'A', 'B']
-        W = np.array([
-            [0, 1, 1, 0],
-            [1, 0, 0, 1],
-            [1, 0, 0, 0],
-            [0, 1, 0, 0]
-        ])
-
-        metric = NumberOfEdgesTypesUndirected(neuronal_types, indices_from_user=[1])
-        n = len(neuronal_types)
-        metric._n_nodes = n
-        metric.initialize_indices_to_ignore()
-
-        # Calculate features
-        result = metric.calculate(W)
-
-        # Should have fewer features due to ignored index
-        n_features = metric._get_effective_feature_count()
-        self.assertEqual(len(result), n_features)
-        self.assertLess(n_features, 3)  # Should be less than total possible types for undirected
-
-    def test_edges_types_with_calc_change_score(self):
-        """Test change score calculation with ignored indices."""
-        neuronal_types = ['A', 'B', 'A', 'B']
-        W = np.array([
-            [0, 1, 1, 0],
-            [0, 0, 0, 1],
-            [1, 0, 0, 0],
-            [0, 1, 0, 0]
-        ])
-
-        # Test directed with ignored indices
-        metric_directed = NumberOfEdgesTypesDirected(neuronal_types, indices_from_user=[0])
-        n = len(neuronal_types)
-        metric_directed._n_nodes = n
-        metric_directed.initialize_indices_to_ignore()
-
-        # Calculate change score for adding an edge
-        change_score = metric_directed.calc_change_score(W, (0, 1))
-        n_features = metric_directed._get_effective_feature_count()
-        self.assertEqual(len(change_score), n_features)
-        self.assertLess(n_features, 4)
-
-        # Test undirected with ignored indices
-        metric_undirected = NumberOfEdgesTypesUndirected(neuronal_types, indices_from_user=[1])
-        metric_undirected._n_nodes = n
-        metric_undirected.initialize_indices_to_ignore()
-
-        change_score = metric_undirected.calc_change_score(W, (0, 1))
-        n_features = metric_undirected._get_effective_feature_count()
-        self.assertEqual(len(change_score), n_features)
-        self.assertLess(n_features, 3)
 
 
 class TestEdgeCases(unittest.TestCase):
