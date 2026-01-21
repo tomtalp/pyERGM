@@ -2132,3 +2132,494 @@ class TestMetricsCollection(unittest.TestCase):
         bootstrapped_features = metrics_collection.bootstrap_observed_features(W, 1)
         expected_bootstrapped_features = np.array([6]).reshape(1, 1)
         self.assertTrue(np.all(bootstrapped_features == expected_bootstrapped_features))
+
+
+class TestTotalReciprocityComprehensive(unittest.TestCase):
+    """Comprehensive tests for TotalReciprocity metric methods."""
+
+    def test_total_reciprocity_calculate(self):
+        """Test direct calculation of total reciprocity."""
+        metric = TotalReciprocity()
+
+        # Test case 1: No reciprocal edges
+        W1 = np.array([
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 0]
+        ])
+        result = metric.calculate(W1)
+        self.assertEqual(result, 0)
+
+        # Test case 2: One reciprocal pair
+        W2 = np.array([
+            [0, 1, 0],
+            [1, 0, 1],
+            [0, 0, 0]
+        ])
+        result = metric.calculate(W2)
+        self.assertEqual(result, 1)
+
+        # Test case 3: All edges reciprocal
+        W3 = np.array([
+            [0, 1, 1],
+            [1, 0, 1],
+            [1, 1, 0]
+        ])
+        result = metric.calculate(W3)
+        self.assertEqual(result, 3)
+
+    def test_total_reciprocity_calc_change_score(self):
+        """Test change score when toggling edges."""
+        metric = TotalReciprocity()
+
+        # Test case 1: Adding an edge that completes a reciprocal pair
+        W1 = np.array([
+            [0, 1, 0],
+            [0, 0, 0],
+            [0, 0, 0]
+        ])
+        change_score = metric.calc_change_score(W1, (1, 0))
+        self.assertEqual(change_score, 1)  # Creates reciprocal pair
+
+        # Test case 2: Removing an edge from a reciprocal pair
+        W2 = np.array([
+            [0, 1, 0],
+            [1, 0, 0],
+            [0, 0, 0]
+        ])
+        change_score = metric.calc_change_score(W2, (0, 1))
+        self.assertEqual(change_score, -1)  # Destroys reciprocal pair
+
+        # Test case 3: Adding an edge that doesn't complete a pair
+        W3 = np.array([
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0]
+        ])
+        change_score = metric.calc_change_score(W3, (0, 1))
+        self.assertEqual(change_score, 0)  # No reciprocal exists
+
+    def test_total_reciprocity_calculate_for_sample(self):
+        """Test batch calculation on sample."""
+        metric = TotalReciprocity()
+
+        W1 = np.array([
+            [0, 1, 0],
+            [1, 0, 1],
+            [0, 1, 0]
+        ])
+        W2 = np.array([
+            [0, 1, 1],
+            [1, 0, 1],
+            [1, 1, 0]
+        ])
+        W3 = np.array([
+            [0, 0, 0],
+            [0, 0, 0],
+            [0, 0, 0]
+        ])
+
+        sample = np.stack([W1, W2, W3], axis=-1)
+        result = metric.calculate_for_sample(sample)
+        expected_result = np.array([2, 3, 0])
+        self.assertTrue(np.array_equal(result, expected_result))
+
+    def test_total_reciprocity_calculate_bootstrapped_features(self):
+        """Test bootstrap feature generation."""
+        metric = TotalReciprocity()
+
+        # Create a network with known reciprocity
+        W = np.array([
+            [0, 1, 1, 0],
+            [1, 0, 0, 1],
+            [0, 0, 0, 1],
+            [1, 0, 1, 0]
+        ])
+
+        # Bootstrap with specific node splits
+        first_half_indices = np.array([0, 1])
+        second_half_indices = np.array([2, 3])
+
+        # Create subnetwork samples
+        first_half_W = W[np.ix_(first_half_indices, second_half_indices)]
+        second_half_W = W[np.ix_(second_half_indices, first_half_indices)]
+
+        # Stack samples
+        first_halves = first_half_W.reshape(2, 2, 1)
+        second_halves = second_half_W.reshape(2, 2, 1)
+
+        result = metric.calculate_bootstrapped_features(first_halves, second_halves, first_half_indices, second_half_indices)
+
+        # The result should be a scalar value (total reciprocity is 1 feature)
+        self.assertEqual(result.shape[0], 1)
+        self.assertIsInstance(result[0], (int, float, np.integer, np.floating))
+
+    def test_total_reciprocity_calculate_mple_regressors(self):
+        """Test MPLE regressor generation."""
+        n = 4
+        metric = TotalReciprocity()
+        metric._n_nodes = n
+
+        W = np.array([
+            [0, 1, 0, 1],
+            [1, 0, 1, 0],
+            [0, 0, 0, 1],
+            [0, 1, 1, 0]
+        ])
+
+        # Create mask and output array
+        n_edges = n * (n - 1)
+        mask = np.ones(n_edges, dtype=bool).reshape(-1, 1)
+        Xs = np.zeros((n_edges, 1))
+        feature_indices = np.array([0])
+
+        metric.calculate_mple_regressors(Xs, feature_indices, mask, W)
+
+        # MPLE regressors should indicate change in reciprocity for each potential edge
+        self.assertEqual(Xs.shape, (n_edges, 1))
+        # Values should be in {-1, 0, 1}
+        self.assertTrue(np.all(np.isin(Xs, [-1, 0, 1])))
+
+
+class TestReciprocityMissingMethods(unittest.TestCase):
+    """Tests for missing Reciprocity metric methods."""
+
+    def test_reciprocity_calc_change_score(self):
+        """Test change score calculation for Reciprocity."""
+        n = 4
+        metric = Reciprocity()
+        metric._n_nodes = n
+        metric.initialize_indices_to_ignore()
+
+        W = np.array([
+            [0, 1, 0, 1],
+            [0, 0, 1, 0],
+            [0, 0, 0, 1],
+            [0, 1, 0, 0]
+        ])
+
+        # Calculate change score for adding edge (1, 0) which would create reciprocity with (0, 1)
+        change_score = metric.calc_change_score(W, (1, 0))
+
+        # The change score should indicate which pairs become reciprocal
+        # Reciprocity uses n choose 2 features (unordered pairs)
+        self.assertEqual(change_score.shape[0], n * (n - 1) // 2)
+        # The pair (0,1) should become reciprocal
+        self.assertEqual(change_score[0], 1)  # Pair (0,1) becomes reciprocal
+
+    def test_reciprocity_calculate_for_sample(self):
+        """Test batch calculation for Reciprocity."""
+        n = 3
+        metric = Reciprocity()
+        metric._n_nodes = n
+        metric.initialize_indices_to_ignore()
+
+        W1 = np.array([
+            [0, 1, 0],
+            [1, 0, 1],
+            [0, 0, 0]
+        ])
+        W2 = np.array([
+            [0, 1, 1],
+            [1, 0, 1],
+            [1, 1, 0]
+        ])
+
+        sample = np.stack([W1, W2], axis=-1)
+        result = metric.calculate_for_sample(sample)
+
+        # Should return reciprocity vector for each network (n choose 2 features)
+        self.assertEqual(result.shape, (n * (n - 1) // 2, 2))
+
+        # W1 has one reciprocal pair: (0,1)
+        expected_W1 = np.array([1, 0, 0])  # pairs: (0,1), (0,2), (1,2)
+        # W2 has all pairs reciprocal
+        expected_W2 = np.array([1, 1, 1])
+
+        self.assertTrue(np.array_equal(result[:, 0], expected_W1))
+        self.assertTrue(np.array_equal(result[:, 1], expected_W2))
+
+    def test_reciprocity_calculate_mple_regressors(self):
+        """Test MPLE regressor calculation for Reciprocity."""
+        n = 3
+        metric = Reciprocity()
+        metric._n_nodes = n
+        metric.initialize_indices_to_ignore()
+
+        W = np.array([
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 0]
+        ])
+
+        n_edges = n * (n - 1)
+        n_features = n * (n - 1) // 2  # Reciprocity has n choose 2 features
+        mask = np.ones(n_edges, dtype=bool).reshape(-1, 1)
+        Xs = np.zeros((n_edges, n_features))
+        feature_indices = np.arange(n_features)
+
+        metric.calculate_mple_regressors(Xs, feature_indices, mask, W)
+
+        # MPLE regressors indicate how each directed edge affects unordered pair reciprocity
+        self.assertEqual(Xs.shape, (n_edges, n_features))
+
+
+class TestNumberOfTrianglesMPLE(unittest.TestCase):
+    """Test MPLE regressors for NumberOfTriangles."""
+
+    def test_triangles_calculate_mple_regressors(self):
+        """Test MPLE regressor computation for triangles."""
+        n = 4
+        metric = NumberOfTriangles()
+        metric._n_nodes = n
+
+        W = np.array([
+            [0, 1, 1, 0],
+            [1, 0, 1, 0],
+            [1, 1, 0, 1],
+            [0, 0, 1, 0]
+        ])
+
+        # Number of potential edges in undirected graph
+        n_edges = n * (n - 1) // 2
+        mask = np.ones(n_edges, dtype=bool).reshape(-1, 1)
+        Xs = np.zeros((n_edges, 1))
+        feature_indices = np.array([0])
+
+        metric.calculate_mple_regressors(Xs, feature_indices, mask, W)
+
+        # Each regressor value indicates how many triangles would be added/removed
+        self.assertEqual(Xs.shape, (n_edges, 1))
+        # Values should be non-negative integers (number of triangles affected)
+        self.assertTrue(np.all(Xs >= -3))  # Can't remove more than 3 triangles with one edge
+
+
+class TestNumberOfNodesPerTypeMissingMethods(unittest.TestCase):
+    """Tests for missing NumberOfNodesPerType methods."""
+
+    def test_nodes_per_type_update_indices_to_ignore(self):
+        """Test updating indices to ignore for NumberOfNodesPerType."""
+        V = np.array([[1], [2], [0], [1]])  # 4 nodes, 3 categories
+
+        metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
+        metric._n_nodes = 4
+        metric.initialize_indices_to_ignore()
+
+        # Initially, should have all features
+        initial_count = metric._get_effective_feature_count()
+        self.assertEqual(initial_count, 2)  # 3 categories - 1
+
+        # Now ignore first category
+        metric.update_indices_to_ignore([0])
+        updated_count = metric._get_effective_feature_count()
+        self.assertEqual(updated_count, 1)  # Only 1 feature left
+        self.assertLess(updated_count, initial_count)
+
+        # Calculate and verify result has correct shape
+        result = metric.calculate(V)
+        self.assertEqual(len(result), updated_count)
+
+
+class TestNumberOfEdgesTypesExtended(unittest.TestCase):
+    """Extended tests for NumberOfEdgesTypes with ignored indices and bootstrap."""
+
+    def test_edges_types_directed_with_ignored_indices(self):
+        """Test NumberOfEdgesTypesDirected with ignored feature indices."""
+        neuronal_types = ['A', 'B', 'A', 'B']
+        W = np.array([
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+
+        metric = NumberOfEdgesTypesDirected(neuronal_types, indices_from_user=[0])
+        n = len(neuronal_types)
+        metric._n_nodes = n
+        metric.initialize_indices_to_ignore()
+
+        # Calculate features
+        result = metric.calculate(W)
+
+        # Should have fewer features due to ignored index
+        n_features = metric._get_effective_feature_count()
+        self.assertEqual(len(result), n_features)
+        self.assertLess(n_features, 4)  # Should be less than total possible types (2x2=4)
+
+    def test_edges_types_undirected_with_ignored_indices(self):
+        """Test NumberOfEdgesTypesUndirected with ignored indices."""
+        neuronal_types = ['A', 'B', 'A', 'B']
+        W = np.array([
+            [0, 1, 1, 0],
+            [1, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+
+        metric = NumberOfEdgesTypesUndirected(neuronal_types, indices_from_user=[1])
+        n = len(neuronal_types)
+        metric._n_nodes = n
+        metric.initialize_indices_to_ignore()
+
+        # Calculate features
+        result = metric.calculate(W)
+
+        # Should have fewer features due to ignored index
+        n_features = metric._get_effective_feature_count()
+        self.assertEqual(len(result), n_features)
+        self.assertLess(n_features, 3)  # Should be less than total possible types for undirected
+
+    def test_edges_types_with_calc_change_score(self):
+        """Test change score calculation with ignored indices."""
+        neuronal_types = ['A', 'B', 'A', 'B']
+        W = np.array([
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 0, 0]
+        ])
+
+        # Test directed with ignored indices
+        metric_directed = NumberOfEdgesTypesDirected(neuronal_types, indices_from_user=[0])
+        n = len(neuronal_types)
+        metric_directed._n_nodes = n
+        metric_directed.initialize_indices_to_ignore()
+
+        # Calculate change score for adding an edge
+        change_score = metric_directed.calc_change_score(W, (0, 1))
+        n_features = metric_directed._get_effective_feature_count()
+        self.assertEqual(len(change_score), n_features)
+        self.assertLess(n_features, 4)
+
+        # Test undirected with ignored indices
+        metric_undirected = NumberOfEdgesTypesUndirected(neuronal_types, indices_from_user=[1])
+        metric_undirected._n_nodes = n
+        metric_undirected.initialize_indices_to_ignore()
+
+        change_score = metric_undirected.calc_change_score(W, (0, 1))
+        n_features = metric_undirected._get_effective_feature_count()
+        self.assertEqual(len(change_score), n_features)
+        self.assertLess(n_features, 3)
+
+
+class TestEdgeCases(unittest.TestCase):
+    """Test metrics on edge case networks (empty, full, single node)."""
+
+    def test_empty_network_directed(self):
+        """Test all metrics on empty directed network."""
+        n = 5
+        W = np.zeros((n, n))
+
+        # Test NumberOfEdgesDirected
+        metric = NumberOfEdgesDirected()
+        result = metric.calculate(W)
+        self.assertEqual(result, 0)
+
+        # Test TotalReciprocity
+        metric = TotalReciprocity()
+        result = metric.calculate(W)
+        self.assertEqual(result, 0)
+
+        # Test InDegree
+        metric = InDegree()
+        result = metric.calculate(W)
+        self.assertTrue(np.all(result == 0))
+
+        # Test OutDegree
+        metric = OutDegree()
+        result = metric.calculate(W)
+        self.assertTrue(np.all(result == 0))
+
+    def test_empty_network_undirected(self):
+        """Test metrics on empty undirected network."""
+        n = 5
+        W = np.zeros((n, n))
+
+        # Test NumberOfEdgesUndirected
+        metric = NumberOfEdgesUndirected()
+        result = metric.calculate(W)
+        self.assertEqual(result, 0)
+
+        # Test NumberOfTriangles
+        metric = NumberOfTriangles()
+        result = metric.calculate(W)
+        self.assertEqual(result, 0)
+
+        # Test UndirectedDegree
+        metric = UndirectedDegree()
+        result = metric.calculate(W)
+        self.assertTrue(np.all(result == 0))
+
+    def test_fully_connected_directed(self):
+        """Test metrics on fully connected directed network."""
+        n = 4
+        W = np.ones((n, n))
+        np.fill_diagonal(W, 0)  # No self-loops
+
+        # Test NumberOfEdgesDirected
+        metric = NumberOfEdgesDirected()
+        result = metric.calculate(W)
+        self.assertEqual(result, n * (n - 1))
+
+        # Test TotalReciprocity
+        metric = TotalReciprocity()
+        result = metric.calculate(W)
+        self.assertEqual(result, n * (n - 1) / 2)
+
+        # Test InDegree
+        metric = InDegree()
+        result = metric.calculate(W)
+        self.assertTrue(np.all(result == n - 1))
+
+        # Test OutDegree
+        metric = OutDegree()
+        result = metric.calculate(W)
+        self.assertTrue(np.all(result == n - 1))
+
+    def test_fully_connected_undirected(self):
+        """Test metrics on fully connected undirected network."""
+        n = 4
+        W = np.ones((n, n))
+        np.fill_diagonal(W, 0)
+
+        # Test NumberOfEdgesUndirected
+        metric = NumberOfEdgesUndirected()
+        result = metric.calculate(W)
+        self.assertEqual(result, n * (n - 1) // 2)
+
+        # Test NumberOfTriangles - complete graph of n nodes has C(n,3) triangles
+        metric = NumberOfTriangles()
+        result = metric.calculate(W)
+        expected_triangles = n * (n - 1) * (n - 2) // 6
+        self.assertEqual(result, expected_triangles)
+
+        # Test UndirectedDegree
+        metric = UndirectedDegree()
+        result = metric.calculate(W)
+        self.assertTrue(np.all(result == n - 1))
+
+    def test_single_node_network(self):
+        """Test metrics on single node network."""
+        n = 1
+        W = np.zeros((n, n))
+
+        # Test NumberOfEdgesDirected
+        metric = NumberOfEdgesDirected()
+        result = metric.calculate(W)
+        self.assertEqual(result, 0)
+
+        # Test TotalReciprocity
+        metric = TotalReciprocity()
+        result = metric.calculate(W)
+        self.assertEqual(result, 0)
+
+        # Test NumberOfEdgesUndirected
+        metric = NumberOfEdgesUndirected()
+        result = metric.calculate(W)
+        self.assertEqual(result, 0)
+
+        # Test degree metrics
+        metric = InDegree()
+        result = metric.calculate(W)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0], 0)
