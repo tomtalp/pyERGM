@@ -20,7 +20,6 @@ class ERGM():
                  initial_normalization_factor=None,
                  seed_MCMC_proba=0.25,
                  verbose=True,
-                 use_sparse_matrix=False,
                  fix_collinearity=True,
                  collinearity_fixer_sample_size=1000,
                  is_distributed_optimization=False,
@@ -53,10 +52,6 @@ class ERGM():
         verbose : bool
             Optional. Whether to print progress information. *Defaults to True*
 
-        use_sparse_matrix : bool
-            Optional. Whether to use sparse matrices for the adjacency matrix. 
-            Sparse matrices are implemented via PyTorch's Sparse Tensor's, which are still in beta.  *Defaults to False*
-        
         fix_collinearity : bool
             Optional. Whether to fix collinearity in the metrics. *Defaults to True*
 
@@ -94,7 +89,6 @@ class ERGM():
                 )
 
         self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
-                                                     use_sparse_matrix=use_sparse_matrix,
                                                      fix_collinearity=fix_collinearity and (initial_thetas is None),
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size,
                                                      is_collinearity_distributed=self._is_distributed_optimization,

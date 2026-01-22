@@ -33,7 +33,6 @@ class pyERGM.ERGM(n_nodes, metrics_collection, is_directed, **kwargs)
 * **initial_normalization_factor** (*float*) - Optional. The initial value of the normalization factor. If not provided, it is randomly initialized.
 * **seed_MCMC_proba** (*float*) - Optional. The probability of a connection in the seed graph for MCMC sampling, in case no seed graph is provided. *Defaults to 0.25*
 * **sample_size** (*int*) - Optional. The number of graphs to sample via MCMC. If number of samples is odd, it is increased by 1. This is because downstream algorithms assume the sample size is even (e.g. the Covariance matrix estimation). *Defaults to 1000*
-* **use_sparse_matrix** (*bool*) - Optional. Whether to use sparse matrices for the adjacency matrix.  Sparse matrices are implemented via PyTorch's Sparse Tensor's, which are still in beta.  *Defaults to False*
 * **fix_collinearity** (*bool*) - Optional. Whether to fix collinearity in the metrics. *Defaults to True*
 * **collinearity_fixer_sample_size** (*int*) - Optional. The number of graphs to sample for fixing collinearity. *Defaults to 1000*
 

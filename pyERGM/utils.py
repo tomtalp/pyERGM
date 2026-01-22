@@ -6,7 +6,6 @@ from numpy import typing as npt
 import networkx as nx
 from numba import njit
 from scipy.spatial.distance import mahalanobis
-import torch
 import random
 
 import pickle
@@ -28,7 +27,7 @@ def set_seed(seed):
     """
     Set random seed for reproducibility across all libraries.
 
-    Sets seeds for numpy, torch, Python's random module, and numba-jitted functions.
+    Sets seeds for numpy, Python's random module, and numba-jitted functions.
 
     Parameters
     ----------
@@ -36,7 +35,6 @@ def set_seed(seed):
         Random seed value.
     """
     np.random.seed(seed)
-    torch.manual_seed(seed)
     random.seed(seed)
     _numba_seed(seed)
 
@@ -328,40 +326,6 @@ def get_custom_distribution_random_edges_to_flip(num_pairs, edge_probs):
     flat_no_diag_indices = np.random.choice(edge_probs.size, p=edge_probs, size=num_pairs)
     # TODO: force the following to be pre-complied with numba, and the current as well?
     return convert_flat_no_diag_idx_to_i_j(flat_no_diag_indices, num_nodes)
-
-
-def np_tensor_to_sparse_tensor(np_tensor: np.ndarray) -> torch.Tensor:
-    """
-    Receives a numpy tensor and converts it to a sparse Tensor, using Torch.
-    TODO - Support different types of Sparse Matrix data structures? More efficient conversion?
-    """
-    return torch.from_numpy(np_tensor).to_sparse()
-
-
-def transpose_sparse_sample_matrices(sparse_tensor: torch.Tensor) -> torch.Tensor:
-    """
-    Transpose a sparse tensor that represents k matrices of dimension n x n.
-    The transpose operation occurs along the dimension of sample (i.e. each matrix is transposed separately)
-
-    Parameters
-    ----------
-    sparse_tensor: torch.Tensor
-        A sparse tensor of dimension (n, n, k) representing k matrices of dim (n,n)
-
-    Returns
-    -------
-    transposed_tensor: torch.Tensor
-        The same tensor but matrices are transposed
-
-    """
-    n = sparse_tensor.shape[0]
-    k = sparse_tensor.shape[2]
-
-    indices = sparse_tensor.indices().type(torch.int64)
-    transposed_indices = torch.stack([indices[1], indices[0], indices[2]])
-    values = sparse_tensor.values()
-
-    return torch.sparse_coo_tensor(transposed_indices, values, (n, n, k))
 
 
 def approximate_auto_correlation_function(features_of_net_samples: np.ndarray) -> np.ndarray:
