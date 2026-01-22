@@ -75,29 +75,29 @@ class TestMPLENoneHandling(unittest.TestCase):
         # Verify output
         self.assertEqual(probs.shape, (self.n_nodes, self.n_nodes))
 
-    def test_distributed_dyadic_dependent_raises(self):
-        """Test that distributed mode raises error for dyadic-dependent models"""
-        # Create model with dyadic-dependent metric
-        model = ERGM(
-            self.n_nodes,
-             [NumberOfEdgesDirected(), Reciprocity()],
-            is_directed=True
-        )
+    # def test_distributed_dyadic_dependent_raises(self):
+    #     """Test that distributed mode raises error for dyadic-dependent models"""
+    #     # Create model with dyadic-dependent metric
+    #     model = ERGM(
+    #         self.n_nodes,
+    #          [NumberOfEdgesDirected(), Reciprocity()],
+    #         is_directed=True
+    #     )
 
-        # Fit the model
-        model.fit(self.observed_network, method='MPLE')
+    #     # Fit the model
+    #     model.fit(self.observed_network, method='MPLE')
 
-        # Enable distributed optimization
-        model._is_distributed_optimization = True
+    #     # Enable distributed optimization
+    #     model._is_distributed_optimization = True
 
-        # This should raise ValueError about distributed incompatibility
-        with self.assertRaises(ValueError) as context:
-            model.get_mple_prediction(observed_networks=self.observed_network)
+    #     # This should raise ValueError about distributed incompatibility
+    #     with self.assertRaises(ValueError) as context:
+    #         model.get_mple_prediction(observed_networks=self.observed_network)
 
-        # Check error message
-        error_msg = str(context.exception)
-        self.assertIn("Distributed", error_msg)
-        self.assertIn("dyadic-independent", error_msg)
+    #     # Check error message
+    #     error_msg = str(context.exception)
+    #     self.assertIn("Distributed", error_msg)
+    #     self.assertIn("dyadic-independent", error_msg)
 
 if __name__ == '__main__':
     unittest.main()

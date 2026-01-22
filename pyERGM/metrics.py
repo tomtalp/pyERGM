@@ -301,7 +301,7 @@ class NumberOfEdges(Metric):
 
     def calculate_for_sample(
             self,
-            networks_sample: np.ndarray | torch.Tensor,
+            networks_sample: np.ndarray,
             mask: npt.NDArray[bool] | None = None
     ) -> np.ndarray:
         """
@@ -787,16 +787,9 @@ class TotalReciprocity(Metric):
             return 0
 
     @staticmethod
-    # @njit # Not supporting neither np.einsum nor sparse torch
-    def calculate_for_sample(networks_sample: np.ndarray | torch.Tensor):
-        if isinstance(networks_sample, torch.Tensor) and networks_sample.is_sparse:
-            transposed_sparse_tensor = transpose_sparse_sample_matrices(networks_sample)
-            return torch.sum(networks_sample * transposed_sparse_tensor, axis=(0, 1)) / 2
-        elif isinstance(networks_sample, np.ndarray):
-            return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
-        else:
-            raise ValueError(f"Unsupported type of sample: {type(networks_sample)}! Supported types are np.ndarray and "
-                             f"torch.Tensor with is_sparse=True")
+    # @njit # Not supporting np.einsum
+    def calculate_for_sample(networks_sample: np.ndarray):
+        return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
 
     def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
                                         second_halves_to_use: np.ndarray,
@@ -1433,7 +1426,7 @@ class NumberOfNodesPerType(Metric):
         changes[new_category] = 1
         return self._handle_indices_to_ignore(changes[:-1])  # last category is redundant
 
-    def calculate_for_sample(self, networks_sample: np.ndarray | torch.Tensor):
+    def calculate_for_sample(self, networks_sample: np.ndarray):
         """
         We use a trick here to make the bincount operation vectorized: we add each column of the sample
         (namely, features of a different network) a distinct offset, then flatten the sample. Now, we can
@@ -1472,8 +1465,6 @@ class MetricsCollection:
         Number of nodes in the network.
     fix_collinearity : bool, optional
         If True, automatically detect and remove collinear features. Default is True.
-    use_sparse_matrix : bool, optional
-        If True, use sparse matrix representations for efficiency. Default is False.
     collinearity_fixer_sample_size : int, optional
         Number of random networks to sample for collinearity detection. Default is 1000.
     is_collinearity_distributed : bool, optional
@@ -1491,7 +1482,6 @@ class MetricsCollection:
                  is_directed: bool,
                  n_nodes: int,
                  fix_collinearity=True,
-                 use_sparse_matrix=False,
                  collinearity_fixer_sample_size=1000,
                  is_collinearity_distributed=False,
                  # TODO: For tests only, find a better solution
@@ -1538,7 +1528,6 @@ class MetricsCollection:
         self.node_features_n_categories = {m.metric_node_feature: m.n_node_categories for m in self.metrics if
                                            m._metric_type == 'node'}
 
-        self.use_sparse_matrix = use_sparse_matrix
         self.requires_graph = any([x.requires_graph for x in self.metrics])
 
         # Returns the number of features that are being calculated. Since a single metric might return more than one
@@ -1865,24 +1854,12 @@ class MetricsCollection:
             networks_as_graphs = [connectivity_matrix_to_G(W[:self.n_nodes, :self.n_nodes], self.is_directed) for W in
                                   networks_sample]
 
-        if self.use_sparse_matrix:
-            networks_as_sparse_tensor = np_tensor_to_sparse_tensor(networks_sample)
-
         feature_idx = 0
         for metric in self.metrics:
             n_features_from_metric = metric._get_effective_feature_count()
 
             if metric.requires_graph:
                 networks = networks_as_graphs
-
-            elif self.use_sparse_matrix:
-                if metric._metric_type in ['binary_edge', 'non_binary_edge']:
-                    networks = networks_as_sparse_tensor[:self.n_nodes, :self.n_nodes]
-                elif metric._metric_type == 'node':
-                    feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
-                                                                          list(np.arange(self.n_node_features)))
-                    feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
-                    networks = networks_as_sparse_tensor[:, feature_indices_to_pass]
             else:
                 if metric._metric_type in ['binary_edge', 'non_binary_edge']:
                     networks = networks_sample[:self.n_nodes, :self.n_nodes]
@@ -1896,11 +1873,6 @@ class MetricsCollection:
             if self.mask is not None:
                 calc_for_sample_kwargs |= {'mask': self.mask}
             features = metric.calculate_for_sample(**calc_for_sample_kwargs)
-
-            if isinstance(features, torch.Tensor):
-                if features.is_sparse:
-                    features = features.to_dense()
-                features = features.numpy()
 
             features_of_net_samples[feature_idx:feature_idx + n_features_from_metric] = features
             feature_idx += n_features_from_metric
@@ -2153,10 +2125,6 @@ class MetricsCollection:
             first_halves_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in first_halves]
             second_halves_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in second_halves]
 
-        if self.use_sparse_matrix:
-            first_halves_as_sparse_tensor = np_tensor_to_sparse_tensor(first_halves)
-            second_halves_as_sparse_tensor = np_tensor_to_sparse_tensor(second_halves)
-
         feature_idx = 0
         for metric in self.metrics:
             n_features_from_metric = metric._get_effective_feature_count()
@@ -2164,9 +2132,6 @@ class MetricsCollection:
             if metric.requires_graph:
                 first_halves_to_use = first_halves_as_graphs
                 second_halves_to_use = second_halves_as_graphs
-            elif self.use_sparse_matrix:
-                first_halves_to_use = first_halves_as_sparse_tensor
-                second_halves_to_use = second_halves_as_sparse_tensor
             else:
                 first_halves_to_use = first_halves
                 second_halves_to_use = second_halves
@@ -2174,11 +2139,6 @@ class MetricsCollection:
             cur_metric_bootstrapped_features = metric.calculate_bootstrapped_features(
                 first_halves_to_use, second_halves_to_use,
                 first_halves_indices, second_halves_indices)
-
-            if isinstance(cur_metric_bootstrapped_features, torch.Tensor):
-                if cur_metric_bootstrapped_features.is_sparse:
-                    cur_metric_bootstrapped_features = cur_metric_bootstrapped_features.to_dense()
-                cur_metric_bootstrapped_features = cur_metric_bootstrapped_features.numpy()
 
             bootstrapped_features[feature_idx:feature_idx + n_features_from_metric] = cur_metric_bootstrapped_features
             feature_idx += n_features_from_metric
