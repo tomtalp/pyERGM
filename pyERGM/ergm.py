@@ -9,6 +9,7 @@ from scipy.optimize import minimize, OptimizeResult
 from pyERGM.logging_config import logger
 from pyERGM.sampling import NaiveMetropolisHastings
 from pyERGM.mple_optimization import *
+from pyERGM.utils import generate_erdos_renyi_matrix
 
 
 class ERGM():
@@ -241,8 +242,9 @@ class ERGM():
         """
         if sampling_method == "metropolis_hastings":
             if seed_network is None:
-                G = nx.erdos_renyi_graph(self._n_nodes, self._seed_MCMC_proba, directed=self._is_directed)
-                seed_connectivity_matrix = nx.to_numpy_array(G)
+                seed_connectivity_matrix = generate_erdos_renyi_matrix(
+                    self._n_nodes, self._seed_MCMC_proba, self._is_directed
+                )
                 seed_neuron_features = np.zeros((self._n_nodes, self.n_node_features))
                 for feature_name, feature_indices in self.node_feature_names.items():
                     for feature_index in feature_indices:

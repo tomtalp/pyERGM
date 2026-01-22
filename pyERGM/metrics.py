@@ -24,16 +24,12 @@ class Metric(ABC):
 
     Parameters
     ----------
-    requires_graph : bool, optional
-        If True, the metric requires a NetworkX graph object as input.
-        If False, the metric can work directly with adjacency matrices. Default is False.
     metric_type : str, optional
         Type of metric: 'node', 'binary_edge', or 'non_binary_edge'. Default is 'binary_edge'.
     metric_node_feature : str, optional
         Name of the node feature this metric operates on. Only relevant if metric_type='node'.
     """
-    def __init__(self, requires_graph=False, metric_type='binary_edge', metric_node_feature=None):
-        self.requires_graph = requires_graph
+    def __init__(self, metric_type='binary_edge', metric_node_feature=None):
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
         self._is_directed = None
@@ -72,7 +68,7 @@ class Metric(ABC):
         return res[~self._indices_to_ignore]
 
     @abstractmethod
-    def calculate(self, input: np.ndarray | nx.Graph):
+    def calculate(self, input: np.ndarray):
         pass
 
     def _get_effective_feature_count(self):
@@ -100,7 +96,7 @@ class Metric(ABC):
         """
         self._indices_to_ignore[indices_to_ignore] = True
 
-    def calc_change_score(self, current_network: np.ndarray | nx.Graph, indices: tuple):
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         """
         The default naive way to calculate the change score (namely, the difference in statistics) of a pair of
         networks.
@@ -112,31 +108,24 @@ class Metric(ABC):
         statistic of proposed_network minus statistic of current_network.
         """
         i, j = indices
-        if self.requires_graph:
-            proposed_network = current_network.copy()
-            if proposed_network.has_edge(i, j):
-                proposed_network.remove_edge(i, j)
-            else:
-                proposed_network.add_edge(i, j)
-        else:
-            proposed_network = current_network.copy()
-            proposed_network[i, j] = 1 - proposed_network[i, j]
+        proposed_network = current_network.copy()
+        proposed_network[i, j] = 1 - proposed_network[i, j]
 
-            if not self._is_directed:
-                proposed_network[j, i] = 1 - proposed_network[j, i]
+        if not self._is_directed:
+            proposed_network[j, i] = 1 - proposed_network[j, i]
 
         proposed_network_stat = self.calculate(proposed_network)
         current_network_stat = self.calculate(current_network)
         return proposed_network_stat - current_network_stat
 
-    def calculate_for_sample(self, networks_sample: np.ndarray | Collection[nx.Graph]):
+    def calculate_for_sample(self, networks_sample: np.ndarray):
         """
         Calculate metric statistics for a sample of networks.
 
         Parameters
         ----------
-        networks_sample : np.ndarray or Collection[nx.Graph]
-            A collection of networks. If array, shape is (n, n, sample_size).
+        networks_sample : np.ndarray
+            A collection of networks with shape (n, n, sample_size).
 
         Returns
         -------
@@ -147,7 +136,7 @@ class Metric(ABC):
 
         result = np.zeros((self._get_effective_feature_count(), num_of_samples))
         for i in range(num_of_samples):
-            network = networks_sample[i] if self.requires_graph else networks_sample[:, :, i]
+            network = networks_sample[:, :, i]
             result[:, i] = self.calculate(network)
         return result
 
@@ -156,7 +145,7 @@ class Metric(ABC):
             Xs_out: np.ndarray,
             feature_col_indices: npt.NDArray[np.int64],
             edge_indices_mask: npt.NDArray[bool],
-            observed_network: np.ndarray | nx.Graph,
+            observed_network: np.ndarray,
     ) -> None:
         """
         Calculate the design matrix (regressors) for Maximum Pseudo-Likelihood Estimation.
@@ -172,8 +161,8 @@ class Metric(ABC):
             Column indices in Xs_out corresponding to this metric's features.
         edge_indices_mask : np.ndarray
             Boolean mask indicating which edges to include in the calculation.
-        observed_network : np.ndarray or nx.Graph
-            The observed network data.
+        observed_network : np.ndarray
+            The observed network adjacency matrix.
         """
         edge_idx_in_full_xs = 0
         edge_idx_in_masked_xs = 0
@@ -188,11 +177,7 @@ class Metric(ABC):
                         continue
                     indices = (i, j)
                     observed_edge_off = observed_network.copy()
-                    if self.requires_graph:
-                        if observed_edge_off.has_edge(i, j):
-                            observed_edge_off.remove_edge(i, j)
-                    else:
-                        observed_edge_off[i, j] = 0
+                    observed_edge_off[i, j] = 0
 
                     Xs_out[edge_idx_in_masked_xs, feature_col_indices] = self.calc_change_score(
                         observed_edge_off, indices
@@ -210,12 +195,8 @@ class Metric(ABC):
                     indices = (i, j)
 
                     observed_edge_off = observed_network.copy()
-                    if self.requires_graph:
-                        if observed_edge_off.has_edge(i, j):
-                            observed_edge_off.remove_edge(i, j)
-                    else:
-                        observed_edge_off[i, j] = 0
-                        observed_edge_off[j, i] = 0
+                    observed_edge_off[i, j] = 0
+                    observed_edge_off[j, i] = 0
 
                     Xs_out[edge_idx_in_masked_xs, feature_col_indices] = self.calc_change_score(
                         observed_edge_off, indices
@@ -277,7 +258,7 @@ class NumberOfEdges(Metric):
         raise NotImplementedError
 
     def __init__(self):
-        super().__init__(requires_graph=False)
+        super().__init__()
         self._is_dyadic_independent = True
         self.does_support_mask = True
 
@@ -408,7 +389,7 @@ class NumberOfTriangles(Metric):
         return "num_triangles"
 
     def __init__(self):
-        super().__init__(requires_graph=False)
+        super().__init__()
         self._is_directed = False
         self._is_dyadic_independent = False
 
@@ -467,7 +448,7 @@ class BaseDegreeVector(Metric, abc.ABC):
             summation_axis: SummationAxis,
             indices_from_user: Sequence[int] | None = None,
     ):
-        super().__init__(requires_graph=False)
+        super().__init__()
 
         self._indices_from_user = np.array(indices_from_user, dtype=int).copy() if indices_from_user is not None else None
         self._is_directed = is_directed
@@ -596,7 +577,7 @@ class InDegree(BaseDegreeVector):
             Xs_out: np.ndarray,
             feature_col_indices: npt.NDArray[np.int64],
             edge_indices_mask: npt.NDArray[bool],
-            observed_network: np.ndarray | nx.Graph,
+            observed_network: np.ndarray,
     ) -> None:
         num_neurons = num_edges_to_num_nodes(edge_indices_mask.size, is_directed=True)
         in_deg_xs = np.tile(np.eye(num_neurons), (num_neurons, 1))[~np.eye(num_neurons, dtype=bool).flatten()]
@@ -644,7 +625,7 @@ class OutDegree(BaseDegreeVector):
             Xs_out: np.ndarray,
             feature_col_indices: npt.NDArray[np.int64],
             edge_indices_mask: npt.NDArray[bool],
-            observed_network: np.ndarray | nx.Graph,
+            observed_network: np.ndarray,
     ) -> None:
         num_neurons = num_edges_to_num_nodes(edge_indices_mask.size, is_directed=True)
         out_deg_xs = np.repeat(np.eye(num_neurons), num_neurons-1, axis=0)
@@ -690,7 +671,7 @@ class UndirectedDegree(BaseDegreeVector):
             Xs_out: np.ndarray,
             feature_col_indices: npt.NDArray[np.int64],
             edge_indices_mask: npt.NDArray[bool],
-            observed_network: np.ndarray | nx.Graph,
+            observed_network: np.ndarray,
     ) -> None:
         num_node_pairs = edge_indices_mask.size
         num_nodes = num_edges_to_num_nodes(num_node_pairs, is_directed=False)
@@ -722,7 +703,7 @@ class Reciprocity(Metric):
         return "reciprocity"
 
     def __init__(self):
-        super().__init__(requires_graph=False)
+        super().__init__()
         self._is_directed = True
         self._is_dyadic_independent = False
 
@@ -767,7 +748,7 @@ class TotalReciprocity(Metric):
         return "total_reciprocity"
 
     def __init__(self):
-        super().__init__(requires_graph=False)
+        super().__init__()
         self._is_directed = True
         self._is_dyadic_independent = False
 
@@ -836,7 +817,7 @@ class ExWeightNumEdges(Metric):
 
     # TODO: Collection doesn't necessarily support __getitem__, find a typing hint of a sized Iterable that does.
     def __init__(self, exogenous_attr: Collection):
-        super().__init__(requires_graph=False)
+        super().__init__()
         self.exogenous_attr = exogenous_attr
         self.edge_weights = None
         self._calc_edge_weights()
@@ -1395,7 +1376,7 @@ class NumberOfNodesPerType(Metric):
         return "num_nodes_per_type"
 
     def __init__(self, metric_node_feature, n_node_categories, feature_dim=1):
-        super().__init__(requires_graph=False, metric_type='node', metric_node_feature=metric_node_feature)
+        super().__init__(metric_type='node', metric_node_feature=metric_node_feature)
         self._is_dyadic_independent = True
         self.n_node_categories = n_node_categories
         self.feature_dim = feature_dim
@@ -1528,8 +1509,6 @@ class MetricsCollection:
         self.node_features_n_categories = {m.metric_node_feature: m.n_node_categories for m in self.metrics if
                                            m._metric_type == 'node'}
 
-        self.requires_graph = any([x.requires_graph for x in self.metrics])
-
         # Returns the number of features that are being calculated. Since a single metric might return more than one
         # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
         # on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count
@@ -1554,7 +1533,6 @@ class MetricsCollection:
 
     def _delete_metric(self, metric: Metric):
         self.metrics = tuple([m for m in self.metrics if m != metric])
-        self.requires_graph = any([x.requires_graph for x in self.metrics])
 
     def calc_num_of_features(self):
         return sum([metric._get_effective_feature_count() for metric in self.metrics])
@@ -1756,23 +1734,17 @@ class MetricsCollection:
         statistics : np.ndarray
             An array of statistics
         """
-        if self.requires_graph:
-            G = connectivity_matrix_to_G(W[:self.n_nodes, :self.n_nodes], directed=self.is_directed)
-
         statistics = np.zeros(self.num_of_features)
 
         feature_idx = 0
         for metric in self.metrics:
-            if metric.requires_graph:  # it cannot require graph and also have _metric_type='node'
-                input = G
-            else:
-                if metric._metric_type in ['binary_edge', 'non_binary_edge']:
-                    input = W[:self.n_nodes, :self.n_nodes]
-                elif metric._metric_type == 'node':
-                    feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
-                                                                          list(np.arange(self.n_node_features)))
-                    feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
-                    input = W[:, feature_indices_to_pass]
+            if metric._metric_type in ['binary_edge', 'non_binary_edge']:
+                input = W[:self.n_nodes, :self.n_nodes]
+            elif metric._metric_type == 'node':
+                feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
+                                                                      list(np.arange(self.n_node_features)))
+                feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
+                input = W[:, feature_indices_to_pass]
 
             n_features_from_metric = metric._get_effective_feature_count()
             statistics[feature_idx:feature_idx + n_features_from_metric] = metric.calculate(input)
@@ -1788,9 +1760,6 @@ class MetricsCollection:
         it, due to runtime considerations. Currently, the only use of this function is within ERGM and
         NaiveMetropolisHastings, so this is fine.
         """
-        if self.requires_graph:
-            G1 = connectivity_matrix_to_G(current_network[:self.n_nodes, :self.n_nodes], directed=self.is_directed)
-
         change_scores = np.zeros(self.num_of_features)
 
         feature_idx = 0
@@ -1798,32 +1767,26 @@ class MetricsCollection:
             # n_features_from_metric = metric._get_effective_feature_count()
             n_features_from_metric = self.features_per_metric[i]
 
-            if metric.requires_graph:  # it cannot require graph and also have _metric_type='node'
-                input = G1
+            if metric._metric_type in ['binary_edge', 'non_binary_edge']:
+                input = current_network[:self.n_nodes, :self.n_nodes]
                 change_scores[feature_idx:feature_idx + n_features_from_metric] = (
                     metric.calc_change_score(input, edge_flip_info['edge'])
                 )
-            else:
-                if metric._metric_type in ['binary_edge', 'non_binary_edge']:
-                    input = current_network[:self.n_nodes, :self.n_nodes]
-                    change_scores[feature_idx:feature_idx + n_features_from_metric] = (
-                        metric.calc_change_score(input, edge_flip_info['edge'])
+            elif metric._metric_type == 'node':
+                feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
+                                                                      list(np.arange(self.n_node_features)))
+                feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
+                if node_flip_info['feature'] not in feature_indices_to_pass:
+                    continue
+                input = current_network[:, feature_indices_to_pass]
+                change_scores[feature_idx:feature_idx + n_features_from_metric] = (
+                    metric.calc_change_score(
+                        input,
+                        current_network[:, feature_indices_to_pass],
+                        node_flip_info['node'],
+                        node_flip_info['new_category'],
                     )
-                elif metric._metric_type == 'node':
-                    feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
-                                                                          list(np.arange(self.n_node_features)))
-                    feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
-                    if node_flip_info['feature'] not in feature_indices_to_pass:
-                        continue
-                    input = current_network[:, feature_indices_to_pass]
-                    change_scores[feature_idx:feature_idx + n_features_from_metric] = (
-                        metric.calc_change_score(
-                            input,
-                            current_network[:, feature_indices_to_pass],
-                            node_flip_info['node'],
-                            node_flip_info['new_category'],
-                        )
-                    )
+                )
             feature_idx += n_features_from_metric
 
         return change_scores
@@ -1850,24 +1813,17 @@ class MetricsCollection:
         num_of_samples = networks_sample.shape[2]
         features_of_net_samples = np.zeros((self.num_of_features, num_of_samples))
 
-        if self.requires_graph:
-            networks_as_graphs = [connectivity_matrix_to_G(W[:self.n_nodes, :self.n_nodes], self.is_directed) for W in
-                                  networks_sample]
-
         feature_idx = 0
         for metric in self.metrics:
             n_features_from_metric = metric._get_effective_feature_count()
 
-            if metric.requires_graph:
-                networks = networks_as_graphs
-            else:
-                if metric._metric_type in ['binary_edge', 'non_binary_edge']:
-                    networks = networks_sample[:self.n_nodes, :self.n_nodes]
-                elif metric._metric_type == 'node':
-                    feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
-                                                                          list(np.arange(self.n_node_features)))
-                    feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
-                    networks = networks_sample[:, feature_indices_to_pass]
+            if metric._metric_type in ['binary_edge', 'non_binary_edge']:
+                networks = networks_sample[:self.n_nodes, :self.n_nodes]
+            elif metric._metric_type == 'node':
+                feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
+                                                                      list(np.arange(self.n_node_features)))
+                feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
+                networks = networks_sample[:, feature_indices_to_pass]
 
             calc_for_sample_kwargs = {'networks_sample': networks}
             if self.mask is not None:
@@ -1893,25 +1849,19 @@ class MetricsCollection:
         change_scores : np.ndarray
             A matrix of size (n**2-n, num_of_features), where each row corresponds to the change scores of the i,j-th edges.
         """
-        if self.requires_graph:
-            G1 = connectivity_matrix_to_G(current_network[:self.n_nodes, :self.n_nodes], directed=self.is_directed)
-
         n_nodes = current_network.shape[0]
         num_edges = n_nodes * n_nodes - n_nodes
         change_scores = np.zeros((num_edges, self.num_of_features))
 
         feature_idx = 0
         for metric in self.metrics:
-            if metric.requires_graph:
-                input = G1
-            else:
-                if metric._metric_type in ['binary_edge', 'non_binary_edge']:
-                    input = current_network[:self.n_nodes, :self.n_nodes]
-                elif metric._metric_type == 'node':
-                    feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
-                                                                          list(np.arange(self.n_node_features)))
-                    feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
-                    input = current_network[:, feature_indices_to_pass]
+            if metric._metric_type in ['binary_edge', 'non_binary_edge']:
+                input = current_network[:self.n_nodes, :self.n_nodes]
+            elif metric._metric_type == 'node':
+                feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
+                                                                      list(np.arange(self.n_node_features)))
+                feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
+                input = current_network[:, feature_indices_to_pass]
 
             n_features_from_metric = metric._get_effective_feature_count()
 
@@ -1964,25 +1914,19 @@ class MetricsCollection:
             observed_network: np.ndarray | None = None,
             edge_indices_lims: tuple[int, int] | None = None,
     ) -> np.ndarray:
-        if self.requires_graph:
-            G1 = connectivity_matrix_to_G(observed_network[:self.n_nodes, :self.n_nodes], directed=self.is_directed)
-
         data_chunk_mask = self._get_mple_data_chunk_mask(edge_indices_lims)
         Xs = np.zeros((data_chunk_mask.sum(), self.num_of_features))
 
         feature_idx = 0
         for metric in self.metrics:
             if observed_network is not None:
-                if metric.requires_graph:
-                    input = G1
-                else:
-                    if metric._metric_type in ['binary_edge', 'non_binary_edge']:
-                        input = observed_network[:self.n_nodes, :self.n_nodes]
-                    elif metric._metric_type == 'node':
-                        feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
-                                                                              list(np.arange(self.n_node_features)))
-                        feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
-                        input = observed_network[:, feature_indices_to_pass]
+                if metric._metric_type in ['binary_edge', 'non_binary_edge']:
+                    input = observed_network[:self.n_nodes, :self.n_nodes]
+                elif metric._metric_type == 'node':
+                    feature_indices_to_pass = self.node_feature_names.get(metric.metric_node_feature,
+                                                                          list(np.arange(self.n_node_features)))
+                    feature_indices_to_pass = [i + self.n_nodes for i in feature_indices_to_pass]
+                    input = observed_network[:, feature_indices_to_pass]
             else:
                 input = None
 
@@ -2121,20 +2065,13 @@ class MetricsCollection:
         #  `first_halves` and `second_halves` instead of `networks_sample` and a different callable for each metric.
         #  Maybe is can be handled in a single method that gets a callable for metrics and **kwargs or something like
         #  that.
-        if self.requires_graph:
-            first_halves_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in first_halves]
-            second_halves_as_graphs = [connectivity_matrix_to_G(W, self.is_directed) for W in second_halves]
 
         feature_idx = 0
         for metric in self.metrics:
             n_features_from_metric = metric._get_effective_feature_count()
 
-            if metric.requires_graph:
-                first_halves_to_use = first_halves_as_graphs
-                second_halves_to_use = second_halves_as_graphs
-            else:
-                first_halves_to_use = first_halves
-                second_halves_to_use = second_halves
+            first_halves_to_use = first_halves
+            second_halves_to_use = second_halves
 
             cur_metric_bootstrapped_features = metric.calculate_bootstrapped_features(
                 first_halves_to_use, second_halves_to_use,

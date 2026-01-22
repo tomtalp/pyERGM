@@ -214,7 +214,7 @@ class TestCovarianceMatrixEstimation(unittest.TestCase):
         for i in range(num_trials):
             sample = np.zeros((n, n, sample_size))
             for j in range(sample_size):
-                cur_mat = nx.to_numpy_array(nx.erdos_renyi_graph(n, p, directed=True))
+                cur_mat = generate_erdos_renyi_matrix(n, p, is_directed=True)
                 sample[:, :, j] = cur_mat
                 if TestCovarianceMatrixEstimation.validate_test_sample_validity(metrics_collection, sample):
                     return sample

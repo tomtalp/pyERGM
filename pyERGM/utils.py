@@ -3,7 +3,6 @@ from collections import Counter
 from typing import Collection
 import numpy as np
 from numpy import typing as npt
-import networkx as nx
 from numba import njit
 from scipy.spatial.distance import mahalanobis
 import random
@@ -69,26 +68,36 @@ def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
     return perturbed_net
 
 
-def connectivity_matrix_to_G(W: np.ndarray, directed=False):
+def generate_erdos_renyi_matrix(n_nodes: int, p: float, is_directed: bool) -> np.ndarray:
     """
-    Convert a connectivity matrix to a graph object.
-    
+    Generate an Erdős-Rényi random graph as an adjacency matrix.
+
     Parameters
     ----------
-    W : np.ndarray
-        A connectivity matrix.
-        
+    n_nodes : int
+        Number of nodes in the graph.
+    p : float
+        Probability for edge creation (0 <= p <= 1).
+    is_directed : bool
+        If True, generate a directed graph. If False, generate an undirected graph.
+
     Returns
     -------
-    G : nx.Graph
-        A graph object.
-
+    np.ndarray
+        Adjacency matrix of shape (n_nodes, n_nodes) with no self-loops.
     """
-    if directed:
-        G = nx.from_numpy_array(W, create_using=nx.DiGraph)
+    if is_directed:
+        # Sample all off-diagonal entries independently
+        matrix = np.random.binomial(1, p, size=(n_nodes, n_nodes))
+        np.fill_diagonal(matrix, 0)
     else:
-        G = nx.from_numpy_array(W)
-    return G
+        # Sample upper triangle, then mirror to lower triangle
+        matrix = np.zeros((n_nodes, n_nodes))
+        upper_tri_indices = np.triu_indices(n_nodes, k=1)
+        matrix[upper_tri_indices] = np.random.binomial(1, p, size=len(upper_tri_indices[0]))
+        matrix = matrix + matrix.T
+
+    return matrix
 
 
 def get_random_nondiagonal_matrix_entry(n: int):

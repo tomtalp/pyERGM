@@ -8,7 +8,6 @@ from pyERGM.utils import *
 from pyERGM.metrics import *
 from pyERGM.datasets import sampson_matrix
 
-import networkx as nx
 import math
 import pandas as pd
 
@@ -112,8 +111,6 @@ class TestNumberOfTriangles(unittest.TestCase):
     def test_validation(self):
         metric = NumberOfTriangles()
 
-        self.assertTrue(not metric.requires_graph)
-
         W = np.array([
             [0, 1, 0],
             [1, 0, 1],
@@ -136,11 +133,14 @@ class TestNumberOfTriangles(unittest.TestCase):
 
         self.assertEqual(result, expected_result)
 
-        random_graph = nx.fast_gnp_random_graph(6, 0.5, directed=False, seed=42)
-        triangles = nx.triangles(random_graph)
-        total_num_triangles = sum(triangles.values()) / 3
+        # Generate random adjacency matrix
+        np.random.seed(42)
+        G_as_W = generate_erdos_renyi_matrix(6, 0.5, is_directed=False)
 
-        G_as_W = nx.to_numpy_array(random_graph)
+        # Calculate expected triangles directly from adjacency matrix
+        # Number of triangles = trace(A^3) / 6 for undirected graphs
+        total_num_triangles = np.trace(np.linalg.matrix_power(G_as_W, 3)) / 6
+
         calculated_number_of_triangles = metric.calculate(G_as_W)
 
         self.assertEqual(total_num_triangles, calculated_number_of_triangles)
@@ -186,9 +186,9 @@ class TestNumberOfTriangles(unittest.TestCase):
         networks_sample = np.zeros((n, n, sample_size))
         expected_triangles = np.zeros(sample_size)
         for i in range(sample_size):
-            cur_graph = nx.fast_gnp_random_graph(n, 0.5, seed=np.random)
-            expected_triangles[i] = sum(nx.triangles(cur_graph).values()) / 3
-            networks_sample[:, :, i] = nx.to_numpy_array(cur_graph)
+            cur_mat = generate_erdos_renyi_matrix(n, 0.5, is_directed=False)
+            expected_triangles[i] = np.trace(np.linalg.matrix_power(cur_mat, 3)) / 6
+            networks_sample[:, :, i] = cur_mat
 
         res = NumberOfTriangles().calculate_for_sample(networks_sample)
         self.assertTrue(np.all(res == expected_triangles))
@@ -237,8 +237,6 @@ class TestReciprocity(unittest.TestCase):
         collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
         W = np.random.randint(0, 2, (n, n))
 
-        G = nx.from_numpy_array(W, create_using=nx.DiGraph)
-
         total_edges = np.sum(W)
 
         reciprocity_vector = collection.calculate_statistics(W)
@@ -246,8 +244,11 @@ class TestReciprocity(unittest.TestCase):
 
         reciprocty_fraction = total_reciprocity / total_edges
 
-        nx_reciprocity = nx.algorithms.reciprocity(G) / 2  # nx counts each reciprocity twice
-        self.assertEqual(reciprocty_fraction, nx_reciprocity)
+        # Calculate reciprocity directly: fraction of edges that are reciprocated
+        # Reciprocated edges are where both W[i,j] and W[j,i] are 1
+        reciprocated_edges = np.sum(W * W.T) / 2
+        expected_reciprocity = reciprocated_edges / total_edges
+        self.assertEqual(reciprocty_fraction, expected_reciprocity)
 
 
 class TestDegreeMetrics(unittest.TestCase):
@@ -259,15 +260,14 @@ class TestDegreeMetrics(unittest.TestCase):
             [1, 0, 0, 0]
         ])
 
-        G = nx.from_numpy_array(W, create_using=nx.DiGraph)
-        expected_in_degrees = np.array(list(dict(G.in_degree()).values()))
+        # Calculate in-degrees and out-degrees directly from adjacency matrix
+        expected_in_degrees = np.sum(W, axis=0)  # Sum over columns
+        expected_out_degrees = np.sum(W, axis=1)  # Sum over rows
 
         receiver = InDegree()
         indegree = receiver.calculate(W)
 
         self.assertTrue(np.all(indegree == expected_in_degrees))
-
-        expected_out_degrees = np.array(list(dict(G.out_degree()).values()))
 
         sender = OutDegree()
         outdegree = sender.calculate(W)
@@ -282,10 +282,10 @@ class TestDegreeMetrics(unittest.TestCase):
             [1, 1, 1, 0]
         ])
 
-        G = nx.from_numpy_array(W)
+        # For undirected graphs, degree is sum of each row (or column, they're the same)
+        expected_degrees = np.sum(W, axis=1)
 
         degrees = undirected_degree.calculate(W)
-        expected_degrees = np.array(list(dict(G.degree()).values()))
         self.assertTrue(np.all(degrees == expected_degrees))
 
     def test_out_degree_on_sample(self):

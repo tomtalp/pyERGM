@@ -17,7 +17,7 @@ model = ERGM(num_nodes, metrics, is_directed=is_directed)
 model.fit(sampson_matrix)
 ```
 
-The above example fits a model from the Sampson's monastery data using the number of edges and total reciprocity as statistics. The graph is represented as an adjacency matrix, but pyERGM also supports graphs represented as `networkx` objects.
+The above example fits a model from the Sampson's monastery data using the number of edges and total reciprocity as statistics. The graph is represented as an adjacency matrix.
 
 ## ERGM
 ```python
@@ -47,7 +47,7 @@ With the exception of dyadic dependent models, all models are fit using the MCML
 
 **Parameters**:
 
-* **observed_graph** (*np.ndarray*) - The adjacency matrix of the observed graph. #TODO - how do we support nx.Graph?
+* **observed_graph** (*np.ndarray*) - The adjacency matrix of the observed graph.
 * **lr** (*float*) - Optional. The learning rate for the optimization. *Defaults to 0.1*
 * **opt_steps** (*int*) - Optional. The number of optimization steps to run. *Defaults to 1000*
 * **steps_for_decay** (*int*) - Optional. The number of steps after which to decay the optimization params. *Defaults to 100* # TODO - redundant parameter?
