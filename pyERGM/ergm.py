@@ -386,7 +386,6 @@ class ERGM():
         if is_dyadic_independent and self._exact_average_mat is not None:
             return self._exact_average_mat.copy()
 
-        is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
         if self._is_distributed_optimization:
             logger.debug("Using distributed optimization for MPLE prediction")
             sys.stdout.flush()
