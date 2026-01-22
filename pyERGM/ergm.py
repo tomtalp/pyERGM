@@ -331,7 +331,10 @@ class ERGM():
         Parameters
         ----------
         observed_networks : np.ndarray, optional
-            Observed network(s). Only needed for dyadic dependent models.
+            Observed network(s). Required for models with dyadic-dependent metrics
+            (e.g., NumberOfTriangles, Reciprocity). Optional for dyadic-independent
+            models (e.g., NumberOfEdges, InDegree, OutDegree).
+            If provided as 3D array, uses the first network (observed_networks[..., 0]).
         **kwargs
             Additional keyword arguments (e.g., num_edges_per_job for distributed computation).
 
@@ -339,16 +342,50 @@ class ERGM():
         -------
         np.ndarray
             Matrix of edge probabilities of shape (n, n).
+
+        Raises
+        ------
+        ValueError
+            If observed_networks is None and the model contains dyadic-dependent metrics.
+        ValueError
+            If distributed optimization is enabled for a model with dyadic-dependent metrics.
+
+        Notes
+        -----
+        - For dyadic-independent models, observed_networks can be None as edge probabilities
+          don't depend on network structure.
+        - Distributed computation (via _is_distributed_optimization) requires dyadic independence.
         """
         logger.debug("Calculating MPLE prediction")
         sys.stdout.flush()
-        if observed_networks.ndim == 3:
-            observed_networks = observed_networks[..., 0]
+
+        # Check for dyadic dependence requirements
         is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
+
+        if observed_networks is None and not is_dyadic_independent:
+            raise ValueError(
+                "observed_networks is required for models with dyadic-dependent metrics. "
+                "This model contains dyadic-dependent metrics: "
+                f"{[str(m) for m in self._metrics_collection.metrics if not m._is_dyadic_independent]}"
+            )
+
+        # Safe dimension check
+        if observed_networks is not None and observed_networks.ndim == 3:
+            observed_networks = observed_networks[..., 0]
+
+        # Check cache for dyadic-independent models
         if is_dyadic_independent and self._exact_average_mat is not None:
             return self._exact_average_mat.copy()
 
         if self._is_distributed_optimization:
+            # Validate distributed mode compatibility
+            if not is_dyadic_independent:
+                raise ValueError(
+                    "Distributed MPLE computation is only supported for dyadic-independent models. "
+                    "This model contains dyadic-dependent metrics: "
+                    f"{[str(m) for m in self._metrics_collection.metrics if not m._is_dyadic_independent]}"
+                )
+
             logger.debug("Using distributed optimization for MPLE prediction")
             sys.stdout.flush()
             data_path = distributed_mple_data_chunks_calculations(
