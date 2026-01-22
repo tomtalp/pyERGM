@@ -108,6 +108,15 @@ class ERGM():
                                                      )
         if "MPLE" != self._metrics_collection.choose_optimization_scheme() and self._mask is not None:
             raise NotImplementedError("Masking is currently supported only for edge independent models.")
+        
+
+        if self._is_distributed_optimization and not self._metrics_collection._has_dyadic_dependent_metrics:
+            raise ValueError(
+                "Distributed optimization is only supported for dyadic-independent models. "
+                "This model contains dyadic-dependent metrics: "
+                f"{[str(m) for m in self._metrics_collection.metrics if not m._is_dyadic_independent]}"
+            )
+
 
         self.n_node_features = self._metrics_collection.n_node_features
         self.node_feature_names = self._metrics_collection.node_feature_names.copy()
@@ -377,15 +386,8 @@ class ERGM():
         if is_dyadic_independent and self._exact_average_mat is not None:
             return self._exact_average_mat.copy()
 
+        is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
         if self._is_distributed_optimization:
-            # Validate distributed mode compatibility
-            if not is_dyadic_independent:
-                raise ValueError(
-                    "Distributed MPLE computation is only supported for dyadic-independent models. "
-                    "This model contains dyadic-dependent metrics: "
-                    f"{[str(m) for m in self._metrics_collection.metrics if not m._is_dyadic_independent]}"
-                )
-
             logger.debug("Using distributed optimization for MPLE prediction")
             sys.stdout.flush()
             data_path = distributed_mple_data_chunks_calculations(
