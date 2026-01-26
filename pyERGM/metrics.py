@@ -267,8 +267,7 @@ class NumberOfEdges(Metric):
         )
 
     def calculate(self, W: np.ndarray, mask: npt.NDArray[bool] | None = None) -> float:
-        mat_sum = np.sum(W) if mask is None else np.sum(W * mask)
-        return mat_sum // self._get_num_edges_in_mat_factor()
+        return self.calculate_for_sample(expand_net_dims(W), mask=mask)[0]
 
     @staticmethod
     @njit
@@ -391,12 +390,7 @@ class NumberOfTriangles(Metric):
     def calculate(self, W: np.ndarray):
         if not np.all(W.T == W):
             raise ValueError("NumOfTriangles not implemented for directed graphs")
-        # the (i,j)-th entry of W^3 counts the number of 3-length paths from node i to node j. Thus, the i-th element on
-        # the diagonal counts the number of triangles that node 1 is part of (3-length paths from i to itself). As the
-        # graph is undirected, we get that each path is counted twice ("forward and backwards"), thus the division by 2.
-        # Additionally, each triangle is counted 3 times by diagonal elements (once for each node that takes part in
-        # forming it), thus the division by 3.
-        return (np.linalg.matrix_power(W, 3)).diagonal().sum() // (3 * 2)
+        return self.calculate_for_sample(expand_net_dims(W))[0]
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         # The triangles that are affected by the edge toggling are those that involve it, namely, if the (i,j)-th edge
@@ -703,7 +697,16 @@ class Reciprocity(Metric):
         self._is_dyadic_independent = False
 
     def calculate(self, W: np.ndarray):
-        return (W * W.T)[np.triu_indices(W.shape[0], 1)]
+        return self.calculate_for_sample(expand_net_dims(W))[:, 0]
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        n = networks_sample.shape[0]
+        # Element-wise multiply each network with its transpose
+        # networks_sample is (n, n, sample_size), transpose swaps axes 0 and 1
+        reciprocal = networks_sample * np.transpose(networks_sample, (1, 0, 2))
+        # Extract upper triangular elements for each sample
+        triu_indices = np.triu_indices(n, 1)
+        return reciprocal[triu_indices[0], triu_indices[1], :]
 
     def _get_total_feature_count(self):
         # n choose 2
@@ -748,7 +751,7 @@ class TotalReciprocity(Metric):
         self._is_dyadic_independent = False
 
     def calculate(self, W: np.ndarray):
-        return (W * W.T).sum() / 2
+        return self.calculate_for_sample(expand_net_dims(W))[0]
 
     @staticmethod
     @njit
@@ -762,9 +765,7 @@ class TotalReciprocity(Metric):
         else:
             return 0
 
-    @staticmethod
-    # @njit # Not supporting np.einsum
-    def calculate_for_sample(networks_sample: np.ndarray):
+    def calculate_for_sample(self, networks_sample: np.ndarray):
         return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
 
     def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
