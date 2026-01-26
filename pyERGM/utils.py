@@ -6,7 +6,7 @@ from numpy import typing as npt
 from numba import njit
 from scipy.spatial.distance import mahalanobis
 import random
-
+from scipy.stats import f
 import pickle
 
 # Dyad states indexing convention
