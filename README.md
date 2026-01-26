@@ -38,4 +38,4 @@ model = ERGM(num_nodes, metrics, is_directed=is_directed)
 model.fit(sampson_matrix)
 ```
 
-The above example fits a model from the Sampson's monastery data using the number of edges and total reciprocity as statistics. The graph is represented as an adjacency matrix, but pyERGM also supports graphs represented as `networkx` objects (however there may be performance implications for that).
+The above example fits a model from the Sampson's monastery data using the number of edges and total reciprocity as statistics. The graph is represented as an adjacency matrix.

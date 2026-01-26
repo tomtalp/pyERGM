@@ -3,27 +3,47 @@ from scipy.optimize import minimize, OptimizeResult
 from scipy.special import softmax
 import glob
 
+from pyERGM.logging_config import logger
 from pyERGM.metrics import *
 
 
 @njit
 def sigmoid(x: np.ndarray | float):
+    """
+    Compute the sigmoid (logistic) function.
+
+    Parameters
+    ----------
+    x : np.ndarray or float
+        Input value(s).
+
+    Returns
+    -------
+    np.ndarray or float
+        Sigmoid of x: 1 / (1 + exp(-x)).
+    """
     return 1 / (1 + np.exp(-x))
 
 
 @njit
 def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
     """
-    Calculate the predictions of a Logistic Regression model with input Xs and parameters thetas
+    Calculate logistic regression predictions.
+
+    Computes the predicted probabilities by applying the sigmoid function to
+    the linear combination of features and parameters.
+
     Parameters
     ----------
-    Xs
-        The input to the model (the regressors), of shape (num_samples X num_features)
-    thetas
-        The parameters of the model, of shape (num_features X 1)
+    Xs : np.ndarray
+        Feature matrix (design matrix) of shape (num_samples, num_features).
+    thetas : np.ndarray
+        Model parameters of shape (num_features, 1) or (num_features,).
+
     Returns
-        sigmoid(Xs @ thetas)
     -------
+    np.ndarray
+        Predicted probabilities of shape (num_samples, 1), computed as sigmoid(Xs @ thetas).
     """
     return sigmoid(Xs @ thetas)
 
@@ -32,19 +52,29 @@ def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
 def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray, eps=1e-10,
                                                         reduction: str = 'sum', log_base: float = np.exp(1)):
     """
-    Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
+    Calculate the log-likelihood of observations given model predictions.
+
+    Computes the binary cross-entropy loss (negative log-likelihood) between
+    predicted probabilities and observed labels.
+
     Parameters
     ----------
-    predictions
-        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
-        labeled 1). Of shape (num_samples X 1)
-    ys
-        The labeled data (probability for each feature vector). The values are floats between 0 and 1 (and are
-        calculated as the fraction of networks in the observed ensemble where an edge exists. If training on a single
-        network, labels are binary). Of shape (num_samples X 1)
+    predictions : np.ndarray
+        Predicted probabilities of shape (num_samples, 1). Values should be in [0, 1].
+    ys : np.ndarray
+        Observed labels of shape (num_samples, 1). Can be binary (0/1) or fractional
+        probabilities when averaging over multiple observed networks.
+    eps : float, optional
+        Small constant to avoid log(0). Default is 1e-10.
+    reduction : str, optional
+        How to aggregate the log-likelihood: 'sum' (default), 'mean', or 'none'.
+    log_base : float, optional
+        Base for logarithm. Default is e (natural log).
+
     Returns
     -------
-    The probability to observe the vector `ys` under the distribution induced by `predictions`.
+    np.ndarray or float
+        Log-likelihood value(s). Shape depends on reduction parameter.
     """
     trimmed_predictions = np.clip(predictions, eps, 1 - eps)
     minus_binary_cross_entropy_per_edge = (ys * np.log(trimmed_predictions) + (1 - ys) * np.log(
@@ -64,21 +94,24 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
 @njit
 def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np.ndarray, ys: np.ndarray):
     """
-    Calculates the gradient of the log-likelihood of labeled data with regard to the predictions of a Logistic
-    Regression model.
+    Calculate the gradient of log-likelihood with respect to model parameters.
+
+    Computes the partial derivatives of the log-likelihood function with respect
+    to each parameter (theta).
+
     Parameters
     ----------
-    Xs
-        The input to the model (the regressors), of shape (num_samples X num_features)
-    predictions
-        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
-        labeled 1). Of shape (num_samples X 1)
-    ys
-         The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+    Xs : np.ndarray
+        Feature matrix of shape (num_samples, num_features).
+    predictions : np.ndarray
+        Predicted probabilities of shape (num_samples, 1).
+    ys : np.ndarray
+        Observed labels of shape (num_samples, 1).
+
     Returns
     -------
-    The gradient (partial derivatives with relation to thetas - the model parameters) of the log-likelihood of the data
-    given the model. Of shape (num_features X 1)
+    np.ndarray
+        Gradient vector of shape (num_features, 1).
     """
     return Xs.T @ (ys - predictions)
 
@@ -86,47 +119,92 @@ def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np
 @njit
 def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions: np.ndarray):
     """
-    Calculates the hessian of the log-likelihood of labeled data with regard to the predictions of a Logistic
-    Regression model.
+    Calculate the Hessian matrix of log-likelihood.
+
+    Computes the matrix of second partial derivatives of the log-likelihood
+    with respect to model parameters. Used in Newton-type optimization methods.
+
     Parameters
     ----------
-    Xs
-        The input to the model (the regressors), of shape (num_samples X num_features)
-    predictions
-        The predictions of a Logistic Regression model (the probabilities it assigns to feature vectors to be
-        labeled 1). Of shape (num_samples X 1)
+    Xs : np.ndarray
+        Feature matrix of shape (num_samples, num_features).
+    predictions : np.ndarray
+        Predicted probabilities of shape (num_samples, 1).
+
     Returns
     -------
-    The hessian (partial second derivatives with relation to thetas - the model parameters) of the log-likelihood of the
-    data given the model. Of shape (num_features X num_features)
+    np.ndarray
+        Hessian matrix of shape (num_features, num_features).
     """
     return Xs.T @ (predictions * (1 - predictions) * Xs)
 
 
 def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas: np.ndarray, ys: np.ndarray):
     """
-    Calculates the log-likelihood of labeled data with regard to the predictions of a Logistic Regression model.
+    Calculate log-likelihood directly from features and parameters.
+
+    Alternative formulation that computes log-likelihood without explicitly
+    computing predictions first. Can be numerically more stable.
+
     Parameters
     ----------
-    Xs
-        The input to the model (the regressors), of shape (num_samples X num_features)
-    thetas
-        The parameters of the model, of shape (num_features X 1)
-    ys
-        The labeled data (zeros and ones, for each feature vector). Of shape (num_samples X 1)
+    Xs : np.ndarray
+        Feature matrix of shape (num_samples, num_features).
+    thetas : np.ndarray
+        Model parameters of shape (num_features, 1) or (num_features,).
+    ys : np.ndarray
+        Observed labels of shape (num_samples, 1).
+
     Returns
     -------
-    The probability to observe the vector `ys` under the distribution induced by the model.
+    float
+        Total log-likelihood (summed over all samples).
     """
     return (-np.log(1 + np.exp(-Xs @ thetas)) + (ys - 1) * Xs @ thetas).sum()
 
 
 def analytical_minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10):
+    """
+    Compute negative log-likelihood for local (non-distributed) optimization.
+
+    Wrapper function compatible with scipy.optimize.minimize.
+
+    Parameters
+    ----------
+    thetas : np.ndarray
+        Flattened parameter vector.
+    Xs : np.ndarray
+        Feature matrix.
+    ys : np.ndarray
+        Observed labels.
+    eps : float, optional
+        Clipping value to avoid numerical issues. Default is 1e-10.
+
+    Returns
+    -------
+    float
+        Negative log-likelihood value.
+    """
     pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
     return -calc_logistic_regression_predictions_log_likelihood(pred, ys)[0][0]
 
 
 def analytical_minus_log_likelihood_distributed(thetas, data_path):
+    """
+    Compute negative log-likelihood and gradient for distributed optimization.
+
+    Parameters
+    ----------
+    thetas : np.ndarray
+        Flattened parameter vector.
+    data_path : Path
+        Path to distributed data chunks.
+
+    Returns
+    -------
+    tuple
+        (negative_log_likelihood, negative_gradient).
+    """
     log_like, grad = distributed_logistic_regression_optimization_step(
         data_path,
         thetas.reshape(thetas.size, 1),
@@ -136,6 +214,21 @@ def analytical_minus_log_likelihood_distributed(thetas, data_path):
 
 
 def analytical_logistic_regression_predictions_distributed(thetas, data_path):
+    """
+    Compute predictions using distributed computation.
+
+    Parameters
+    ----------
+    thetas : np.ndarray
+        Model parameters.
+    data_path : Path
+        Path to distributed data chunks.
+
+    Returns
+    -------
+    np.ndarray
+        Predicted probabilities.
+    """
     return distributed_logistic_regression_optimization_step(
         data_path,
         thetas.reshape(thetas.size, 1),
@@ -144,16 +237,71 @@ def analytical_logistic_regression_predictions_distributed(thetas, data_path):
 
 
 def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10):
+    """
+    Compute negative log-likelihood gradient for local optimization.
+
+    Parameters
+    ----------
+    thetas : np.ndarray
+        Flattened parameter vector.
+    Xs : np.ndarray
+        Feature matrix.
+    ys : np.ndarray
+        Observed labels.
+    eps : float, optional
+        Clipping value. Default is 1e-10.
+
+    Returns
+    -------
+    np.ndarray
+        Negative gradient vector.
+    """
     pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
     return -calc_logistic_regression_log_likelihood_grad(Xs, pred, ys).reshape(thetas.size, )
 
 
 def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10):
+    """
+    Compute negative log-likelihood Hessian for local optimization.
+
+    Parameters
+    ----------
+    thetas : np.ndarray
+        Flattened parameter vector.
+    Xs : np.ndarray
+        Feature matrix.
+    ys : np.ndarray
+        Observed labels.
+    eps : float, optional
+        Clipping value. Default is 1e-10.
+
+    Returns
+    -------
+    np.ndarray
+        Negative Hessian matrix.
+    """
     pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
     return -calc_logistic_regression_log_likelihood_hessian(Xs, pred)
 
 
 def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_edges_per_job):
+    """
+    Compute negative log-likelihood Hessian using distributed computation.
+
+    Parameters
+    ----------
+    thetas : np.ndarray
+        Model parameters.
+    data_path : Path
+        Path to distributed data chunks.
+    num_edges_per_job : int
+        Number of edges per distributed job.
+
+    Returns
+    -------
+    np.ndarray
+        Negative Hessian matrix.
+    """
     return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
                                                               ('log_likelihood_hessian',),
                                                               num_edges_per_job)[0]
@@ -199,10 +347,9 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         nonlocal iteration
         iteration += 1
         cur_time = time.time()
-        print(f'iteration: {iteration}, time from start '
-              f'training: {cur_time - start_time} '
-              f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
-        sys.stdout.flush()
+        logger.info(f'iteration: {iteration}, time from start '
+              f'training: {cur_time - start_time:.2f} '
+              f'log10 likelihood: {-intermediate_result.fun / np.log(10):.4f}')
         if is_distributed:
             checkpoint_path_getter = lambda idx: (
                     Path.cwd().parent / "OptimizationIntermediateCalculations" / f"checkpoint_iter_{idx}.pkl"
@@ -214,8 +361,7 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
 
     iteration = 0
     start_time = time.time()
-    print("optimization started")
-    sys.stdout.flush()
+    logger.info("MPLE optimization started")
 
     observed_networks = expand_net_dims(observed_networks)
 
@@ -261,8 +407,7 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         shutil.rmtree(data_path)
         shutil.rmtree((data_path.parent / 'mple_data_paged_chunks').resolve())
 
-    print(res)
-    sys.stdout.flush()
+    logger.debug(f"Optimization result: {res}")
 
     return res.x, pred, res.success
 
@@ -280,12 +425,10 @@ def distributed_logistic_regression_optimization_step(data_path, thetas, funcs_t
     for chunks_path in chunks_paths:
         os.makedirs(chunks_path, exist_ok=True)
 
-    print("start waiting for children jobs in MPLE optimization")
-    sys.stdout.flush()
+    logger.debug("Start waiting for children jobs in MPLE optimization")
     wait_for_distributed_children_outputs(num_jobs, chunks_paths, job_array_ids, "__".join(funcs_to_calc),
                                           children_logs_dir)
-    print("done waiting for children jobs in MPLE optimization")
-    sys.stdout.flush()
+    logger.debug("Done waiting for children jobs in MPLE optimization")
 
     aggregated_funcs = []
     for func_to_calc in funcs_to_calc:
@@ -315,17 +458,15 @@ def distributed_mple_data_chunks_calculations(
     # Copy the `MetricsCollection` and the observed network to provide its path to children jobs, so they will be
     # able to access it.
     metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
-    print("dumping metrics collection")
-    sys.stdout.flush()
+    logger.debug("Dumping metrics collection")
     with open(metric_collection_path, 'wb') as f:
         pickle.dump(metrics_collection, f)
-    print("dumped metrics collection")
-    sys.stdout.flush()
+    logger.debug("Dumped metrics collection")
     observed_networks_path = os.path.join(data_path, 'observed_networks.pkl')
-    print("dumping observed networks")
+    logger.debug("Dumping observed networks")
     with open(observed_networks_path, 'wb') as f:
         pickle.dump(observed_networks, f)
-    print("dumped observed networks")
+    logger.debug("Dumped observed networks")
     cmd_line_single_batch = (f'python ./mple_data_distributed_paging.py '
                              f'--out_dir_path={out_dir_path} '
                              f'--num_edges_per_job={num_edges_per_job} ')
@@ -334,8 +475,7 @@ def distributed_mple_data_chunks_calculations(
     num_data_points = num_nodes * num_nodes - num_nodes
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
 
-    print("sending children jobs to calculate MPLE data chunks")
-    sys.stdout.flush()
+    logger.debug("Sending children jobs to calculate MPLE data chunks")
     job_array_ids, children_logs_dir = run_distributed_children_jobs(
         out_dir_path,
         cmd_line_single_batch,
@@ -346,12 +486,10 @@ def distributed_mple_data_chunks_calculations(
     chunks_path = (out_dir_path / 'mple_data_paged_chunks').resolve()
     os.makedirs(chunks_path, exist_ok=True)
 
-    print("start waiting for children jobs in MPLE data paging")
-    sys.stdout.flush()
+    logger.debug("Start waiting for children jobs in MPLE data paging")
     wait_for_distributed_children_outputs(num_jobs, [chunks_path], job_array_ids, 'data_paging',
                                           children_logs_dir)
-    print("done waiting for children jobs in MPLE data paging")
-    sys.stdout.flush()
+    logger.debug("Done waiting for children jobs in MPLE data paging")
     # Clean current scripts
     shutil.rmtree((out_dir_path / "scripts").resolve())
     return data_path
@@ -369,8 +507,7 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, fu
     paged_chunks_path = os.path.join(out_path, "mple_data_paged_chunks")
     num_jobs = len(glob.glob(f"{paged_chunks_path}/[0-9]*.npz"))
 
-    print("sending children jobs to calculate MPLE likelihood grad")
-    sys.stdout.flush()
+    logger.debug("Sending children jobs to calculate MPLE likelihood grad")
     job_array_ids, children_logs_dir = run_distributed_children_jobs(out_path, cmd_line_single_batch,
                                                                      "distributed_logistic_regression.sh",
                                                                      num_jobs, "__".join(funcs_to_calculate))
@@ -378,11 +515,52 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, fu
 
 
 def predict_multi_class_logistic_regression(Xs, thetas):
+    """
+    Predict class probabilities using multinomial logistic regression.
+
+    Applies the softmax function to compute probability distributions over
+    multiple classes. Used for MPLE with reciprocity (4 dyadic states).
+
+    Parameters
+    ----------
+    Xs : np.ndarray
+        Feature tensor of shape (num_samples, num_classes, num_features).
+    thetas : np.ndarray
+        Model parameters of shape (num_features,).
+
+    Returns
+    -------
+    np.ndarray
+        Probability distributions of shape (num_samples, num_classes).
+    """
     return softmax(Xs @ thetas, axis=1)
 
 
 def log_likelihood_multi_class_logistic_regression(true_labels, predictions, reduction='sum', log_base=np.exp(1),
                                                    eps: float = 1e-10):
+    """
+    Calculate log-likelihood for multinomial logistic regression.
+
+    Computes the categorical cross-entropy between true labels and predictions.
+
+    Parameters
+    ----------
+    true_labels : np.ndarray
+        One-hot encoded labels or probability distributions of shape (num_samples, num_classes).
+    predictions : np.ndarray
+        Predicted probability distributions of shape (num_samples, num_classes).
+    reduction : str, optional
+        How to aggregate: 'sum' (default), 'mean', or 'none'.
+    log_base : float, optional
+        Base for logarithm. Default is e.
+    eps : float, optional
+        Small constant to avoid log(0). Default is 1e-10.
+
+    Returns
+    -------
+    float or np.ndarray
+        Log-likelihood value(s).
+    """
     predictions = np.maximum(predictions, eps)
     individual_data_samples_minus_cross_ent = ((np.log(predictions) / np.log(log_base)) * true_labels).sum(axis=1)
     if reduction == 'none':
@@ -396,10 +574,46 @@ def log_likelihood_multi_class_logistic_regression(true_labels, predictions, red
 
 
 def minus_log_likelihood_multi_class_logistic_regression(thetas, Xs, ys):
+    """
+    Compute negative log-likelihood for multinomial logistic regression.
+
+    Wrapper for optimization with scipy.optimize.minimize.
+
+    Parameters
+    ----------
+    thetas : np.ndarray
+        Model parameters.
+    Xs : np.ndarray
+        Feature tensor.
+    ys : np.ndarray
+        True labels.
+
+    Returns
+    -------
+    float
+        Negative log-likelihood value.
+    """
     return -log_likelihood_multi_class_logistic_regression(ys, predict_multi_class_logistic_regression(Xs, thetas))
 
 
 def minus_log_likelihood_gradient_multi_class_logistic_regression(thetas, Xs, ys):
+    """
+    Compute gradient of negative log-likelihood for multinomial logistic regression.
+
+    Parameters
+    ----------
+    thetas : np.ndarray
+        Model parameters.
+    Xs : np.ndarray
+        Feature tensor.
+    ys : np.ndarray
+        True labels.
+
+    Returns
+    -------
+    np.ndarray
+        Negative gradient vector.
+    """
     prediction = predict_multi_class_logistic_regression(Xs, thetas)
     num_features = Xs.shape[-1]
     return -(ys - prediction).flatten() @ Xs.reshape(-1, num_features)
@@ -411,19 +625,44 @@ def mple_reciprocity_logistic_regression_optimization(
         initial_thetas: np.ndarray | None = None,
         optimization_method: str = 'L-BFGS-B',
 ):
+    """
+    Optimize ERGM parameters using MPLE for reciprocity models.
+
+    This function performs Maximum Pseudo-Likelihood Estimation for directed ERGMs
+    that contain reciprocity dependencies but are otherwise dyadic independent.
+    Uses multinomial logistic regression over the 4 possible dyadic states.
+
+    Parameters
+    ----------
+    metrics_collection : MetricsCollection
+        Collection of metrics defining the ERGM model.
+    observed_networks : np.ndarray
+        Observed network(s) of shape (n, n) or (n, n, num_networks).
+    initial_thetas : np.ndarray, optional
+        Initial parameter values. If None, randomly initialized from [0, 1].
+    optimization_method : str, optional
+        Optimization method. Currently only 'L-BFGS-B' is supported. Default is 'L-BFGS-B'.
+
+    Returns
+    -------
+    thetas : np.ndarray
+        Optimized model parameters.
+    pred : np.ndarray
+        Predicted dyadic state probabilities of shape (n_choose_2, 4).
+    success : bool
+        Whether optimization converged successfully.
+    """
     def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
         nonlocal iteration
         iteration += 1
         cur_time = time.time()
-        print(f'iteration: {iteration}, time from start '
-              f'training: {cur_time - start_time} '
-              f'log10 likelihood: {-intermediate_result.fun / np.log(10)}')
-        sys.stdout.flush()
+        logger.info(f'iteration: {iteration}, time from start '
+              f'training: {cur_time - start_time:.2f} '
+              f'log10 likelihood: {-intermediate_result.fun / np.log(10):.4f}')
 
     iteration = 0
     start_time = time.time()
-    print("optimization started")
-    sys.stdout.flush()
+    logger.info("MPLE optimization started")
 
     observed_networks = expand_net_dims(observed_networks)
     Xs = metrics_collection.prepare_mple_reciprocity_regressors()
@@ -443,6 +682,5 @@ def mple_reciprocity_logistic_regression_optimization(
         raise ValueError(
             f"Unsupported optimization method: {optimization_method}. Options are: L-BFGS-B")
     pred = predict_multi_class_logistic_regression(Xs, res.x)
-    print(res)
-    sys.stdout.flush()
+    logger.debug(f"Optimization result: {res}")
     return res.x, pred, res.success

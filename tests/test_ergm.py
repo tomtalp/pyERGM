@@ -1,13 +1,165 @@
 import unittest
 
 import numpy as np
-
+from scipy.optimize import minimize, OptimizeResult
 from pyERGM.utils import *
 from pyERGM.metrics import *
-from pyERGM.ergm import ERGM, BruteForceERGM
+from pyERGM.ergm import ERGM
 from pyERGM.datasets import sampson_matrix
 import sys
 from scipy.linalg import eigh
+
+class BruteForceERGM(ERGM):
+    """
+    Exact ERGM implementation via exhaustive enumeration of all networks.
+
+    This class computes ERGM quantities exactly by enumerating all possible networks
+    and calculating statistics, weights, and normalization constants. This is only
+    tractable for very small networks (≤5 nodes directed, ≤7 nodes undirected).
+
+    Primarily used for testing and validation of approximate methods.
+
+    Parameters
+    ----------
+    n_nodes : int
+        Number of nodes. Must be ≤5 for directed or ≤7 for undirected networks.
+    metrics_collection : Collection[Metric]
+        Collection of metrics to compute.
+    is_directed : bool, optional
+        Whether the network is directed. Default is False.
+    initial_thetas : dict, optional
+        Initial parameter values. If None, randomly initialized.
+
+    Attributes
+    ----------
+    MAX_NODES_BRUTE_FORCE_DIRECTED : int
+        Maximum nodes for directed networks (5).
+    MAX_NODES_BRUTE_FORCE_NOT_DIRECTED : int
+        Maximum nodes for undirected networks (7).
+    """
+    # The maximum number of nodes that is allowed for carrying brute force calculations (i.e. iterating the whole space
+    # of networks and calculating stuff exactly). This becomes not tractable above this limit.
+    MAX_NODES_BRUTE_FORCE_DIRECTED = 5
+    MAX_NODES_BRUTE_FORCE_NOT_DIRECTED = 7
+
+    def __init__(self,
+                 n_nodes,
+                 metrics_collection: Collection[Metric],
+                 is_directed=False,
+                 initial_thetas=None):
+        super().__init__(n_nodes,
+                         metrics_collection,
+                         is_directed,
+                         initial_thetas)
+
+        if is_directed:
+            num_connections = (n_nodes ** 2 - n_nodes)
+        else:
+            num_connections = (n_nodes ** 2 - n_nodes) // 2
+
+        self._num_nets = 2 ** num_connections
+
+        self._num_features = self._metrics_collection.num_of_features
+
+        all_networks = np.zeros((self._n_nodes, self._n_nodes, self._num_nets))
+        for i in range(self._num_nets):
+            all_networks[:, :, i] = construct_adj_mat_from_int(i, self._n_nodes, is_directed=is_directed)
+
+        self.all_features_by_all_nets = self._metrics_collection.calculate_sample_statistics(all_networks)
+        self._all_weights, self._normalization_factor = self._calc_all_weights()
+
+    def _calc_all_weights(self):
+        all_weights = np.exp(np.sum(self._thetas[:, None] * self.all_features_by_all_nets, axis=0))
+        normalization_factor = all_weights.sum()
+        return all_weights, normalization_factor
+
+    def _validate_net_size(self):
+        return (
+                (self._is_directed and self._n_nodes <= BruteForceERGM.MAX_NODES_BRUTE_FORCE_DIRECTED)
+                or
+                (not self._is_directed and self._n_nodes <= BruteForceERGM.MAX_NODES_BRUTE_FORCE_NOT_DIRECTED)
+        )
+
+    def calculate_weight(self, W: np.ndarray):
+        adj_mat_idx = construct_int_from_adj_mat(W, self._is_directed)
+        return self._all_weights[adj_mat_idx]
+
+    def generate_networks_for_sample(self, sample_size, sampling_method="Exact"):
+        if sampling_method != "Exact":
+            raise ValueError("BruteForceERGM supports only exact sampling (this is its whole purpose)")
+
+        all_nets_probs = self._all_weights / self._normalization_factor
+        sampled_idx = np.random.choice(all_nets_probs.size, p=all_nets_probs, size=sample_size)
+        return np.stack([construct_adj_mat_from_int(i, self._n_nodes, self._is_directed) for i in sampled_idx], axis=-1)
+
+    def calc_expected_features(self):
+        """
+        Calculate the expected values of all features under the model.
+
+        Returns
+        -------
+        np.ndarray
+            Expected feature values (sufficient statistics) under the current model.
+        """
+        all_probs = self._all_weights / self._normalization_factor
+
+        expected_features = self.all_features_by_all_nets @ all_probs
+        return expected_features
+
+    def fit(self, observed_networks):
+        """
+        Fit the model parameters to observed network(s) using exact likelihood.
+
+        Uses scipy.optimize.minimize to maximize the exact log-likelihood by
+        enumerating all possible networks.
+
+        Parameters
+        ----------
+        observed_networks : np.ndarray
+            Observed network(s) of shape (n, n) or (n, n, num_networks).
+
+        Returns
+        -------
+        OptimizeResult
+            Optimization result object from scipy.optimize.minimize.
+        """
+        def nll(thetas, observed_networks):
+            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
+                                   initial_thetas={feat_name: thetas[i] for i, feat_name in
+                                                   enumerate(self._metrics_collection.get_parameter_names())},
+                                   is_directed=self._is_directed)
+            log_z = np.log(model._normalization_factor)
+            observed_networks_log_weights = np.log(np.array(
+                [model.calculate_weight(observed_networks[..., i]) for i in range(observed_networks.shape[2])]))
+            return (log_z - observed_networks_log_weights).sum()
+
+        def nll_grad(thetas, observed_networks):
+            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
+                                   initial_thetas={feat_name: thetas[i] for i, feat_name in
+                                                   enumerate(self._metrics_collection.get_parameter_names())},
+                                   is_directed=self._is_directed)
+            mean_observed_features = model._metrics_collection.calculate_sample_statistics(observed_networks).mean(
+                axis=1)
+            expected_features = model.calc_expected_features()
+            return expected_features - mean_observed_features
+
+        def after_iteration_callback(intermediate_result: OptimizeResult):
+            self.optimization_iter += 1
+            cur_time = time.time()
+            logger.info(f'iteration: {self.optimization_iter}, time from start '
+                  f'training: {cur_time - self.optimization_start_time} '
+                  f'log likelihood: {-intermediate_result.fun}')
+
+        if observed_networks.ndim == 2:
+            observed_networks = observed_networks[..., np.newaxis]
+
+        self.optimization_iter = 0
+        logger.info("BruteForceERGM optimization started")
+        self.optimization_start_time = time.time()
+        res = minimize(nll, self._thetas, args=(observed_networks,), jac=nll_grad, callback=after_iteration_callback)
+        self._thetas = res.x
+        self._all_weights, self._normalization_factor = self._calc_all_weights()
+        return res
 
 def ccc(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """
@@ -209,66 +361,6 @@ class TestERGM(unittest.TestCase):
         # TODO - what criteria to use for testing convergence? From manual tests, it doesn't seem to perfectly converge on the true thetas...
         # Nevertheless, even without an assert, this will catch errors - fit won't work if something breaks.
 
-    def test_fit_small_ER_network_with_e_i_node_feature(self):
-        n = 4
-        p = 0.25
-        is_directed = False
-
-        num_pos_connect = n * (n - 1)
-        if not is_directed:
-            num_pos_connect //= 2
-
-        ground_truth_num_edges = round(num_pos_connect * p)
-        ground_truth_p = ground_truth_num_edges / num_pos_connect
-
-        ground_truth_theta = np.log(ground_truth_p / (1 - ground_truth_p))
-
-        adj_mat_no_diag = np.zeros(num_pos_connect)
-        on_indices = np.random.choice(num_pos_connect, size=ground_truth_num_edges, replace=False).astype(int)
-        adj_mat_no_diag[on_indices] = 1
-        adj_mat = np.zeros((n, n))
-
-        if not is_directed:
-            upper_triangle_indices = np.triu_indices(n, k=1)
-            adj_mat[upper_triangle_indices] = adj_mat_no_diag
-            lower_triangle_indices_aligned = (upper_triangle_indices[1], upper_triangle_indices[0])
-            adj_mat[lower_triangle_indices_aligned] = adj_mat_no_diag
-        else:
-            adj_mat[~np.eye(n, dtype=bool)] = adj_mat_no_diag
-
-        node_features = {"E_I": [[0, 1, 1, 1]]}
-        ground_truth_e_nodes = 0.25
-        ground_truth_theta_e = np.log(ground_truth_e_nodes / (1 - ground_truth_e_nodes))
-
-        W = adj_mat  # np.concatenate([adj_mat, node_types], axis=1)
-        print(f"Fitting matrix ({W.shape}) - ")
-        print(W)
-
-        ergm = ERGM(n,
-                    [NumberOfEdgesUndirected(), NumberOfNodesPerType(metric_node_feature='E_I', n_node_categories=2)],
-                    is_directed=is_directed,
-                    seed_MCMC_proba=0.25
-                    )
-
-        ergm.fit(W, observed_node_features=node_features, lr=0.1, opt_steps=500, sliding_grad_window_k=10,
-                 sample_pct_growth=0.05,
-                 steps_for_decay=20, lr_decay_pct=0.05, mcmc_sample_size=300, mcmc_steps_per_sample=10,
-                 theta_init_method='uniform')
-
-        fit_theta = ergm._thetas[0]
-        fit_theta_e = ergm._thetas[1]
-        print(f"ground truth theta: {ground_truth_theta, ground_truth_theta_e}")
-        print(f"fit theta: {fit_theta, fit_theta_e}")
-
-        # ergm._thetas = np.array([ground_truth_theta, ground_truth_theta_e])
-        sampled_networks = ergm.generate_networks_for_sample(sample_size=100)
-        fit_p = sampled_networks[:, :-1, :].mean()
-        fit_e_i_fraction = sampled_networks[:, -1, :].mean()
-        print(f"ground truth p: {p}")
-        print(f"fit p: {fit_p}")
-        print(f"ground truth excitatory fraction: {np.array(node_features['E_I']).mean()}")
-        print(f"fit excitatory fraction: {fit_e_i_fraction}")
-
     def test_MPLE(self):
         n = 4
 
@@ -362,164 +454,6 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(thetas_ccc > 0.99)
         self.assertTrue(convergence_result["success"])
 
-    # def test_sampson_MCMLE_with_node_features(self):
-    #     set_seed(1234)
-    #     metrics = [NumberOfEdgesDirected(), OutDegree(), InDegree(), TotalReciprocity()]
-    #     n_nodes = sampson_matrix.shape[0]
-    #
-    #     mcmle_model = ERGM(n_nodes, metrics, is_directed=True)
-    #
-    #     node_features = np.random.choice(3, size=(n_nodes, 2))
-    #     # sampson_matrix_with_node_features = np.concatenate([sampson_matrix, node_features], axis=1)
-    #     convergence_result = mcmle_model.fit(sampson_matrix,
-    #                                          observed_node_features=node_features,
-    #                                          opt_steps=10,
-    #                                          steps_for_decay=1,
-    #                                          lr=1,
-    #                                          mple_lr=0.5,
-    #                                          convergence_criterion="model_bootstrap",
-    #                                          mcmc_burn_in=0,
-    #                                          mcmc_steps_per_sample=n_nodes ** 2,
-    #                                          mcmc_sample_size=1000,
-    #                                          num_model_sub_samples=10,
-    #                                          model_subsample_size=1000,
-    #                                          bootstrap_convergence_confidence=0.95,
-    #                                          bootstrap_convergence_num_stds_away_thr=1,
-    #                                          optimization_scheme='MCMLE'
-    #                                          )
-    #
-    #     model_thethas = mcmle_model._thetas
-    #
-    #     expected_values = {"edges": -1.1761, "sender2": -0.2945, "sender3": 1.4141, "sender4": 0.3662,
-    #                        "sender5": 0.1315,
-    #                        "sender6": 1.2148, "sender7": 0.6055,
-    #                        "sender8": 1.3609, "sender9": 0.6402, "sender10": 2.0639, "sender11": 1.4355,
-    #                        "sender12": -0.1681,
-    #                        "sender13": -0.2322, "sender14": 0.5841, "sender15": 1.8600,
-    #                        "sender16": 1.4317, "sender17": 1.2211, "sender18": 1.8724, "receiver2": -0.1522,
-    #                        "receiver3": -3.0453,
-    #                        "receiver4": -1.7596, "receiver5": -0.8198, "receiver6": -3.3922,
-    #                        "receiver7": -1.6074, "receiver8": -2.2656, "receiver9": -2.2069, "receiver10": -3.9189,
-    #                        "receiver11": -3.0257, "receiver12": -0.9457, "receiver13": -1.4749, "receiver14": -1.5950,
-    #                        "receiver15": -3.3147, "receiver16": -3.0567, "receiver17": -3.4436, "receiver18": -3.3239,
-    #                        "mutual": 3.6918
-    #                        }
-    #     expected_thetas = np.array(list(expected_values.values()))
-    #
-    #     thetas_R_2 = 1 - np.sum((model_thethas - expected_thetas) ** 2) / np.sum(
-    #         (expected_thetas - np.mean(expected_thetas)) ** 2)
-    #     self.assertTrue(thetas_R_2 > 0.99)
-    #     self.assertTrue(convergence_result["success"])
-
-    def test_MPLE_regressors_of_different_scales(self):
-        # TODO: currently this is a smoke test - we validate nothing: neither convergence nor the thetas/predictions.
-        #  Somehow sklearn still finds a slightly better solution than ours.
-        set_seed(42)
-
-        W = np.random.randint(0, 2, size=(10, 10))
-        W[np.diag_indices(10)] = 0
-
-        metrics = [NumberOfEdgesDirected(),
-                   NodeAttrSum([np.random.randint(1, 5) ** 10 for x in range(10)], is_directed=True)]
-        model = ERGM(n_nodes=10, metrics_collection=metrics, is_directed=True)
-
-        model.fit(W)
-
-        # sklearn_thetas = np.array([2.82974701e-01, -2.34383474e-07])
-
-        # sklearn_probas = np.array([0.56682151,
-        # 0.56682151,
-        # 0.50584116,
-        # 0.56682151,
-        # 0.56682151,
-        # 0.56682151,
-        # 0.50584116,
-        # 0.56682151,
-        # 0.56347922,
-        # 0.56682151,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.56682151,
-        # 0.56682151,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.56682151,
-        # 0.50584116,
-        # 0.5092404 ,
-        # 0.5092404 ,
-        # 0.5092404 ,
-        # 0.5092404 ,
-        # 0.5092404 ,
-        # 0.44804742,
-        # 0.5092404 ,
-        # 0.50584116,
-        # 0.56682151,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.56682151,
-        # 0.56682151,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.56682151,
-        # 0.56682151,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.56682151,
-        # 0.50584116,
-        # 0.5092404 ,
-        # 0.5092404 ,
-        # 0.44804742,
-        # 0.5092404 ,
-        # 0.5092404 ,
-        # 0.5092404 ,
-        # 0.5092404 ,
-        # 0.50584116,
-        # 0.56682151,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.57015772,
-        # 0.5092404 ,
-        # 0.56682151,
-        # 0.56347922,
-        # 0.56682151,
-        # 0.56682151,
-        # 0.50584116,
-        # 0.56682151,
-        # 0.56682151,
-        # 0.56682151,
-        # 0.50584116,
-        # 0.56682151])
-
-        # self.assertAlmostEqual()
-
     def test_assigning_model_initial_thetas(self):
         # TODO: seems like convergence of the model in this test depends on the seed...
         set_seed(8765)
@@ -529,7 +463,7 @@ class TestERGM(unittest.TestCase):
                       [0, 0, 0, 0, 1],
                       [0, 1, 0, 0, 0],
                       [0, 1, 0, 1, 0]])
-        metrics_1 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(1, n_nodes + 1), is_directed=True),
+        metrics_1 = [NumberOfEdgesDirected(),
                      NumberOfEdgesTypesDirected(['A', 'B', 'A', 'A', 'B'])]
         model_1 = ERGM(n_nodes=n_nodes, metrics_collection=metrics_1, is_directed=True)
 
@@ -537,7 +471,7 @@ class TestERGM(unittest.TestCase):
 
         model_1_params = model_1.get_model_parameters()
 
-        metrics_2 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(n_nodes + 1, 1, -1), is_directed=True),
+        metrics_2 = [NumberOfEdgesDirected(),
                      NumberOfEdgesTypesDirected(['B', 'B', 'B', 'A', 'A'])]
         model_2 = ERGM(n_nodes=n_nodes, metrics_collection=metrics_2, is_directed=True, initial_thetas=model_1_params)
 
@@ -751,7 +685,7 @@ class TestERGM(unittest.TestCase):
         set_seed(348976)
         metrics = [NumberOfEdgesDirected(), TotalReciprocity()]
         n_nodes = 15
-        net = generate_binomial_tensor(net_size=n_nodes, node_features_size=0, num_samples=1)
+        net = generate_binomial_tensor(net_size=n_nodes, num_samples=1)
         train_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
         train_model.fit(net)
         test_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True,
@@ -808,7 +742,7 @@ class TestERGM(unittest.TestCase):
     def test_e_2_e_training_with_mask_directed(self):
         set_seed(348976)
         n = 20
-        data = generate_binomial_tensor(net_size=n, node_features_size=0, num_samples=3, p=0.1)
+        data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.1)
         types = np.random.choice([1, 2, 3], size=n)
         positions = np.random.rand(n * 3).reshape(n, 3)
         metrics_to_mask = [
@@ -842,7 +776,7 @@ class TestERGM(unittest.TestCase):
     def test_e_2_e_training_with_mask_undirected(self):
         set_seed(389476)
         n = 20
-        data = generate_binomial_tensor(net_size=n, node_features_size=0, num_samples=3, p=0.1)
+        data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.1)
         # symmetrize
         data = np.round((data + data.transpose(1, 0, 2)) / 2)
         types = np.random.choice([1, 2, 3], size=n)
