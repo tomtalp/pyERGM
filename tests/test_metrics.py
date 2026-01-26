@@ -1939,8 +1939,8 @@ class TestTotalReciprocity(unittest.TestCase):
 
         # Create subnetwork samples
         # first_half_W = W[[0,1], :][:, [2,3]] = [[1,0], [0,1]]
-        first_half_W = W[np.ix_(first_half_indices, second_half_indices)]
-        second_half_W = W[np.ix_(second_half_indices, first_half_indices)]
+        first_half_W = W[np.ix_(first_half_indices, first_half_indices)]
+        second_half_W = W[np.ix_(second_half_indices, second_half_indices)]
 
         # Stack samples
         first_halves = first_half_W.reshape(2, 2, 1)
