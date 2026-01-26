@@ -500,7 +500,7 @@ class TestDegreeMetrics(unittest.TestCase):
         in_degree_ignored_indices = InDegree(indices_from_user=ignored_indices)
         global_mask = flatten_square_matrix_to_edge_list(
             generate_binomial_tensor(
-                net_size=n, node_features_size=0, num_samples=1
+                net_size=n, num_samples=1
             )[..., -1],
             True,
         ).astype(bool)
@@ -522,7 +522,7 @@ class TestDegreeMetrics(unittest.TestCase):
         out_degree_ignored_indices = OutDegree(indices_from_user=ignored_indices)
         global_mask = flatten_square_matrix_to_edge_list(
             generate_binomial_tensor(
-                net_size=n, node_features_size=0, num_samples=1
+                net_size=n, num_samples=1
             )[..., -1],
             True,
         ).astype(bool)
@@ -543,7 +543,7 @@ class TestDegreeMetrics(unittest.TestCase):
         set_seed(384976)
         ignored_indices = np.random.choice(n, 12, replace=False)
         undirected_degree_ignored_indices = UndirectedDegree(indices_from_user=ignored_indices)
-        global_mask = generate_binomial_tensor(net_size=n, node_features_size=0, num_samples=1)[..., -1]
+        global_mask = generate_binomial_tensor(net_size=n, num_samples=1)[..., -1]
         global_mask = (global_mask + global_mask.T) // 2
         global_mask = flatten_square_matrix_to_edge_list(global_mask, False).astype(bool)
         dummy_metrics_collection = MetricsCollection(
@@ -733,7 +733,7 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         set_seed(92349)
         global_mask = flatten_square_matrix_to_edge_list(
             generate_binomial_tensor(
-                net_size=n_nodes, node_features_size=0, num_samples=1
+                net_size=n_nodes, num_samples=1
             )[..., -1],
             True,
         ).astype(bool)
@@ -1044,325 +1044,6 @@ class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
         np.testing.assert_array_equal(change_score_aa, expected_change_score)
 
 
-class TestNodeAttrSums(unittest.TestCase):
-    def test_calc_edge_weights(self):
-        node_attr = np.array([1, 2, 3, 4])
-        metric_both = NodeAttrSum(node_attr, is_directed=True)
-        expected_edge_weights = np.array([
-            [0, 3, 4, 5],
-            [3, 0, 5, 6],
-            [4, 5, 0, 7],
-            [5, 6, 7, 0]
-        ])
-        self.assertTrue(np.all(expected_edge_weights == metric_both.edge_weights))
-
-        metric_out = NodeAttrSumOut(node_attr)
-        expected_edge_weights = np.array([
-            [0, 1, 1, 1],
-            [2, 0, 2, 2],
-            [3, 3, 0, 3],
-            [4, 4, 4, 0]
-        ])
-        self.assertTrue(np.all(expected_edge_weights == metric_out.edge_weights))
-
-        metric_in = NodeAttrSumIn(node_attr)
-        self.assertTrue(np.all(expected_edge_weights.T == metric_in.edge_weights))
-
-    def test_calculate(self):
-        W = np.array([
-            [0, 1, 1, 0],
-            [0, 0, 0, 1],
-            [1, 0, 0, 0],
-            [0, 1, 1, 0]
-        ])
-
-        node_attr = np.array([1, 2, 3, 4])
-        metric_both = NodeAttrSum(node_attr, is_directed=True)
-        expected_statistic = 3 + 4 + 6 + 4 + 6 + 7
-        self.assertEqual(expected_statistic, metric_both.calculate(W)[0])
-
-        metric_out = NodeAttrSumOut(node_attr)
-        expected_statistic = 1 + 1 + 2 + 3 + 4 + 4
-        self.assertEqual(expected_statistic, metric_out.calculate(W)[0])
-
-        metric_in = NodeAttrSumIn(node_attr)
-        expected_statistic = 1 + 2 + 2 + 3 + 3 + 4
-        self.assertEqual(expected_statistic, metric_in.calculate(W)[0])
-
-    def test_calculate_for_sample(self):
-        n = 3
-        sample_size = 3
-
-        W1 = np.array([
-            [0, 1, 0],
-            [1, 0, 1],
-            [1, 0, 0]
-        ])
-        W2 = np.array([
-            [0, 0, 1],
-            [1, 0, 0],
-            [1, 1, 0]
-        ])
-        W3 = np.array([
-            [0, 0, 0],
-            [1, 0, 0],
-            [0, 1, 0]
-        ])
-
-        sample = np.zeros((n, n, sample_size))
-        sample[:, :, 0] = W1
-        sample[:, :, 1] = W2
-        sample[:, :, 2] = W3
-
-        node_attributes = np.array([2, 1, 1])
-
-        set_seed(2349876)
-        mask = generate_binomial_tensor(n, 0, 1)[..., -1].astype(bool)
-        masked_sample = np.einsum("ijk,ij->ijk", sample, mask)
-        mask = flatten_square_matrix_to_edge_list(mask, True)
-
-        metric_both = NodeAttrSum(node_attributes, is_directed=True)
-        expected_stats_sample = np.array([11, 11, 5])
-        calculated_stats_sample = metric_both.calculate_for_sample(sample)
-        self.assertTrue(np.all(expected_stats_sample == calculated_stats_sample))
-        calculated_stats_masked_sample = metric_both.calculate_for_sample(masked_sample)
-        calculated_stats_with_mask = metric_both.calculate_for_sample(sample, mask)
-        self.assertTrue(np.all(calculated_stats_with_mask == calculated_stats_masked_sample))
-
-        metric_out = NodeAttrSumOut(node_attributes)
-        expected_stats_sample = np.array([5, 5, 2])
-        calculated_stats_sample = metric_out.calculate_for_sample(sample)
-        self.assertTrue(np.all(expected_stats_sample == calculated_stats_sample))
-        calculated_stats_masked_sample = metric_out.calculate_for_sample(masked_sample)
-        calculated_stats_with_mask = metric_out.calculate_for_sample(sample, mask)
-        self.assertTrue(np.all(calculated_stats_with_mask == calculated_stats_masked_sample))
-
-        metric_in = NodeAttrSumIn(node_attributes)
-        expected_stats_sample = np.array([6, 6, 3])
-        calculated_stats_sample = metric_in.calculate_for_sample(sample)
-        self.assertTrue(np.all(expected_stats_sample == calculated_stats_sample))
-        calculated_stats_masked_sample = metric_in.calculate_for_sample(masked_sample)
-        calculated_stats_with_mask = metric_in.calculate_for_sample(sample, mask)
-        self.assertTrue(np.all(calculated_stats_with_mask == calculated_stats_masked_sample))
-
-    def test_calc_change_score(self):
-        W_off = np.zeros((3, 3))
-        W_on = np.ones((3, 3))
-
-        node_attributes = np.array([1, 0.5, 2])
-
-        metric_both = NodeAttrSum(node_attributes, is_directed=True)
-        metric_out = NodeAttrSumOut(node_attributes)
-        metric_in = NodeAttrSumIn(node_attributes)
-
-        calculated_change_score = metric_both.calc_change_score(W_off, (2, 1))
-        expected_change_score = 2.5
-        self.assertEqual(expected_change_score, calculated_change_score)
-
-        calculated_change_score = metric_both.calc_change_score(W_on, (2, 0))
-        expected_change_score = -3
-        self.assertEqual(expected_change_score, calculated_change_score)
-
-        calculated_change_score = metric_out.calc_change_score(W_off, (1, 0))
-        expected_change_score = 0.5
-        self.assertEqual(expected_change_score, calculated_change_score)
-
-        calculated_change_score = metric_out.calc_change_score(W_on, (0, 2))
-        expected_change_score = -1
-        self.assertEqual(expected_change_score, calculated_change_score)
-
-        calculated_change_score = metric_in.calc_change_score(W_off, (0, 1))
-        expected_change_score = 0.5
-        self.assertEqual(expected_change_score, calculated_change_score)
-
-        calculated_change_score = metric_in.calc_change_score(W_on, (1, 2))
-        expected_change_score = -2
-        self.assertEqual(expected_change_score, calculated_change_score)
-
-    def test_calculate_mple_regressors(self):
-        # directed both (in+out)
-        node_attr = np.array([3, 5, 7])
-        n = node_attr.size
-        # The edge weights matrix for reference
-        # np.array([
-        #     [0, 8, 10],
-        #     [8, 0, 12],
-        #     [10, 12, 0]
-        # ])
-
-        metric_both = NodeAttrSum(node_attr, is_directed=True)
-        dummy_metrics_collection = MetricsCollection(
-            metrics=[metric_both], n_nodes=n, is_directed=True, fix_collinearity=False
-        )
-        indices_lims = (0, 6)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_1_1 = np.array([[8.],
-                                            [10.],
-                                            [8.],
-                                            [12.],
-                                            [10.],
-                                            [12.]])
-        regressors = np.zeros_like(expected_regressors_1_1)
-        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_1_1))
-
-        indices_lims = (1, 4)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_1_2 = np.array([[10.],
-                                            [8.],
-                                            [12.]])
-        regressors = np.zeros_like(expected_regressors_1_2)
-        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_1_2))
-
-        global_mask_squared = np.array([
-            [False, False, True],
-            [True, False, False],
-            [True, False, False],
-        ])
-        global_mask = flatten_square_matrix_to_edge_list(global_mask_squared, True)
-        dummy_metrics_collection = MetricsCollection(
-            metrics=[metric_both], n_nodes=n, is_directed=True, fix_collinearity=False, mask=global_mask
-        )
-        indices_lims = (0, 2)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_1_masked = np.array([[10.],
-                                                 [8.]])
-        regressors = np.zeros_like(expected_regressors_1_masked)
-        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_1_masked))
-
-        # directed in
-        # The edge weights matrix for reference
-        # np.array([
-        #     [0, 5, 7],
-        #     [3, 0, 7],
-        #     [3, 5, 0]
-        # ])
-
-        metric_in = NodeAttrSumIn(node_attr)
-        dummy_metrics_collection = MetricsCollection(
-            metrics=[metric_in], n_nodes=n, is_directed=True, fix_collinearity=False
-        )
-        indices_lims = (0, 6)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_2_1 = np.array([[5.],
-                                            [7.],
-                                            [3.],
-                                            [7.],
-                                            [3.],
-                                            [5.]])
-        regressors = np.zeros_like(expected_regressors_2_1)
-        metric_in.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_2_1))
-
-        indices_lims = (1, 4)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_2_2 = np.array([[7.],
-                                            [3.],
-                                            [7.]])
-        regressors = np.zeros_like(expected_regressors_2_2)
-        metric_in.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_2_2))
-
-        dummy_metrics_collection = MetricsCollection(
-            metrics=[metric_in], n_nodes=n, is_directed=True, fix_collinearity=False, mask=global_mask
-        )
-        indices_lims = (1, 3)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_2_masked = np.array([[3.], [3.]])
-        regressors = np.zeros_like(expected_regressors_2_masked)
-        metric_in.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_2_masked))
-
-        # directed out
-        # The edge weights matrix for reference
-        # np.array([
-        #     [0, 3, 3],
-        #     [5, 0, 5],
-        #     [7, 7, 0]
-        # ])
-
-        metric_out = NodeAttrSumOut(node_attr)
-        dummy_metrics_collection = MetricsCollection(
-            metrics=[metric_out], n_nodes=n, is_directed=True, fix_collinearity=False
-        )
-        indices_lims = (0, 6)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_3_1 = np.array([[3.],
-                                            [3.],
-                                            [5.],
-                                            [5.],
-                                            [7.],
-                                            [7.]])
-        regressors = np.zeros_like(expected_regressors_3_1)
-        metric_out.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_3_1))
-
-        indices_lims = (1, 4)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_3_2 = np.array([[3.],
-                                            [5.],
-                                            [5.]])
-        regressors = np.zeros_like(expected_regressors_3_2)
-        metric_out.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_3_2))
-
-        dummy_metrics_collection = MetricsCollection(
-            metrics=[metric_out], n_nodes=n, is_directed=True, fix_collinearity=False, mask=global_mask
-        )
-        indices_lims = None
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_3_masked = np.array([[3.], [5.], [7.]])
-        regressors = np.zeros_like(expected_regressors_3_masked)
-        metric_out.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_3_masked))
-
-        # undirected (both)
-        node_attr = np.array([3, 5, 7])
-        # The edge weights matrix for reference
-        # np.array([
-        #     [0, 8, 10],
-        #     [8, 0, 12],
-        #     [10, 12, 0]
-        # ])
-
-        metric_both = NodeAttrSum(node_attr, is_directed=False)
-        dummy_metrics_collection = MetricsCollection(
-            metrics=[metric_both], n_nodes=n, is_directed=False, fix_collinearity=False
-        )
-        indices_lims = (0, 3)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        # in undirected graphs the expected outcome is the upper triangle (without the diagonal)
-        expected_regressors_1 = np.array([[8.],
-                                          [10.],
-                                          [12.]])
-        regressors = np.zeros_like(expected_regressors_1)
-        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_1))
-
-        indices_lims = (1, 2)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_2 = np.array([[10.]])
-        regressors = np.zeros_like(expected_regressors_2)
-        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_2))
-
-        dummy_metrics_collection = MetricsCollection(
-            metrics=[metric_both],
-            n_nodes=n,
-            is_directed=False,
-            fix_collinearity=False,
-            mask=(global_mask_squared | global_mask_squared.T)[np.triu_indices(n, k=1)],
-        )
-        indices_lims = (1, 2)
-        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
-        expected_regressors_3_masked = np.array([[10.]])
-        regressors = np.zeros_like(expected_regressors_3_masked)
-        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
-        self.assertTrue(np.all(regressors == expected_regressors_3_masked))
-
-
 class TestSumDistancesConnectedNeurons(unittest.TestCase):
     def test_sum_distances(self):
         positions = pd.DataFrame({"x_pos": [0, 0, 4], "y_pos": [0, 3, 0], "z_pos": [2, 2, 2]})
@@ -1579,89 +1260,6 @@ class TestSumDistancesConnectedNeurons(unittest.TestCase):
         self.assertTrue(np.all(Xs_out == expected_regressors_5))
 
 
-class TestNumberOfNodesPerType(unittest.TestCase):
-    def test_calculate(self):
-        V = np.array([[1, 0],
-                      [2, 1],
-                      [1, 1],
-                      [0, 2]])  # n=4, k=2
-
-        expected_num_neurons_per_type = np.array([1, 2, 1])
-        metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
-        calculated_num_neurons_per_type = metric.calculate(V[:, [0]])
-        self.assertTrue(np.all(expected_num_neurons_per_type[:-1] == calculated_num_neurons_per_type))
-
-    def test_calculate_for_sample(self):
-        n = 4
-        sample_size = 2
-        V1 = np.array([[1, 0],
-                       [2, 1],
-                       [1, 1],
-                       [0, 2]])
-        V2 = np.array([[2, 0],
-                       [0, 1],
-                       [0, 1],
-                       [0, 1]])
-
-        expected_num_neurons_per_type = np.array([
-            [1, 2, 1],
-            [3, 0, 1]
-        ]).T
-
-        sample = np.zeros((n, 1, sample_size), dtype=int)
-        sample[:, :, 0] = V1[:, [0]]
-        sample[:, :, 1] = V2[:, [0]]
-        metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
-        calculated_num_neurons_per_type = metric.calculate_for_sample(sample)
-        self.assertTrue(np.all(expected_num_neurons_per_type[:-1] == calculated_num_neurons_per_type))
-
-    def test_calc_change_score(self):
-        V1 = np.array([[1, 0],
-                       [2, 1],
-                       [1, 1],
-                       [0, 2]])
-        V2 = np.array([[2, 0],
-                       [0, 1],
-                       [0, 1],
-                       [0, 1]])
-
-        metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
-
-        calculated_change_score = metric.calc_change_score(V1[:, [0]], idx=2, new_category=0)
-        expected_change_score = np.array([1, -1, 0])
-        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
-
-        calculated_change_score = metric.calc_change_score(V1[:, [1]], idx=0, new_category=2)
-        expected_change_score = np.array([-1, 0, 1])
-        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
-
-        calculated_change_score = metric.calc_change_score(V2[:, [0]], idx=1, new_category=1)
-        expected_change_score = np.array([-1, 1, 0])
-        self.assertTrue(np.all(expected_change_score[:-1] == calculated_change_score))
-
-    def test_update_indices_to_ignore(self):
-        """Test updating indices to ignore for NumberOfNodesPerType."""
-        V = np.array([[1], [2], [0], [1]])  # 4 nodes, 3 categories
-
-        metric = NumberOfNodesPerType(metric_node_feature={'morphology'}, n_node_categories=3)
-        metric._n_nodes = 4
-        metric.initialize_indices_to_ignore()
-
-        # Initially, should have all features
-        initial_count = metric._get_effective_feature_count()
-        self.assertEqual(initial_count, 2)  # 3 categories - 1
-
-        # Now ignore first category
-        metric.update_indices_to_ignore([0])
-        updated_count = metric._get_effective_feature_count()
-        self.assertEqual(updated_count, 1)  # Only 1 feature left
-        self.assertLess(updated_count, initial_count)
-
-        # Calculate and verify result has correct shape
-        result = metric.calculate(V)
-        self.assertEqual(len(result), updated_count)
-
-
 class TestMetricsCollection(unittest.TestCase):
 
     def test_get_effective_feature_count(self):
@@ -1767,13 +1365,6 @@ class TestMetricsCollection(unittest.TestCase):
                 "expected_trimmed_metrics": {},
                 "expected_eliminated_metrics": []
             },
-            "sum_attr_both__sum_attr_in__sum_attr_out": {
-                "metrics": [NodeAttrSum(np.arange(n), is_directed=True), NodeAttrSumIn(np.arange(n)),
-                            NodeAttrSumOut(np.arange(n))],
-                "expected_num_of_features": 2,
-                "expected_trimmed_metrics": {},
-                "expected_eliminated_metrics": []
-            },
             "multiple_types": {
                 "n": n_for_multitypes_test,
                 "metrics": [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types_1),
@@ -1859,37 +1450,6 @@ class TestMetricsCollection(unittest.TestCase):
             [0, 1, 1],
             [1, 0, 1],
             [1, 1, 0]
-        ])
-
-        stats = collection.calculate_statistics(W)
-        expected_stats = np.array([3, 1])
-
-        np.testing.assert_array_equal(stats, expected_stats)
-
-        # Test directed graphs
-        metrics = [NumberOfEdgesDirected()]
-        collection = MetricsCollection(metrics, is_directed=True, n_nodes=3)
-        W = np.array([
-            [0, 1, 0],
-            [1, 0, 1],
-            [1, 0, 0]
-        ])
-
-        stats = collection.calculate_statistics(W)
-        expected_stats = np.array([4])
-
-        np.testing.assert_array_equal(stats, expected_stats)
-
-    def test_calculate_statistics_with_node_features(self):
-        # Test undirected graphs
-        metrics = [NumberOfEdgesUndirected(), NumberOfTriangles()]
-        collection = MetricsCollection(metrics, is_directed=False, n_nodes=3)
-
-        # Now, W is an (n, n+k) with n=3, k=2. Result shouldn't change.
-        W = np.array([
-            [0, 1, 1, 1, 2],
-            [1, 0, 1, 0, 1],
-            [1, 1, 0, 1, 0]
         ])
 
         stats = collection.calculate_statistics(W)
@@ -2421,19 +1981,11 @@ class TestTotalReciprocity(unittest.TestCase):
 
 
         # MPLE regressors = 1 if the reverse edge exists (would be reciprocal), 0 otherwise
-        # Xs[i, 0] corresponds to the i-th edge in the edge list order
-
-        # e.g., Xs[0, 0] is for edge (0,1): its reverse (1,0) exists in W, so regressor = 1
-        self.assertEqual(Xs[0, 0], 1, "Edge (0,1): W[1,0]=1, reverse edge (1,0) exists")
-        self.assertEqual(Xs[1, 0], 0, "Edge (0,2): W[2,0]=0, reverse edge (2,0) doesn't exist")
-        self.assertEqual(Xs[3, 0], 1, "Edge (1,0): W[0,1]=1, reverse edge (0,1) exists")
-        self.assertEqual(Xs[7, 0], 1, "Edge (2,1): W[1,2]=1, reverse edge (1,2) exists")
-        self.assertEqual(Xs[8, 0], 1, "Edge (2,3): W[3,2]=1, reverse edge (3,2) exists")
-        self.assertEqual(Xs[11, 0], 1, "Edge (3,2): W[2,3]=1, reverse edge (2,3) exists")
-        self.assertEqual(Xs[5, 0], 1, "Edge (1,3): W[3,1]=1, reverse edge (3,1) exists")
-
-        # All values should be in {0, 1} for MPLE regressors
-        self.assertTrue(np.all(np.isin(Xs, [0, 1])))
+        expected_Xs = np.array([
+            1, 0, 0, 1, 0, 1,  # edges from node 0, 1
+            0, 1, 1, 0, 0, 1   # edges from node 2, 3
+        ]).reshape(-1, 1)
+        np.testing.assert_array_equal(Xs, expected_Xs)
 
 
 class TestReciprocity(unittest.TestCase):

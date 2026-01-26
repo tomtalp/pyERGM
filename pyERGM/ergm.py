@@ -113,10 +113,6 @@ class ERGM():
             )
 
 
-        self.n_node_features = self._metrics_collection.n_node_features
-        self.node_feature_names = self._metrics_collection.node_feature_names.copy()
-        self.node_features_n_categories = self._metrics_collection.node_features_n_categories.copy()
-
         if initial_thetas is not None:
             if type(initial_thetas) != dict:
                 raise ValueError("Initial thetas must be a dictionary keyed by feature names, as returned by "
@@ -177,7 +173,7 @@ class ERGM():
         Parameters
         ----------
         W : np.ndarray
-            Network adjacency matrix of shape (n, n) or (n, n+k) if node features are included.
+            Network adjacency matrix of shape (n, n).
 
         Returns
         -------
@@ -189,7 +185,7 @@ class ERGM():
         ValueError
             If the dimensions of W don't match the expected network size.
         """
-        if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] < self._n_nodes:
+        if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] != self._n_nodes:
             raise ValueError(f"The dimensions of the given adjacency matrix, {W.shape}, don't comply with the number of"
                              f" nodes in the network: {self._n_nodes}")
         features = self._metrics_collection.calculate_statistics(W)
@@ -211,7 +207,6 @@ class ERGM():
                                      mcmc_steps_per_sample=1000,
                                      sampling_method="metropolis_hastings",
                                      edge_proposal_method='uniform',
-                                     edge_node_flip_ratio=None
                                      ):
         """
         Generate a sample of networks from the current ERGM model.
@@ -232,39 +227,28 @@ class ERGM():
             Sampling method to use. Options: "metropolis_hastings" (default), "exact".
         edge_proposal_method : str, optional
             Edge proposal distribution for MCMC. Default is "uniform".
-        edge_node_flip_ratio : float, optional
-            Ratio of edge flips to node feature flips in MCMC. Default is None.
 
         Returns
         -------
         np.ndarray
-            Array of sampled networks with shape (n, n+k, sample_size).
+            Array of sampled networks with shape (n, n, sample_size).
         """
         if burn_in is None:
             burn_in = 100 * (self._n_nodes ** 2)
-        
+
         if mcmc_steps_per_sample is None:
             mcmc_steps_per_sample = self._n_nodes ** 2
 
         if sampling_method == "metropolis_hastings":
             if seed_network is None:
-                seed_connectivity_matrix = generate_erdos_renyi_matrix(
+                seed_network = generate_erdos_renyi_matrix(
                     self._n_nodes, self._seed_MCMC_proba, self._is_directed
                 )
-                seed_neuron_features = np.zeros((self._n_nodes, self.n_node_features))
-                for feature_name, feature_indices in self.node_feature_names.items():
-                    for feature_index in feature_indices:
-                        seed_neuron_features[:, feature_index] = np.random.choice(
-                            self.node_features_n_categories[feature_name], size=self._n_nodes)
-                seed_network = np.concatenate((seed_connectivity_matrix, seed_neuron_features), axis=1)
 
             self.mh_sampler.set_thetas(self._thetas)
             return self.mh_sampler.sample(seed_network, sample_size, replace=replace, burn_in=burn_in,
                                           steps_per_sample=mcmc_steps_per_sample,
-                                          edge_proposal_method=edge_proposal_method,
-                                          node_feature_names=self.node_feature_names,
-                                          node_features_n_categories=self.node_features_n_categories,
-                                          edge_node_flip_ratio=edge_node_flip_ratio)
+                                          edge_proposal_method=edge_proposal_method)
         elif sampling_method == "exact":
             return self._generate_exact_sample(sample_size)
         else:
@@ -596,8 +580,6 @@ class ERGM():
             mcmc_steps_per_sample=10,
             mcmc_sample_size=100,
             edge_proposal_method='uniform',
-            edge_node_flip_ratio=None,
-            observed_node_features=None,
             **kwargs
             ):
         """
@@ -608,12 +590,6 @@ class ERGM():
         observed_networks : np.ndarray
             The observed network connectivity matrix, with shape (n, n) or (n, n, num_networks).
 
-        observed_node_features : dict
-            Optional. A dictionary of node features. Each key is the name of the feature, and the value is a list of
-            `n` numbers representing the feature of every node. *Defaults to None*.
-            
-            e.g. - `observed_node_features = {"E_I": [[0, 1, 1, 1]]}`
-            
         lr : float
             Optional. The learning rate for the optimization. *Defaults to 0.1*
 
@@ -706,15 +682,6 @@ class ERGM():
         (grads, hotelling_statistics) : (np.ndarray, list)
         # TODO - what do we want to return?
         """
-        # Create the full observed network from adjacency matrix and node features:
-        if observed_node_features is not None:
-            if len(observed_networks.shape) != 2:
-                raise ValueError("Multiple networks are not supported with observed_node_features")
-            ordered_observed_node_features = [observed_node_features[fname] for fname in self.node_feature_names.keys()]
-            ordered_observed_node_features = [one_d_f for f in ordered_observed_node_features for one_d_f in f]
-            ordered_observed_node_features = np.array(ordered_observed_node_features).T
-            observed_networks = np.concatenate([observed_networks, ordered_observed_node_features], axis=1)
-
         # This is because we assume the sample size is even when estimating the covariance matrix (in
         # calc_capital_gammas).
         if mcmc_sample_size % 2 != 0:
@@ -801,8 +768,7 @@ class ERGM():
             networks_for_sample = self.generate_networks_for_sample(sample_size=mcmc_sample_size,
                                                                     seed_network=mcmc_seed_network, burn_in=burn_in,
                                                                     mcmc_steps_per_sample=mcmc_steps_per_sample,
-                                                                    edge_proposal_method=edge_proposal_method,
-                                                                    edge_node_flip_ratio=edge_node_flip_ratio)
+                                                                    edge_proposal_method=edge_proposal_method)
             mcmc_seed_network = networks_for_sample[:, :, -1]
 
             features_of_net_samples = self._metrics_collection.calculate_sample_statistics(networks_for_sample)
