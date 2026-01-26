@@ -290,7 +290,7 @@ def convert_flat_no_diag_idx_to_i_j(flat_no_diag_idx: Collection[int], full_mat_
     return np.stack((rows, cols), axis=0).astype(np.int32)
 
 
-def get_custom_distribution_random_edges_to_flip(num_pairs, edge_probs):
+def get_custom_distribution_random_edges_to_flip(num_pairs, edge_probs, is_directed: bool):
     """
     Sample pairs of indices for edge flips according to a given probability distribution over all possible edges (all
     entries of the adjacency matrix but the main diagonal).
@@ -302,13 +302,14 @@ def get_custom_distribution_random_edges_to_flip(num_pairs, edge_probs):
         The probability distribution over all possible edges. The indexing here is in the flattened-no-diagonal format.
         This is equivalent to having a matrix A of nXn probabilities, where the i,j-th entry is the probability of the
         i,j-th edge to be sampled, and passing A[~np.eye(A.shape[0], dtype=bool)].
+    is_directed
+        Whether the network is directed.
     Returns
     -------
     A sample of num_pairs pairs of indices, sampled according to edge_probs.
     """
     num_possible_edges = edge_probs.size
-    # The solution for the equation n(n-1)=num_possible_edges
-    num_nodes = np.round((1 + np.sqrt(1 + 4 * num_possible_edges)) / 2)  # TODO: validate that this is indeed an int?
+    num_nodes = num_edges_to_num_nodes(num_possible_edges, is_directed=is_directed)
     flat_no_diag_indices = np.random.choice(edge_probs.size, p=edge_probs, size=num_pairs)
     # TODO: force the following to be pre-complied with numba, and the current as well?
     return convert_flat_no_diag_idx_to_i_j(flat_no_diag_indices, num_nodes)

@@ -175,3 +175,108 @@ class Test_MetropolisHastings(unittest.TestCase):
                                                                      is_directed=True, n_nodes=n))
         sampler.sample(initial_state=adj_mat, num_of_nets=10, edge_proposal_method='features_influence__sum')
         sampler.sample(initial_state=adj_mat, num_of_nets=10, edge_proposal_method='features_influence__softmax')
+
+    def test_custom_edge_proposal_distribution_sampling(self):
+        """
+        Verify that get_custom_distribution_random_edges_to_flip samples
+        edges according to the specified probability distribution.
+
+        Approach:
+        1. Create a model with non-uniform edge influences (using OutDegree)
+        2. Calculate the proposal distribution
+        3. Sample many edges
+        4. Compare empirical frequencies to theoretical probabilities using chi-squared test
+        """
+        from scipy.stats import chi2
+
+        set_seed(12345)
+        n = 5
+        is_directed = True
+        # OutDegree creates non-uniform influence: edges from node i affect
+        # node i's out-degree differently than other nodes
+        metrics_collection = MetricsCollection(
+            [NumberOfEdgesDirected(), OutDegree()],
+            is_directed=is_directed,
+            n_nodes=n
+        )
+
+        sampler = sampling.NaiveMetropolisHastings(
+            thetas=np.zeros(metrics_collection.num_of_features),
+            metrics_collection=metrics_collection
+        )
+
+        adj_mat = generate_erdos_renyi_matrix(n, 0.5, is_directed=is_directed)
+        # Test both normalization methods
+        for method in ['features_influence__sum', 'features_influence__softmax']:
+            if method == 'features_influence__sum':
+                sampler._calc_proposal_dist_features_influence__sum(adj_mat)
+            else:
+                sampler._calc_proposal_dist_features_influence__softmax(adj_mat)
+
+            edge_probs = sampler._edge_proposal_dists[method]
+
+            # Verify valid probability distribution
+            self.assertAlmostEqual(edge_probs.sum(), 1.0, places=10)
+            self.assertTrue(np.all(edge_probs >= 0))
+
+            # Sample many edges
+            num_samples = 100000
+            sampled_edges = get_custom_distribution_random_edges_to_flip(num_samples, edge_probs, is_directed=True)
+
+            # Convert (i,j) pairs back to flat-no-diagonal indices
+            flat_indices = sampled_edges[0] * (n - 1) + sampled_edges[1]
+            flat_indices[sampled_edges[1] > sampled_edges[0]] -= 1
+
+            # Count empirical frequencies
+            empirical_counts = np.bincount(flat_indices, minlength=n*(n-1))
+
+            # Chi-squared test for goodness of fit
+            expected_counts = edge_probs * num_samples
+            # Only test bins with expected count > 5 (chi-squared assumption)
+            valid_bins = expected_counts > 5
+            self.assertGreater(valid_bins.sum(), 1,
+                f"Not enough bins with expected count > 5 for chi-squared test ({valid_bins.sum()} bins)")
+
+            chi_squared = np.sum((empirical_counts[valid_bins] - expected_counts[valid_bins])**2
+                                 / expected_counts[valid_bins])
+            dof = valid_bins.sum() - 1
+
+            p_value = 1 - chi2.cdf(chi_squared, dof)
+
+            self.assertGreater(p_value, 0.01,
+                f"Chi-squared test failed for {method}: chi2={chi_squared:.2f}, dof={dof}, p={p_value:.4f}")
+
+    def test_proposal_distribution_creates_non_uniform_probs(self):
+        """
+        Verify that the proposal distribution is actually non-uniform when using
+        metrics that create different influences for different edges.
+        """
+        set_seed(67890)
+        n = 6
+
+        # OutDegree should create non-uniform influence since the first node's
+        # OutDegree is removed due to collinearity, making edges from node 0
+        # have different total influence than edges from other nodes
+        metrics_collection = MetricsCollection(
+            [NumberOfEdgesDirected(), OutDegree()],
+            is_directed=True,
+            n_nodes=n
+        )
+
+        sampler = sampling.NaiveMetropolisHastings(
+            thetas=np.zeros(metrics_collection.num_of_features),
+            metrics_collection=metrics_collection
+        )
+
+        adj_mat = generate_erdos_renyi_matrix(n, 0.5, is_directed=True)
+
+        sampler._calc_proposal_dist_features_influence__softmax(adj_mat)
+        edge_probs = sampler._edge_proposal_dists['features_influence__softmax']
+
+        # The distribution should NOT be uniform
+        uniform_prob = 1.0 / (n * (n - 1))
+        max_deviation_from_uniform = np.abs(edge_probs - uniform_prob).max()
+
+        # With OutDegree, we expect meaningful deviation from uniform
+        self.assertGreater(max_deviation_from_uniform, 0.001,
+            "Expected non-uniform distribution but got approximately uniform")
