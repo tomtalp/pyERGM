@@ -183,21 +183,6 @@ class TestGreatestConvexMinorant(unittest.TestCase):
         self.assertTrue(np.all(np.diff(minorant_vals, n=2) >= -10 ** -10))
 
 
-class TestSparseTensorUtilities(unittest.TestCase):
-    def test_transpose_sample_matrices(self):
-        np_tensor = np.random.choice([0, 1], size=(5, 5, 1), p=[0.8, 0.2])
-        expected_np_tensor_T = np.transpose(np_tensor, axes=(1, 0, 2))
-
-        sparse_tensor = np_tensor_to_sparse_tensor(np_tensor)
-
-        self.assertTrue(sparse_tensor.is_sparse)
-
-        transposed_sparse_tensor = transpose_sparse_sample_matrices(sparse_tensor)
-        transposed_sparse_tensor_as_np = transposed_sparse_tensor.to_dense().numpy()
-
-        self.assertTrue(np.all(expected_np_tensor_T == transposed_sparse_tensor_as_np))
-
-
 class TestCovarianceMatrixEstimation(unittest.TestCase):
 
     @staticmethod
@@ -229,7 +214,7 @@ class TestCovarianceMatrixEstimation(unittest.TestCase):
         for i in range(num_trials):
             sample = np.zeros((n, n, sample_size))
             for j in range(sample_size):
-                cur_mat = nx.to_numpy_array(nx.erdos_renyi_graph(n, p, directed=True))
+                cur_mat = generate_erdos_renyi_matrix(n, p, is_directed=True)
                 sample[:, :, j] = cur_mat
                 if TestCovarianceMatrixEstimation.validate_test_sample_validity(metrics_collection, sample):
                     return sample

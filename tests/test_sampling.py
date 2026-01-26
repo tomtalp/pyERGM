@@ -1,10 +1,8 @@
 import unittest
 import numpy as np
-import networkx as nx
 
 from pyERGM.utils import *
 from pyERGM.metrics import *
-from pyERGM.ergm import ERGM, BruteForceERGM
 from pyERGM import sampling
 
 
@@ -157,8 +155,7 @@ class Test_MetropolisHastings(unittest.TestCase):
     def test__calc_edge_influence_on_features(self):
         set_seed(5678234)
         n = 10
-        graph = nx.fast_gnp_random_graph(n, 0.5, seed=np.random)
-        adj_mat = nx.to_numpy_array(graph)
+        adj_mat = generate_erdos_renyi_matrix(n, 0.5, is_directed=False)
         sampler = sampling.NaiveMetropolisHastings(np.zeros(n),
                                                    MetricsCollection([NumberOfEdgesDirected(), OutDegree()],
                                                                      is_directed=True, n_nodes=n))
@@ -172,8 +169,7 @@ class Test_MetropolisHastings(unittest.TestCase):
     def test_sample_non_uniform_proposals_smoke_test(self):
         set_seed(5678234)
         n = 10
-        graph = nx.fast_gnp_random_graph(n, 0.5, seed=np.random)
-        adj_mat = nx.to_numpy_array(graph)
+        adj_mat = generate_erdos_renyi_matrix(n, 0.5, is_directed=False)
         sampler = sampling.NaiveMetropolisHastings(np.zeros(n),
                                                    MetricsCollection([NumberOfEdgesDirected(), OutDegree()],
                                                                      is_directed=True, n_nodes=n))

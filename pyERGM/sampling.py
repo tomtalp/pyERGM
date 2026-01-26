@@ -1,3 +1,4 @@
+from abc import abstractmethod, ABC
 from copy import deepcopy
 import numpy as np
 from pyERGM.logging_config import logger
@@ -7,7 +8,7 @@ import time
 from scipy.special import softmax
 
 
-class Sampler():
+class Sampler(ABC):
     """
     Abstract base class for ERGM network samplers.
 
@@ -20,8 +21,9 @@ class Sampler():
     """
     def __init__(self, thetas, metrics_collection: MetricsCollection):
         self.thetas = deepcopy(thetas)
-        self.metrics_collection = deepcopy(metrics_collection)
+        self.metrics_collection = metrics_collection
 
+    @abstractmethod
     def sample(self, initial_state, n_iterations):
         """Generate network samples. Must be implemented by subclasses."""
         pass
@@ -58,11 +60,11 @@ class NaiveMetropolisHastings(Sampler):
         """
         self.thetas = deepcopy(thetas)
 
-    def _calculate_weighted_change_score(self, current_network, edge_flip_info: dict, node_flip_info={}):
+    def _calculate_weighted_change_score(self, current_network, edge_flip_info: dict):
         """
         Calculate g(proposed_network)-g(current_network) and then inner product with thetas.
         """
-        change_score = self.metrics_collection.calc_change_scores(current_network, edge_flip_info, node_flip_info)
+        change_score = self.metrics_collection.calc_change_scores(current_network, edge_flip_info)
         return np.dot(self.thetas, change_score)
 
     def _flip_network_edge(self, current_network, i, j):
@@ -73,14 +75,6 @@ class NaiveMetropolisHastings(Sampler):
         current_network[i, j] = 1 - current_network[i, j]
         if not self.metrics_collection.is_directed:
             current_network[j, i] = 1 - current_network[j, i]
-
-    def _update_node_features(self, current_network, i, f, c):
-        """
-        Update node i's feature f (feature index) to be of category c.
-        NOTE! This function changes the network that is passed by reference
-        """
-        num_nodes = current_network.shape[0]
-        current_network[i, num_nodes + f] = c
 
     def _calc_edge_influence_on_features(self, net_for_change_scores: np.ndarray):
         """
@@ -142,18 +136,15 @@ class NaiveMetropolisHastings(Sampler):
                edge_proposal_method="uniform",
                # TODO - these two params need to be dependent on the network size
                burn_in=1000,
-               steps_per_sample=10,
-               node_feature_names={},
-               node_features_n_categories={},
-               edge_node_flip_ratio=None):
+               steps_per_sample=10):
         """
         Sample networks using the Metropolis-Hastings algorithm.
-        
+
         Parameters
         ----------
         initial_state : np.ndarray
             The initial network to start the Markov Chain from
-        
+
         num_of_nets : int
             The number of networks to sample
 
@@ -163,7 +154,7 @@ class NaiveMetropolisHastings(Sampler):
 
         steps_per_sample : int
             Optional. The number of steps to advance the chain between samples. *Defaults to 10*.
-        
+
         replace : bool
             A boolean flag indicating whether we sample with our without replacement. replace=True means networks can be
             duplicated.
@@ -176,19 +167,8 @@ class NaiveMetropolisHastings(Sampler):
         current_network = initial_state.copy()
 
         net_size = current_network.shape[0]
-        num_of_node_features = current_network.shape[1] - current_network.shape[0]
-        inverse_node_feature_names = {}
-        for feature_name, feature_indices in node_feature_names.items():
-            for i in feature_indices:
-                inverse_node_feature_names[i] = feature_name
 
-        sampled_networks = np.zeros((net_size, net_size + num_of_node_features, num_of_nets))
-        sampled_node_features = np.zeros((net_size, num_of_node_features, num_of_nets))
-        if edge_node_flip_ratio is None:
-            if num_of_node_features > 0:
-                edge_node_flip_ratio = max(1, int(net_size / num_of_node_features))
-            else:
-                edge_node_flip_ratio = net_size
+        sampled_networks = np.zeros((net_size, net_size, num_of_nets))
 
         num_flips = burn_in + (num_of_nets * steps_per_sample)
         if edge_proposal_method == 'uniform':
@@ -206,59 +186,25 @@ class NaiveMetropolisHastings(Sampler):
         else:
             raise ValueError(f"Got an unsupported edge proposal method {edge_proposal_method}")
 
-        # for now, nodes_to_flip supports only uniform sampling
-        if num_of_node_features != 0:
-            nodes_to_flip = get_uniform_random_nodes_to_flip(net_size, num_flips)
-            node_features_to_flip = np.random.choice(num_of_node_features, size=num_flips)
-            node_features_inds_to_n_categories = {feature_ind: node_features_n_categories[feature_name] for feature_ind, feature_name in inverse_node_feature_names.items()}
-            new_node_feature_categories = get_uniform_random_new_node_feature_categories(node_features_to_flip, node_features_inds_to_n_categories)
-
         random_nums_for_change_acceptance = np.random.rand(num_flips)
 
         networks_count = 0
         mcmc_iter_count = 0
-        feature_flip_counts = {feature_ind: 0 for feature_ind in range(num_of_node_features)}
 
         t1 = time.time()
         while networks_count != num_of_nets:
             # Edge flip:
-            random_edge_entry = edges_to_flip[:, mcmc_iter_count % edges_to_flip.shape[1]] # the number in axis 1 is always just mcmc_iter_count?
+            random_edge_entry = edges_to_flip[:, mcmc_iter_count % edges_to_flip.shape[1]]
             edge_flip_info = {
                 'edge': random_edge_entry,
-            } # This will be convenient when we'll start using non-binary edges
-
-            # Node flip
-            if (num_of_node_features != 0) and (mcmc_iter_count % edge_node_flip_ratio == 0):
-                random_node_entry = nodes_to_flip[mcmc_iter_count % nodes_to_flip.shape[0]]
-                random_feature_to_flip = node_features_to_flip[mcmc_iter_count % nodes_to_flip.shape[0]]
-                current_category = current_network[random_node_entry, random_feature_to_flip]
-                # random_feature_name_to_flip = inverse_node_feature_names[random_feature_to_flip]
-                random_new_category = new_node_feature_categories[random_feature_to_flip][current_category][feature_flip_counts[random_feature_to_flip]]
-                feature_flip_counts[random_feature_to_flip] += 1
-
-            else:
-                random_node_entry = None
-                random_feature_to_flip = None
-                current_category = None
-                random_feature_name_to_flip = None
-                random_new_category = None
-            node_flip_info = {
-                'node': random_node_entry,
-                'feature': random_feature_to_flip,
-                'new_category': random_new_category,
             }
 
-            change_score = self._calculate_weighted_change_score(current_network, edge_flip_info, node_flip_info)
+            change_score = self._calculate_weighted_change_score(current_network, edge_flip_info)
 
             rand_num = random_nums_for_change_acceptance[mcmc_iter_count % edges_to_flip.shape[1]]
             perform_change = change_score >= 1 or rand_num <= min(1, np.exp(change_score))
             if perform_change:
                 self._flip_network_edge(current_network, edge_flip_info['edge'][0], edge_flip_info['edge'][1])
-                if random_new_category is not None: # a node flip was suggested
-                    self._update_node_features(current_network,
-                                               node_flip_info['node'],
-                                               node_flip_info['feature'],
-                                               node_flip_info['new_category'])
 
             if mcmc_iter_count >= burn_in and (mcmc_iter_count - burn_in) % steps_per_sample == 0:
                 sampled_networks[:, :, networks_count] = current_network

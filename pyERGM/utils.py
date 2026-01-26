@@ -3,10 +3,8 @@ from collections import Counter
 from typing import Collection
 import numpy as np
 from numpy import typing as npt
-import networkx as nx
 from numba import njit
 from scipy.spatial.distance import mahalanobis
-import torch
 import random
 
 import pickle
@@ -28,7 +26,7 @@ def set_seed(seed):
     """
     Set random seed for reproducibility across all libraries.
 
-    Sets seeds for numpy, torch, Python's random module, and numba-jitted functions.
+    Sets seeds for numpy, Python's random module, and numba-jitted functions.
 
     Parameters
     ----------
@@ -36,7 +34,6 @@ def set_seed(seed):
         Random seed value.
     """
     np.random.seed(seed)
-    torch.manual_seed(seed)
     random.seed(seed)
     _numba_seed(seed)
 
@@ -71,26 +68,36 @@ def perturb_network_by_overriding_edge(network, value, i, j, is_directed):
     return perturbed_net
 
 
-def connectivity_matrix_to_G(W: np.ndarray, directed=False):
+def generate_erdos_renyi_matrix(n_nodes: int, p: float, is_directed: bool) -> np.ndarray:
     """
-    Convert a connectivity matrix to a graph object.
-    
+    Generate an Erdős-Rényi random graph as an adjacency matrix.
+
     Parameters
     ----------
-    W : np.ndarray
-        A connectivity matrix.
-        
+    n_nodes : int
+        Number of nodes in the graph.
+    p : float
+        Probability for edge creation (0 <= p <= 1).
+    is_directed : bool
+        If True, generate a directed graph. If False, generate an undirected graph.
+
     Returns
     -------
-    G : nx.Graph
-        A graph object.
-
+    np.ndarray
+        Adjacency matrix of shape (n_nodes, n_nodes) with no self-loops.
     """
-    if directed:
-        G = nx.from_numpy_array(W, create_using=nx.DiGraph)
+    if is_directed:
+        # Sample all off-diagonal entries independently
+        matrix = np.random.binomial(1, p, size=(n_nodes, n_nodes))
+        np.fill_diagonal(matrix, 0)
     else:
-        G = nx.from_numpy_array(W)
-    return G
+        # Sample upper triangle, then mirror to lower triangle
+        matrix = np.zeros((n_nodes, n_nodes))
+        upper_tri_indices = np.triu_indices(n_nodes, k=1)
+        matrix[upper_tri_indices] = np.random.binomial(1, p, size=len(upper_tri_indices[0]))
+        matrix = matrix + matrix.T
+
+    return matrix
 
 
 def get_random_nondiagonal_matrix_entry(n: int):
@@ -256,29 +263,6 @@ def get_uniform_random_nodes_to_flip(num_nodes, num_flips):
     return nodes_to_flip
 
 
-def get_uniform_random_new_node_feature_categories(node_features_to_flip, node_features_inds_to_n_categories):
-    """
-    Create a dictionary of all the possible category flips for the predetermined node features.
-    keys are node features indices, and values are dictionaries with the key being a category, and the value being
-    random new categories (excluding the current category) - a vector of size of the number of appearances of the
-    feature in the random feature flips array given as input. Each entry represents the new category to flip to.
-    Totally, we save num_flips x (mean_num_categories - 1) numbers.
-    The categories are sampled randomly.
-    """
-
-    new_node_features_categories = {}
-    for feature_ind, n_categories in node_features_inds_to_n_categories.items():
-        categories = np.arange(n_categories)
-        new_node_feature_categories = {}
-        for c in categories:
-            categories_without_c = np.delete(categories, c)
-            random_new_categories = np.random.choice(categories_without_c,
-                                                     size=(node_features_to_flip == feature_ind).sum())
-            new_node_feature_categories[c] = random_new_categories
-        new_node_features_categories[feature_ind] = new_node_feature_categories
-    return new_node_features_categories
-
-
 def convert_flat_no_diag_idx_to_i_j(flat_no_diag_idx: Collection[int], full_mat_size: int) -> np.ndarray[int]:
     """
     Converts the index in the flattened square matrix without the main diagonal to the pair of indices in the original
@@ -328,40 +312,6 @@ def get_custom_distribution_random_edges_to_flip(num_pairs, edge_probs):
     flat_no_diag_indices = np.random.choice(edge_probs.size, p=edge_probs, size=num_pairs)
     # TODO: force the following to be pre-complied with numba, and the current as well?
     return convert_flat_no_diag_idx_to_i_j(flat_no_diag_indices, num_nodes)
-
-
-def np_tensor_to_sparse_tensor(np_tensor: np.ndarray) -> torch.Tensor:
-    """
-    Receives a numpy tensor and converts it to a sparse Tensor, using Torch.
-    TODO - Support different types of Sparse Matrix data structures? More efficient conversion?
-    """
-    return torch.from_numpy(np_tensor).to_sparse()
-
-
-def transpose_sparse_sample_matrices(sparse_tensor: torch.Tensor) -> torch.Tensor:
-    """
-    Transpose a sparse tensor that represents k matrices of dimension n x n.
-    The transpose operation occurs along the dimension of sample (i.e. each matrix is transposed separately)
-
-    Parameters
-    ----------
-    sparse_tensor: torch.Tensor
-        A sparse tensor of dimension (n, n, k) representing k matrices of dim (n,n)
-
-    Returns
-    -------
-    transposed_tensor: torch.Tensor
-        The same tensor but matrices are transposed
-
-    """
-    n = sparse_tensor.shape[0]
-    k = sparse_tensor.shape[2]
-
-    indices = sparse_tensor.indices().type(torch.int64)
-    transposed_indices = torch.stack([indices[1], indices[0], indices[2]])
-    values = sparse_tensor.values()
-
-    return torch.sparse_coo_tensor(transposed_indices, values, (n, n, k))
 
 
 def approximate_auto_correlation_function(features_of_net_samples: np.ndarray) -> np.ndarray:
@@ -613,11 +563,11 @@ def calc_hotelling_statistic_for_sample(observed_features: np.ndarray, sample_fe
     return hotelling_t_as_f
 
 
-def generate_binomial_tensor(net_size, node_features_size, num_samples, p=0.5):
+def generate_binomial_tensor(net_size, num_samples, p=0.5):
     """
     Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
     """
-    return np.random.binomial(1, p, (net_size, net_size + node_features_size, num_samples)).astype(np.int8)
+    return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)
 
 
 def sample_from_independent_probabilities_matrix(
@@ -721,6 +671,21 @@ def convert_connectivity_to_dyad_states(connectivity: np.ndarray):
 
 
 def convert_dyads_states_to_connectivity(dyads_states):
+    """
+    Convert one-hot encoded dyadic states to directed adjacency matrix.
+
+    Inverse operation of convert_connectivity_to_dyad_states.
+
+    Parameters
+    ----------
+    dyads_states : np.ndarray
+        One-hot encoded dyadic states of shape (n_choose_2, 4).
+
+    Returns
+    -------
+    np.ndarray
+        Directed adjacency matrix of shape (n, n).
+    """
     num_dyads = dyads_states.shape[0]
     num_nodes = num_dyads_to_num_nodes(num_dyads)
     indices = np.triu_indices(num_nodes, k=1)
@@ -736,6 +701,23 @@ def convert_dyads_states_to_connectivity(dyads_states):
 
 
 def convert_dyads_state_indices_to_connectivity(dyads_states_indices):
+    """
+    Convert dyadic state indices to directed adjacency matrix.
+
+    Similar to convert_dyads_states_to_connectivity but takes indices (0-3)
+    instead of one-hot encoded states.
+
+    Parameters
+    ----------
+    dyads_states_indices : np.ndarray
+        Dyadic state indices of shape (n_choose_2,), where each value is 0-3
+        representing EMPTY, UPPER, LOWER, or RECIPROCAL.
+
+    Returns
+    -------
+    np.ndarray
+        Directed adjacency matrix of shape (n, n).
+    """
     num_dyads = dyads_states_indices.shape[0]
     num_nodes = num_dyads_to_num_nodes(num_dyads)
     indices = np.triu_indices(num_nodes, k=1)
@@ -913,3 +895,220 @@ def calc_entropy_dyads_dists(
         return np.mean(entropy_per_dyad)
     else:
         raise ValueError(f"reduction must be 'sum', 'mean', or 'none', got: {reduction}")
+
+
+class ConvergenceTester:
+    """
+    Utilities for testing ERGM optimization convergence.
+
+    This class provides various statistical tests to determine whether an ERGM
+    optimization has converged, i.e., whether the model's distribution matches
+    the observed data.
+    """
+    def __init__(self):
+        pass
+
+    @staticmethod
+    def _get_subsample_features(sampled_networks_features, num_subsamples, subsample_size):
+        """
+        Receives a sample of networks, and subsample for `num_subsamples` times, each time with `subsample_size` networks.
+        For each subsample, calculates the sample statistics and reshapes the result to a tensor of shape (num_of_features, num_subsamples, subsample_size).
+
+        Parameters
+        ----------
+        sampled_networks_features : np.ndarray
+            Features of a sample of networks that will be used for subsampling
+        
+        num_subsamples : int
+            The number of subsamples to draw from the sample.
+        
+        subsample_size : int
+            The size of each subsample.
+    
+        Returns
+        -------
+        sub_samples_features : np.ndarray
+            A tensor of shape (num_of_features, num_subsamples, subsample_size) containing the features of all subsamples.
+        """
+        sample_size = sampled_networks_features.shape[1]
+
+        sub_sample_indices = np.random.choice(np.arange(sample_size), size=num_subsamples * subsample_size)
+        sub_samples_features = sampled_networks_features[:, sub_sample_indices]
+        sub_samples_features = sub_samples_features.reshape(-1, num_subsamples, subsample_size)
+
+        return sub_samples_features
+
+    @staticmethod
+    def hotelling(observed_features, mean_features, inverted_sample_cov_matrix, sample_size, confidence=0.99):
+        """
+        Run the Hotelling's T-squared test for convergence.
+
+        The T-Squarted statistic is calculated as - 
+            t^2 = n * dist^2
+        where dist is the Mahalanobis distance between the observed and the mean features, used the given
+        covariance matrix.
+
+        The T^2 statistic can be transformed into an F statistic - 
+            F = (n-p / p(n-1)) * t^2
+        where p is the number of features and n is the sample size.
+        Finally the F statistic is compared to the critical value of the F distribution with p and n-p degrees of freedom.
+
+        Parameters
+        ----------
+        observed_features : np.ndarray
+            The observed features of the network.
+        
+        mean_features : np.ndarray
+            The mean features of the networks sampled from the model.
+        
+        inverted_sample_cov_matrix : np.ndarray
+            The inverted covariance matrix of the features that were calculated from the model sample.
+        
+        sample_size : int  
+            The number of networks sampled from the model.
+        
+        confidence : float
+            The confidence level for the test. *Defaults to 0.99*.
+        """
+        dist = mahalanobis(observed_features, mean_features, inverted_sample_cov_matrix)
+        hotelling_t_statistic = sample_size * dist * dist
+
+        num_of_features = observed_features.shape[0]
+
+        hotelling_as_f_statistic = ((sample_size - num_of_features) / (
+                num_of_features * (sample_size - 1))) * hotelling_t_statistic
+
+        hotelling_critical_value = f.ppf(1 - confidence, num_of_features, sample_size - num_of_features)
+
+        return {
+            "success": hotelling_as_f_statistic <= hotelling_critical_value,
+            "statistic": hotelling_as_f_statistic,
+            "threshold": hotelling_critical_value
+        }
+
+    @staticmethod
+    def bootstrapped_mahalanobis_from_observed(
+            observed_features,
+            sampled_networks_features,
+            inverted_observed_cov_matrix,
+            num_subsamples=100,
+            subsample_size=1000,
+            confidence=0.95,
+            stds_away_thr=1):
+        """
+        Test convergence using bootstrapped Mahalanobis distance from observed features.
+
+        Repeatedly subsamples from model-generated networks and calculates Mahalanobis
+        distance to the observed features using the observed covariance matrix. The observed
+        covariance matrix is estimated by subsampling the data (taking subnetworks), calculating
+        features for each subsample, and computing their covariance. This captures the "noise" or
+        variability within the observed data itself. Tests whether the model distribution is
+        within acceptable distance of the data.
+
+        Parameters
+        ----------
+        observed_features : np.ndarray
+            Observed network features.
+        sampled_networks_features : np.ndarray
+            Features from model-sampled networks.
+        inverted_observed_cov_matrix : np.ndarray
+            Inverse of the observed feature covariance matrix.
+        num_subsamples : int, optional
+            Number of bootstrap subsamples. Default is 100.
+        subsample_size : int, optional
+            Size of each subsample. Default is 1000.
+        confidence : float, optional
+            Confidence level for the test. Default is 0.95.
+        stds_away_thr : float, optional
+            Threshold in standard deviations. Default is 1.
+
+        Returns
+        -------
+        dict
+            Dictionary with keys 'success', 'statistic', and 'threshold'.
+        """
+        mahalanobis_dists = np.zeros(num_subsamples)
+
+        sub_samples_features = ConvergenceTester._get_subsample_features(sampled_networks_features, num_subsamples,
+                                                                         subsample_size)
+        mean_per_subsample = sub_samples_features.mean(axis=2)
+
+        for cur_subsam_idx in range(num_subsamples):
+            cur_subsample_mean = mean_per_subsample[:, cur_subsam_idx]
+            mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, cur_subsample_mean,
+                                                            inverted_observed_cov_matrix)
+
+        empirical_threshold = np.quantile(mahalanobis_dists, confidence)
+
+        return {
+            "success": empirical_threshold < stds_away_thr,
+            "statistic": empirical_threshold,
+            "threshold": stds_away_thr
+        }
+
+    @staticmethod
+    def bootstrapped_mahalanobis_from_model(
+            observed_features,
+            sampled_networks_features,
+            num_subsamples=100,
+            subsample_size=1000,
+            confidence=0.95,
+            stds_away_thr=1):
+        """
+        Repeatedly subsample from a collection of networks sampled from the model (`sampled_networks`), and calculate the Mahalanobis distance 
+        between each subsample mean and the observed network. This is equivalent to generating multiple estimations of the model mean & covariance.
+        We calculate the cutoff threshold for the Mahalanobis distance, according to the provided `confidence` level, and then verify whether
+        the empirical threshold is below `stds_away_thr` (which is standard deviations away from the observed data).
+
+        Parameters
+        ----------
+        observed_features : np.ndarray
+            The observed features of the network.
+        
+        sampled_networks_features : np.ndarray
+            Features of networks sampled from the model.
+        
+        num_subsamples : int
+            The number of subsamples to draw. *Defaults to 100*.
+
+        subsample_size : int
+            The size of each subsample. *Defaults to 1000*.
+        
+        confidence : float
+            The confidence level for the test. *Defaults to 0.95*.
+
+        stds_away_thr : float
+            The desired threshold for the Mahalanobis distance, in units of std *Defaults to 1*.
+        
+        Returns
+        -------
+        dict
+            Dictionary with keys 'success', 'statistic', and 'threshold'.
+        """
+        mahalanobis_dists = np.zeros(num_subsamples)
+
+        sub_samples_features = ConvergenceTester._get_subsample_features(sampled_networks_features, num_subsamples,
+                                                                         subsample_size)
+
+        for cur_subsam_idx in range(num_subsamples):
+            # print(
+            #     f"{datetime.datetime.now()} [model_bootstrap] \t\t Working on subsample {cur_subsam_idx}/{num_subsamples}")
+            sub_sample = sub_samples_features[:, cur_subsam_idx, :]
+            sub_sample_mean = sub_sample.mean(axis=1)
+            model_covariance_matrix = covariance_matrix_estimation(sub_sample, sub_sample_mean, method="naive")
+
+            if np.all(model_covariance_matrix == 0):
+                mahalanobis_dists[cur_subsam_idx] = np.inf
+                continue
+
+            inv_model_cov_matrix = np.linalg.pinv(model_covariance_matrix)
+
+            mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, sub_sample_mean, inv_model_cov_matrix)
+
+        empirical_threshold = np.quantile(mahalanobis_dists, confidence)
+
+        return {
+            "success": empirical_threshold < stds_away_thr,
+            "statistic": empirical_threshold,
+            "threshold": stds_away_thr
+        }

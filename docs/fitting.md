@@ -17,7 +17,7 @@ model = ERGM(num_nodes, metrics, is_directed=is_directed)
 model.fit(sampson_matrix)
 ```
 
-The above example fits a model from the Sampson's monastery data using the number of edges and total reciprocity as statistics. The graph is represented as an adjacency matrix, but pyERGM also supports graphs represented as `networkx` objects.
+The above example fits a model from the Sampson's monastery data using the number of edges and total reciprocity as statistics. The graph is represented as an adjacency matrix.
 
 ## ERGM
 ```python
@@ -33,7 +33,6 @@ class pyERGM.ERGM(n_nodes, metrics_collection, is_directed, **kwargs)
 * **initial_normalization_factor** (*float*) - Optional. The initial value of the normalization factor. If not provided, it is randomly initialized.
 * **seed_MCMC_proba** (*float*) - Optional. The probability of a connection in the seed graph for MCMC sampling, in case no seed graph is provided. *Defaults to 0.25*
 * **sample_size** (*int*) - Optional. The number of graphs to sample via MCMC. If number of samples is odd, it is increased by 1. This is because downstream algorithms assume the sample size is even (e.g. the Covariance matrix estimation). *Defaults to 1000*
-* **use_sparse_matrix** (*bool*) - Optional. Whether to use sparse matrices for the adjacency matrix.  Sparse matrices are implemented via PyTorch's Sparse Tensor's, which are still in beta.  *Defaults to False*
 * **fix_collinearity** (*bool*) - Optional. Whether to fix collinearity in the metrics. *Defaults to True*
 * **collinearity_fixer_sample_size** (*int*) - Optional. The number of graphs to sample for fixing collinearity. *Defaults to 1000*
 
@@ -48,7 +47,7 @@ With the exception of dyadic dependent models, all models are fit using the MCML
 
 **Parameters**:
 
-* **observed_graph** (*np.ndarray*) - The adjacency matrix of the observed graph. #TODO - how do we support nx.Graph?
+* **observed_graph** (*np.ndarray*) - The adjacency matrix of the observed graph.
 * **lr** (*float*) - Optional. The learning rate for the optimization. *Defaults to 0.1*
 * **opt_steps** (*int*) - Optional. The number of optimization steps to run. *Defaults to 1000*
 * **steps_for_decay** (*int*) - Optional. The number of steps after which to decay the optimization params. *Defaults to 100* # TODO - redundant parameter?
