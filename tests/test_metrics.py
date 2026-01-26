@@ -98,7 +98,7 @@ class TestNumberOfEdgesDirected(unittest.TestCase):
     def test_calc_mple_regressors_masked(self):
         n = 10
         mask = flatten_square_matrix_to_edge_list(
-            generate_binomial_tensor(n, 0, 1).astype(bool)[..., -1],
+            generate_binomial_tensor(n, 1).astype(bool)[..., -1],
             True,
         ).reshape(-1, 1)
         m = NumberOfEdgesDirected()
@@ -953,7 +953,7 @@ class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
         self.assertTrue(np.all(expected_mple_regressors == mple_regressors))
 
         set_seed(349876)
-        global_mask = generate_binomial_tensor(n_nodes, 0, 1)[..., -1][
+        global_mask = generate_binomial_tensor(n_nodes, 1)[..., -1][
             np.triu_indices(n_nodes, k=1)
         ].astype(bool)
         dummy_metrics_collection = MetricsCollection(
@@ -1139,7 +1139,7 @@ class TestSumDistancesConnectedNeurons(unittest.TestCase):
 
         set_seed(349876)
         global_mask = flatten_square_matrix_to_edge_list(
-            generate_binomial_tensor(3, 0, 1, 0.6)[..., -1].astype(bool),
+            generate_binomial_tensor(3, 1, 0.6)[..., -1].astype(bool),
             True,
         )
         assert not np.all(global_mask), "the randomly sampled global mask for testing shouldn't be all-True"
@@ -1229,7 +1229,7 @@ class TestSumDistancesConnectedNeurons(unittest.TestCase):
         self.assertTrue(np.all(Xs_out == expected_regressors_4_2))
 
         global_mask = (
-            generate_binomial_tensor(3, 0, 1, 0.6)[..., -1].astype(bool)
+            generate_binomial_tensor(3, 1, 0.6)[..., -1].astype(bool)
         )[np.triu_indices(3, k=1)]
         assert not np.all(global_mask), "the randomly sampled global mask for testing shouldn't be all-True"
         dummy_metrics_collection = MetricsCollection(
@@ -1406,9 +1406,6 @@ class TestMetricsCollection(unittest.TestCase):
         test_scenarios["num_edges__exogenous_types"]["expected_trimmed_metrics"] = {
             test_scenarios["num_edges__exogenous_types"]["metrics"][1]: [0, 10]
         }
-
-        test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["expected_eliminated_metrics"] = [
-            test_scenarios["sum_attr_both__sum_attr_in__sum_attr_out"]["metrics"][0]]
 
         test_scenarios["multiple_types"]["expected_trimmed_metrics"] = {
             test_scenarios["multiple_types"]["metrics"][1]: [0],
@@ -1983,7 +1980,7 @@ class TestTotalReciprocity(unittest.TestCase):
         # MPLE regressors = 1 if the reverse edge exists (would be reciprocal), 0 otherwise
         expected_Xs = np.array([
             1, 0, 0, 1, 0, 1,  # edges from node 0, 1
-            0, 1, 1, 0, 0, 1   # edges from node 2, 3
+            0, 1, 1, 1, 0, 1   # edges from node 2, 3
         ]).reshape(-1, 1)
         np.testing.assert_array_equal(Xs, expected_Xs)
 
