@@ -1,3 +1,4 @@
+from abc import abstractmethod
 from copy import deepcopy
 import numpy as np
 from pyERGM.logging_config import logger
@@ -22,6 +23,7 @@ class Sampler():
         self.thetas = deepcopy(thetas)
         self.metrics_collection = deepcopy(metrics_collection)
 
+    @abstractmethod
     def sample(self, initial_state, n_iterations):
         """Generate network samples. Must be implemented by subclasses."""
         pass

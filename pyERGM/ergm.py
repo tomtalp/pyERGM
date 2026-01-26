@@ -362,7 +362,6 @@ class ERGM():
         - Distributed computation (via _is_distributed_optimization) requires dyadic independence.
         """
         logger.debug("Calculating MPLE prediction")
-        sys.stdout.flush()
 
         # Check for dyadic dependence requirements
         is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
@@ -384,7 +383,6 @@ class ERGM():
 
         if self._is_distributed_optimization:
             logger.debug("Using distributed optimization for MPLE prediction")
-            sys.stdout.flush()
             data_path = distributed_mple_data_chunks_calculations(
                 self._metrics_collection,
                 observed_networks,
@@ -437,7 +435,7 @@ class ERGM():
         Raises
         ------
         NotImplementedError
-            If the model is not a reciprocity-only model.
+            If the model is independent or has dependencies between non-reciprocal edges.
         """
         if self._metrics_collection.choose_optimization_scheme() == 'MPLE_RECIPROCITY':
             if self._exact_dyadic_distributions is None:
@@ -546,7 +544,7 @@ class ERGM():
         Returns
         -------
         float
-            The entropy value (in nats if using natural log).
+            The entropy value in bits.
 
         Raises
         ------
@@ -913,8 +911,6 @@ class ERGM():
                     break
             else:
                 raise ValueError(f"Convergence criterion {convergence_criterion} not defined")
-
-            sys.stdout.flush()
 
         self._last_mcmc_chain_features = features_of_net_samples
 

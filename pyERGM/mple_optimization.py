@@ -426,11 +426,9 @@ def distributed_logistic_regression_optimization_step(data_path, thetas, funcs_t
         os.makedirs(chunks_path, exist_ok=True)
 
     logger.debug("Start waiting for children jobs in MPLE optimization")
-    sys.stdout.flush()
     wait_for_distributed_children_outputs(num_jobs, chunks_paths, job_array_ids, "__".join(funcs_to_calc),
                                           children_logs_dir)
     logger.debug("Done waiting for children jobs in MPLE optimization")
-    sys.stdout.flush()
 
     aggregated_funcs = []
     for func_to_calc in funcs_to_calc:
@@ -461,11 +459,9 @@ def distributed_mple_data_chunks_calculations(
     # able to access it.
     metric_collection_path = os.path.join(data_path, 'metric_collection.pkl')
     logger.debug("Dumping metrics collection")
-    sys.stdout.flush()
     with open(metric_collection_path, 'wb') as f:
         pickle.dump(metrics_collection, f)
     logger.debug("Dumped metrics collection")
-    sys.stdout.flush()
     observed_networks_path = os.path.join(data_path, 'observed_networks.pkl')
     logger.debug("Dumping observed networks")
     with open(observed_networks_path, 'wb') as f:
@@ -480,7 +476,6 @@ def distributed_mple_data_chunks_calculations(
     num_jobs = int(np.ceil(num_data_points / num_edges_per_job))
 
     logger.debug("Sending children jobs to calculate MPLE data chunks")
-    sys.stdout.flush()
     job_array_ids, children_logs_dir = run_distributed_children_jobs(
         out_dir_path,
         cmd_line_single_batch,
@@ -492,11 +487,9 @@ def distributed_mple_data_chunks_calculations(
     os.makedirs(chunks_path, exist_ok=True)
 
     logger.debug("Start waiting for children jobs in MPLE data paging")
-    sys.stdout.flush()
     wait_for_distributed_children_outputs(num_jobs, [chunks_path], job_array_ids, 'data_paging',
                                           children_logs_dir)
     logger.debug("Done waiting for children jobs in MPLE data paging")
-    sys.stdout.flush()
     # Clean current scripts
     shutil.rmtree((out_dir_path / "scripts").resolve())
     return data_path
@@ -515,7 +508,6 @@ def _run_distributed_logistic_regression_children_jobs(data_path, cur_thetas, fu
     num_jobs = len(glob.glob(f"{paged_chunks_path}/[0-9]*.npz"))
 
     logger.debug("Sending children jobs to calculate MPLE likelihood grad")
-    sys.stdout.flush()
     job_array_ids, children_logs_dir = run_distributed_children_jobs(out_path, cmd_line_single_batch,
                                                                      "distributed_logistic_regression.sh",
                                                                      num_jobs, "__".join(funcs_to_calculate))

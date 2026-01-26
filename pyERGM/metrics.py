@@ -5,7 +5,6 @@ from typing import Collection, Callable, Sequence, Any
 from copy import deepcopy
 import numpy as np
 import pandas as pd
-import sys
 from scipy.spatial.distance import pdist, squareform
 from enum import Enum
 
@@ -1470,7 +1469,6 @@ class MetricsCollection:
                  mask: npt.NDArray[bool] | None = None,
                  **kwargs):
         logger.debug("Initializing MetricsCollection")
-        sys.stdout.flush()
         if not do_copy_metrics:
             self.metrics = tuple([metric for metric in metrics])
         else:
@@ -1634,12 +1632,10 @@ class MetricsCollection:
         is_trimmable = metric_of_feat._get_effective_feature_count() > 1
         if not is_trimmable:
             logger.info(f"Removing the metric {str(metric_of_feat)} from the collection")
-            sys.stdout.flush()
             self._delete_metric(metric=metric_of_feat)
         else:
             idx_to_delete_within_metric = self.get_feature_idx_within_metric(idx)
             logger.info(f"Removing the {idx_to_delete_within_metric} feature of {str(metric_of_feat)}")
-            sys.stdout.flush()
             metric_of_feat.update_indices_to_ignore([idx_to_delete_within_metric])
         self.num_of_features = self.calc_num_of_features()
 
@@ -1681,7 +1677,6 @@ class MetricsCollection:
                 is_linearly_dependent = False
             else:
                 logger.info("Collinearity detected, identifying features to remove")
-                sys.stdout.flush()
 
                 # For each linear dependency (corresponding to an eigen vector with a low value), mark the indices of
                 # features that are involved (identified by a non-zero coefficient in the eigen vector).
