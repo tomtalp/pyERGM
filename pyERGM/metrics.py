@@ -992,14 +992,10 @@ class NumberOfEdgesTypes(Metric):
     def calculate_for_sample(self, networks_sample: np.ndarray, mask: npt.NDArray[bool] | None = None):
         sample_size = networks_sample.shape[2]
         stats = np.zeros((self._get_effective_feature_count(), sample_size))
-        num_ignored = 0
         mask = None if mask is None else reshape_flattened_off_diagonal_elements_to_square(mask, self._is_directed)
         for type_pair in self.sorted_type_pairs:
-            if (
-                    self._indices_to_ignore is not None and
-                    self._indices_to_ignore[self._sorted_type_pairs_indices[type_pair]]
-            ):
-                num_ignored += 1
+            type_pair_idx = self._sorted_type_pairs_indices[type_pair]
+            if self._indices_to_ignore is not None and self._indices_to_ignore[type_pair_idx]:
                 continue
             ix_grid = np.ix_(self.indices_of_types[type_pair[0]], self.indices_of_types[type_pair[1]])
             sub_array = networks_sample[ix_grid]
@@ -1008,7 +1004,12 @@ class NumberOfEdgesTypes(Metric):
             else:
                 mask_for_types = mask[ix_grid].astype(float)
                 stat = np.einsum("ijk,ij->k", sub_array, mask_for_types)
-            stats[self._sorted_type_pairs_indices[type_pair] - num_ignored] += stat
+            # Use precomputed cumsum to find correct index in effective feature vector
+            if self._indices_to_ignore is not None:
+                effective_idx = type_pair_idx - self._indices_to_ignore_up_to_idx[type_pair_idx]
+            else:
+                effective_idx = type_pair_idx
+            stats[effective_idx] += stat
         return stats / self._get_num_edges_in_mat_factor()
 
     # TODO: when we finally make calculate_for_sample the mandatory abstract method in Metric and remove calculate

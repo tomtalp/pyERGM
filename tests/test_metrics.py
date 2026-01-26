@@ -784,7 +784,7 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         # Should have fewer features due to ignored index
         n_features = metric._get_effective_feature_count()
         self.assertEqual(len(result), n_features)
-        self.assertLess(n_features, 4)  # Should be less than total possible types (2x2=4)
+        self.assertEqual(n_features, 3)
 
     def test_directed_calc_change_score_with_ignored_indices(self):
         """Test change score calculation with ignored indices."""
@@ -801,11 +801,20 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         metric._n_nodes = n
         metric.initialize_indices_to_ignore()
 
-        # Calculate change score for adding an edge
-        change_score = metric.calc_change_score(W, (0, 1))
         n_features = metric._get_effective_feature_count()
-        self.assertEqual(len(change_score), n_features)
-        self.assertLess(n_features, 4)
+        self.assertEqual(n_features, 3)
+
+        # Edge (0,1) is A->B which is type pair index 1 in full features.
+        # After removing ignored index 0, it maps to effective index 0.
+        # W[0,1]=1, so flipping removes the edge, change score = -1
+        change_score = metric.calc_change_score(W, (0, 1))
+        expected_change_score = np.array([-1, 0, 0])  # A->B at effective index 0
+        np.testing.assert_array_equal(change_score, expected_change_score)
+
+        # Edge (0,2) is A->A which is the ignored type pair (index 0).
+        # Change score should be all zeros since this type is ignored.
+        change_score_ignored = metric.calc_change_score(W, (0, 2))
+        np.testing.assert_array_equal(change_score_ignored, np.zeros(3))
 
 
 class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
@@ -978,18 +987,28 @@ class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
             [0, 1, 0, 0]
         ])
 
+        # For undirected with types ['A', 'B'], canonical pairs are:
+        # [('A','A'), ('A','B'), ('B','B')] = indices [0, 1, 2]
+        # indices_from_user=[1] ignores ('A','B'), so effective features are 2
         metric = NumberOfEdgesTypesUndirected(neuronal_types, indices_from_user=[1])
         n = len(neuronal_types)
         metric._n_nodes = n
         metric.initialize_indices_to_ignore()
 
+        n_features = metric._get_effective_feature_count()
+        self.assertEqual(n_features, 2)
+
         # Calculate features
         result = metric.calculate(W)
+        self.assertEqual(len(result), 2)
 
-        # Should have fewer features due to ignored index
-        n_features = metric._get_effective_feature_count()
-        self.assertEqual(len(result), n_features)
-        self.assertLess(n_features, 3)  # Should be less than total possible types for undirected
+        # Count edges by type in upper triangle (undirected):
+        # (0,1): A-B (ignored), (0,2): A-A = 1, (0,3): A-B (ignored)
+        # (1,2): B-A (ignored), (1,3): B-B = 1
+        # (2,3): A-B (ignored)
+        # So A-A count = 1, B-B count = 1
+        expected_result = np.array([1, 1])  # [A-A, B-B] after removing A-B
+        np.testing.assert_array_equal(result, expected_result)
 
     def test_undirected_calc_change_score_with_ignored_indices(self):
         """Test change score calculation with ignored indices."""
@@ -1001,16 +1020,28 @@ class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
             [0, 1, 0, 0]
         ])
 
+        # For undirected with types ['A', 'B'], canonical pairs are:
+        # [('A','A'), ('A','B'), ('B','B')] = indices [0, 1, 2]
+        # indices_from_user=[1] ignores ('A','B'), so effective features are 2
         metric = NumberOfEdgesTypesUndirected(neuronal_types, indices_from_user=[1])
         n = len(neuronal_types)
         metric._n_nodes = n
         metric.initialize_indices_to_ignore()
 
-        # Calculate change score for adding an edge
-        change_score = metric.calc_change_score(W, (0, 1))
         n_features = metric._get_effective_feature_count()
-        self.assertEqual(len(change_score), n_features)
-        self.assertLess(n_features, 3)
+        self.assertEqual(n_features, 2)
+
+        # Edge (0,1) is A-B which is the ignored type pair (index 1).
+        # W[0,1]=1, so flipping removes the edge, but since it's ignored,
+        # change score should be all zeros.
+        change_score = metric.calc_change_score(W, (0, 1))
+        np.testing.assert_array_equal(change_score, np.zeros(2))
+
+        # Edge (0,2) is A-A which is type pair index 0 (effective index 0).
+        # W[0,2]=1, so flipping removes the edge, change score = -1
+        change_score_aa = metric.calc_change_score(W, (0, 2))
+        expected_change_score = np.array([-1, 0])  # A-A at effective index 0
+        np.testing.assert_array_equal(change_score_aa, expected_change_score)
 
 
 class TestNodeAttrSums(unittest.TestCase):
@@ -2347,6 +2378,7 @@ class TestTotalReciprocity(unittest.TestCase):
         second_half_indices = np.array([2, 3])
 
         # Create subnetwork samples
+        # first_half_W = W[[0,1], :][:, [2,3]] = [[1,0], [0,1]]
         first_half_W = W[np.ix_(first_half_indices, second_half_indices)]
         second_half_W = W[np.ix_(second_half_indices, first_half_indices)]
 
@@ -2356,9 +2388,13 @@ class TestTotalReciprocity(unittest.TestCase):
 
         result = metric.calculate_bootstrapped_features(first_halves, second_halves, first_half_indices, second_half_indices)
 
-        # The result should be a scalar value (total reciprocity is 1 feature)
-        self.assertEqual(result.shape[0], 1)
-        self.assertIsInstance(result[0], (int, float, np.integer, np.floating))
+        # TotalReciprocity.calculate_for_sample on first_halves [[1,0],[0,1]]:
+        # einsum("ijk,jik->k", sample, sample) / 2 counts reciprocal pairs
+        # Reciprocal: (0,0)->1, (1,1)->1, total=2, /2 = 1
+        # Normalization: result * (n_obs*(n_obs-1)/2) / (n_half*(n_half-1)/2)
+        #              = 1 * (4*3/2) / (2*1/2) = 1 * 6 / 1 = 6
+        expected_result = np.array([6.0])
+        np.testing.assert_array_equal(result, expected_result)
 
     def test_total_reciprocity_calculate_mple_regressors(self):
         """Test MPLE regressor generation."""
@@ -2420,11 +2456,11 @@ class TestReciprocity(unittest.TestCase):
         # Calculate change score for adding edge (1, 0) which would create reciprocity with (0, 1)
         change_score = metric.calc_change_score(W, (1, 0))
 
-        # The change score should indicate which pairs become reciprocal
-        # Reciprocity uses n choose 2 features (unordered pairs)
-        self.assertEqual(change_score.shape[0], n * (n - 1) // 2)
-        # The pair (0,1) should become reciprocal
-        self.assertEqual(change_score[0], 1)  # Pair (0,1) becomes reciprocal
+        # Reciprocity uses n choose 2 features (unordered pairs via upper triangular indices):
+        # pairs: (0,1), (0,2), (0,3), (1,2), (1,3), (2,3)
+        # Adding edge (1,0) when W[0,1]=1 creates reciprocity for pair (0,1) only
+        expected_change_score = np.array([1, 0, 0, 0, 0, 0])
+        np.testing.assert_array_equal(change_score, expected_change_score)
 
     def test_reciprocity_calculate_for_sample(self):
         """Test batch calculation for Reciprocity."""

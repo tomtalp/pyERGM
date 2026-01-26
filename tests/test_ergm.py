@@ -1,13 +1,165 @@
 import unittest
 
 import numpy as np
-
+from scipy.optimize import minimize, OptimizeResult
 from pyERGM.utils import *
 from pyERGM.metrics import *
-from pyERGM.ergm import ERGM, BruteForceERGM
+from pyERGM.ergm import ERGM
 from pyERGM.datasets import sampson_matrix
 import sys
 from scipy.linalg import eigh
+
+class BruteForceERGM(ERGM):
+    """
+    Exact ERGM implementation via exhaustive enumeration of all networks.
+
+    This class computes ERGM quantities exactly by enumerating all possible networks
+    and calculating statistics, weights, and normalization constants. This is only
+    tractable for very small networks (≤5 nodes directed, ≤7 nodes undirected).
+
+    Primarily used for testing and validation of approximate methods.
+
+    Parameters
+    ----------
+    n_nodes : int
+        Number of nodes. Must be ≤5 for directed or ≤7 for undirected networks.
+    metrics_collection : Collection[Metric]
+        Collection of metrics to compute.
+    is_directed : bool, optional
+        Whether the network is directed. Default is False.
+    initial_thetas : dict, optional
+        Initial parameter values. If None, randomly initialized.
+
+    Attributes
+    ----------
+    MAX_NODES_BRUTE_FORCE_DIRECTED : int
+        Maximum nodes for directed networks (5).
+    MAX_NODES_BRUTE_FORCE_NOT_DIRECTED : int
+        Maximum nodes for undirected networks (7).
+    """
+    # The maximum number of nodes that is allowed for carrying brute force calculations (i.e. iterating the whole space
+    # of networks and calculating stuff exactly). This becomes not tractable above this limit.
+    MAX_NODES_BRUTE_FORCE_DIRECTED = 5
+    MAX_NODES_BRUTE_FORCE_NOT_DIRECTED = 7
+
+    def __init__(self,
+                 n_nodes,
+                 metrics_collection: Collection[Metric],
+                 is_directed=False,
+                 initial_thetas=None):
+        super().__init__(n_nodes,
+                         metrics_collection,
+                         is_directed,
+                         initial_thetas)
+
+        if is_directed:
+            num_connections = (n_nodes ** 2 - n_nodes)
+        else:
+            num_connections = (n_nodes ** 2 - n_nodes) // 2
+
+        self._num_nets = 2 ** num_connections
+
+        self._num_features = self._metrics_collection.num_of_features
+
+        all_networks = np.zeros((self._n_nodes, self._n_nodes, self._num_nets))
+        for i in range(self._num_nets):
+            all_networks[:, :, i] = construct_adj_mat_from_int(i, self._n_nodes, is_directed=is_directed)
+
+        self.all_features_by_all_nets = self._metrics_collection.calculate_sample_statistics(all_networks)
+        self._all_weights, self._normalization_factor = self._calc_all_weights()
+
+    def _calc_all_weights(self):
+        all_weights = np.exp(np.sum(self._thetas[:, None] * self.all_features_by_all_nets, axis=0))
+        normalization_factor = all_weights.sum()
+        return all_weights, normalization_factor
+
+    def _validate_net_size(self):
+        return (
+                (self._is_directed and self._n_nodes <= BruteForceERGM.MAX_NODES_BRUTE_FORCE_DIRECTED)
+                or
+                (not self._is_directed and self._n_nodes <= BruteForceERGM.MAX_NODES_BRUTE_FORCE_NOT_DIRECTED)
+        )
+
+    def calculate_weight(self, W: np.ndarray):
+        adj_mat_idx = construct_int_from_adj_mat(W, self._is_directed)
+        return self._all_weights[adj_mat_idx]
+
+    def generate_networks_for_sample(self, sample_size, sampling_method="Exact"):
+        if sampling_method != "Exact":
+            raise ValueError("BruteForceERGM supports only exact sampling (this is its whole purpose)")
+
+        all_nets_probs = self._all_weights / self._normalization_factor
+        sampled_idx = np.random.choice(all_nets_probs.size, p=all_nets_probs, size=sample_size)
+        return np.stack([construct_adj_mat_from_int(i, self._n_nodes, self._is_directed) for i in sampled_idx], axis=-1)
+
+    def calc_expected_features(self):
+        """
+        Calculate the expected values of all features under the model.
+
+        Returns
+        -------
+        np.ndarray
+            Expected feature values (sufficient statistics) under the current model.
+        """
+        all_probs = self._all_weights / self._normalization_factor
+
+        expected_features = self.all_features_by_all_nets @ all_probs
+        return expected_features
+
+    def fit(self, observed_networks):
+        """
+        Fit the model parameters to observed network(s) using exact likelihood.
+
+        Uses scipy.optimize.minimize to maximize the exact log-likelihood by
+        enumerating all possible networks.
+
+        Parameters
+        ----------
+        observed_networks : np.ndarray
+            Observed network(s) of shape (n, n) or (n, n, num_networks).
+
+        Returns
+        -------
+        OptimizeResult
+            Optimization result object from scipy.optimize.minimize.
+        """
+        def nll(thetas, observed_networks):
+            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
+                                   initial_thetas={feat_name: thetas[i] for i, feat_name in
+                                                   enumerate(self._metrics_collection.get_parameter_names())},
+                                   is_directed=self._is_directed)
+            log_z = np.log(model._normalization_factor)
+            observed_networks_log_weights = np.log(np.array(
+                [model.calculate_weight(observed_networks[..., i]) for i in range(observed_networks.shape[2])]))
+            return (log_z - observed_networks_log_weights).sum()
+
+        def nll_grad(thetas, observed_networks):
+            model = BruteForceERGM(self._n_nodes, list(self._metrics_collection.metrics),
+                                   initial_thetas={feat_name: thetas[i] for i, feat_name in
+                                                   enumerate(self._metrics_collection.get_parameter_names())},
+                                   is_directed=self._is_directed)
+            mean_observed_features = model._metrics_collection.calculate_sample_statistics(observed_networks).mean(
+                axis=1)
+            expected_features = model.calc_expected_features()
+            return expected_features - mean_observed_features
+
+        def after_iteration_callback(intermediate_result: OptimizeResult):
+            self.optimization_iter += 1
+            cur_time = time.time()
+            logger.info(f'iteration: {self.optimization_iter}, time from start '
+                  f'training: {cur_time - self.optimization_start_time} '
+                  f'log likelihood: {-intermediate_result.fun}')
+
+        if observed_networks.ndim == 2:
+            observed_networks = observed_networks[..., np.newaxis]
+
+        self.optimization_iter = 0
+        logger.info("BruteForceERGM optimization started")
+        self.optimization_start_time = time.time()
+        res = minimize(nll, self._thetas, args=(observed_networks,), jac=nll_grad, callback=after_iteration_callback)
+        self._thetas = res.x
+        self._all_weights, self._normalization_factor = self._calc_all_weights()
+        return res
 
 def ccc(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     """

@@ -3,7 +3,6 @@ import numpy as np
 
 from pyERGM.utils import *
 from pyERGM.metrics import *
-from pyERGM.ergm import ERGM, BruteForceERGM
 from pyERGM import sampling
 
 

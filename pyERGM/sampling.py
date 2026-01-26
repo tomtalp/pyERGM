@@ -1,4 +1,4 @@
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 from copy import deepcopy
 import numpy as np
 from pyERGM.logging_config import logger
@@ -8,7 +8,7 @@ import time
 from scipy.special import softmax
 
 
-class Sampler():
+class Sampler(ABC):
     """
     Abstract base class for ERGM network samplers.
 
@@ -21,7 +21,7 @@ class Sampler():
     """
     def __init__(self, thetas, metrics_collection: MetricsCollection):
         self.thetas = deepcopy(thetas)
-        self.metrics_collection = deepcopy(metrics_collection)
+        self.metrics_collection = metrics_collection
 
     @abstractmethod
     def sample(self, initial_state, n_iterations):
