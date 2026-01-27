@@ -370,8 +370,6 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
     success: bool
         Whether the optimization was successful
     """
-    if sample_weights is not None and is_distributed:
-        raise NotImplementedError("Sample weights are not supported with distributed optimization.")
 
     # TODO: this code is duplicated, but the scoping of the nonlocal variables makes it not trivial to export out of
     #  the scope of each function using it.
@@ -429,7 +427,8 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         pred = calc_logistic_regression_predictions(Xs, res.x.reshape(-1, 1)).flatten()
     else:
         data_path = distributed_mple_data_chunks_calculations(metrics_collection, observed_networks,
-                                                            kwargs.get('num_edges_per_job', 100000))
+                                                            kwargs.get('num_edges_per_job', 100000),
+                                                            sample_weights=sample_weights)
         if optimization_method == "L-BFGS-B":
             res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path,),
                            jac=True, callback=_after_optim_iteration_callback, method=optimization_method)
@@ -491,6 +490,7 @@ def distributed_mple_data_chunks_calculations(
         metrics_collection: MetricsCollection,
         observed_networks: np.ndarray,
         num_edges_per_job,
+        sample_weights: np.ndarray | None = None,
 ) -> Path:
     out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
     data_path = (out_dir_path / "data").resolve()
@@ -508,6 +508,12 @@ def distributed_mple_data_chunks_calculations(
     with open(observed_networks_path, 'wb') as f:
         pickle.dump(observed_networks, f)
     logger.debug("Dumped observed networks")
+    if sample_weights is not None:
+        sample_weights_path = os.path.join(data_path, 'sample_weights.pkl')
+        logger.debug("Dumping sample weights")
+        with open(sample_weights_path, 'wb') as f:
+            pickle.dump(sample_weights, f)
+        logger.debug("Dumped sample weights")
     cmd_line_single_batch = (f'python ./mple_data_distributed_paging.py '
                              f'--out_dir_path={out_dir_path} '
                              f'--num_edges_per_job={num_edges_per_job} ')
