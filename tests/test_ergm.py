@@ -808,3 +808,175 @@ class TestERGM(unittest.TestCase):
 
         thetas_ccc = ccc(normal_model._thetas, masked_model._thetas)
         self.assertTrue(thetas_ccc > 0.99)
+
+    def test_edge_weights_mask_equivalence_directed(self):
+        """
+        A masked model with metric NumberOfEdgesTypesDirected should produce the same thetas as an unmasked model
+        with weights=0 for masked edges and weights=1 for unmasked edges.
+        This works because NumberOfEdgesTypesDirected change scores are purely determined by node types (not network
+        state), so the Xs rows are identical whether computed over the masked or full network.
+        """
+        set_seed(348976)
+        n = 20
+        data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.3)
+        types = np.array([1, 2] * 10)
+
+        num_nodes_to_mask = 5
+        mask = np.zeros((n, n))
+        mask[:-num_nodes_to_mask, :-num_nodes_to_mask] = 1
+        mask[np.diag_indices(n)] = 0
+        mask = mask.astype(bool)
+
+        # Masked model
+        metrics_masked = [NumberOfEdgesTypesDirected(types)]
+        masked_model = ERGM(n_nodes=n, metrics_collection=metrics_masked, is_directed=True, mask=mask)
+        result_masked = masked_model.fit(data)
+        self.assertTrue(result_masked["success"])
+
+        # Weighted model (no mask, but weights=0 where mask=False, weights=1 where mask=True)
+        weights = mask.astype(float)
+        metrics_weighted = [NumberOfEdgesTypesDirected(types)]
+        weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=True)
+        result_weighted = weighted_model.fit(data, edge_weights=weights)
+        self.assertTrue(result_weighted["success"])
+
+        np.testing.assert_allclose(masked_model._thetas, weighted_model._thetas, rtol=1e-3)
+
+    def test_edge_weights_mask_equivalence_undirected(self):
+        """
+        Same as directed test but for undirected networks.
+        """
+        set_seed(389476)
+        n = 20
+        data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.3)
+        data = np.round((data + data.transpose(1, 0, 2)) / 2)
+        types = np.array([1, 2] * 10)
+
+        num_nodes_to_mask = 5
+        mask = np.zeros((n, n))
+        mask[:-num_nodes_to_mask, :-num_nodes_to_mask] = 1
+        mask[np.diag_indices(n)] = 0
+        mask = mask.astype(bool)
+
+        # Masked model
+        metrics_masked = [NumberOfEdgesTypesUndirected(types)]
+        masked_model = ERGM(n_nodes=n, metrics_collection=metrics_masked, is_directed=False, mask=mask)
+        result_masked = masked_model.fit(data)
+        self.assertTrue(result_masked["success"])
+
+        # Weighted model
+        weights = mask.astype(float)
+        metrics_weighted = [NumberOfEdgesTypesUndirected(types)]
+        weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=False)
+        result_weighted = weighted_model.fit(data, edge_weights=weights)
+        self.assertTrue(result_weighted["success"])
+
+        np.testing.assert_allclose(masked_model._thetas, weighted_model._thetas, rtol=1e-3)
+
+    def test_edge_weights_constant_weight_equivalence(self):
+        """Model with all weights = c should produce the same thetas as unweighted model."""
+        set_seed(67890)
+        n = 15
+        data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.2)
+        types = np.random.choice([1, 2], size=n)
+
+        # Unweighted model
+        metrics_unweighted = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
+        unweighted_model = ERGM(n_nodes=n, metrics_collection=metrics_unweighted, is_directed=True)
+        result_unw = unweighted_model.fit(data)
+        self.assertTrue(result_unw["success"])
+
+        # Weighted model with constant weight = 5
+        weights = 5.0 * np.ones((n, n))
+        np.fill_diagonal(weights, 0)
+        metrics_weighted = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
+        weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=True)
+        result_w = weighted_model.fit(data, edge_weights=weights)
+        self.assertTrue(result_w["success"])
+
+        np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=1e-3)
+
+    def test_edge_weights_ones_equals_no_weights(self):
+        """Model with all weights = 1 should produce exactly the same thetas as unweighted model."""
+        set_seed(112233)
+        n = 15
+        data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.2)
+        types = np.random.choice([1, 2], size=n)
+
+        # Unweighted model
+        metrics_unweighted = [NumberOfEdgesTypesDirected(types)]
+        unweighted_model = ERGM(n_nodes=n, metrics_collection=metrics_unweighted, is_directed=True)
+        result_unw = unweighted_model.fit(data)
+        self.assertTrue(result_unw["success"])
+
+        # Weighted model with all weights = 1
+        weights = np.ones((n, n))
+        np.fill_diagonal(weights, 0)
+        metrics_weighted = [NumberOfEdgesTypesDirected(types)]
+        weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=True)
+        result_w = weighted_model.fit(data, edge_weights=weights)
+        self.assertTrue(result_w["success"])
+
+        np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=3e-6)
+
+    def test_edge_weights_upweighting_shifts_theta(self):
+        """
+        Upweighting edges of a specific type pair should shift the fitted theta for that type pair
+        towards the density of edges in that type pair relative to unweighted.
+
+        With NumberOfEdgesTypesDirected, the MPLE solution for each type pair theta is:
+            theta = log(p / (1-p)) where p is the (weighted) density.
+
+        When we upweight existing A->B edges (y=1) more than absent ones (y=0),
+        the effective density increases, so the A->B theta should increase.
+        """
+        set_seed(445566)
+        n = 20
+        types = np.array(["A"] * 10 + ["B"] * 10)
+        type_A_indices = np.where(types == "A")[0]
+        type_B_indices = np.where(types == "B")[0]
+
+        data = generate_binomial_tensor(net_size=n, num_samples=1, p=0.3)[..., 0]
+        np.fill_diagonal(data, 0)
+
+        # Unweighted model
+        metrics1 = [NumberOfEdgesTypesDirected(types)]
+        model1 = ERGM(n_nodes=n, metrics_collection=metrics1, is_directed=True)
+        result1 = model1.fit(data)
+        self.assertTrue(result1["success"])
+
+        # Weighted model: upweight present A->B edges by 3x
+        weights = np.ones((n, n))
+        for i in type_A_indices:
+            for j in type_B_indices:
+                if data[i, j] == 1:
+                    weights[i, j] = 3.0
+        np.fill_diagonal(weights, 0)
+
+        metrics2 = [NumberOfEdgesTypesDirected(types)]
+        model2 = ERGM(n_nodes=n, metrics_collection=metrics2, is_directed=True)
+        result2 = model2.fit(data, edge_weights=weights)
+        self.assertTrue(result2["success"])
+
+        # Find the index corresponding to A->B type pair
+        ab_idx = metrics2[0]._sorted_type_pairs_indices[("A", "B")]
+
+        # The A->B theta should increase when we upweight present A->B edges
+        self.assertGreater(model2._thetas[ab_idx], model1._thetas[ab_idx])
+
+    def test_edge_weights_validation(self):
+        """Test that invalid edge weights raise appropriate errors."""
+        n = 10
+        data = np.random.randint(0, 2, (n, n))
+        np.fill_diagonal(data, 0)
+
+        metrics = [NumberOfEdgesDirected()]
+        model = ERGM(n_nodes=n, metrics_collection=metrics, is_directed=True)
+
+        # Wrong shape
+        with self.assertRaises(ValueError):
+            model.fit(data, edge_weights=np.ones((5, 5)))
+
+        # Negative weights
+        with self.assertRaises(ValueError):
+            model.fit(data, edge_weights=-np.ones((n, n)))

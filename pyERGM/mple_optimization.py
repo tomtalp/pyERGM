@@ -50,7 +50,8 @@ def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
 
 @njit
 def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray, eps=1e-10,
-                                                        reduction: str = 'sum', log_base: float = np.exp(1)):
+                                                        reduction: str = 'sum', log_base: float = np.exp(1),
+                                                        sample_weights: np.ndarray = np.empty(0)):
     """
     Calculate the log-likelihood of observations given model predictions.
 
@@ -70,6 +71,9 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
         How to aggregate the log-likelihood: 'sum' (default), 'mean', or 'none'.
     log_base : float, optional
         Base for logarithm. Default is e (natural log).
+    sample_weights : np.ndarray, optional
+        Per-sample weights of shape (num_samples, 1). If empty (default), all samples
+        are weighted equally.
 
     Returns
     -------
@@ -79,6 +83,8 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
     trimmed_predictions = np.clip(predictions, eps, 1 - eps)
     minus_binary_cross_entropy_per_edge = (ys * np.log(trimmed_predictions) + (1 - ys) * np.log(
         1 - trimmed_predictions)) / np.log(log_base)
+    if sample_weights.size > 0:
+        minus_binary_cross_entropy_per_edge = sample_weights * minus_binary_cross_entropy_per_edge
     if reduction == 'none':
         return minus_binary_cross_entropy_per_edge
     # The wrapping into a numpy array and reshape to 2D is necessary for numba to compile the function properly
@@ -92,7 +98,8 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
 
 
 @njit
-def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np.ndarray, ys: np.ndarray):
+def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np.ndarray, ys: np.ndarray,
+                                                  sample_weights: np.ndarray = np.empty(0)):
     """
     Calculate the gradient of log-likelihood with respect to model parameters.
 
@@ -107,17 +114,24 @@ def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np
         Predicted probabilities of shape (num_samples, 1).
     ys : np.ndarray
         Observed labels of shape (num_samples, 1).
+    sample_weights : np.ndarray, optional
+        Per-sample weights of shape (num_samples, 1). If empty (default), all samples
+        are weighted equally.
 
     Returns
     -------
     np.ndarray
         Gradient vector of shape (num_features, 1).
     """
-    return Xs.T @ (ys - predictions)
+    residuals = ys - predictions
+    if sample_weights.size > 0:
+        residuals = sample_weights * residuals
+    return Xs.T @ residuals
 
 
 @njit
-def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions: np.ndarray):
+def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions: np.ndarray,
+                                                     sample_weights: np.ndarray = np.empty(0)):
     """
     Calculate the Hessian matrix of log-likelihood.
 
@@ -130,13 +144,19 @@ def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions:
         Feature matrix of shape (num_samples, num_features).
     predictions : np.ndarray
         Predicted probabilities of shape (num_samples, 1).
+    sample_weights : np.ndarray, optional
+        Per-sample weights of shape (num_samples, 1). If empty (default), all samples
+        are weighted equally.
 
     Returns
     -------
     np.ndarray
         Hessian matrix of shape (num_features, num_features).
     """
-    return Xs.T @ (predictions * (1 - predictions) * Xs)
+    diag_values = predictions * (1 - predictions)
+    if sample_weights.size > 0:
+        diag_values = sample_weights * diag_values
+    return Xs.T @ (diag_values * Xs)
 
 
 def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas: np.ndarray, ys: np.ndarray):
@@ -163,7 +183,7 @@ def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas
     return (-np.log(1 + np.exp(-Xs @ thetas)) + (ys - 1) * Xs @ thetas).sum()
 
 
-def analytical_minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10):
+def analytical_minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10, sample_weights=np.empty(0)):
     """
     Compute negative log-likelihood for local (non-distributed) optimization.
 
@@ -179,6 +199,8 @@ def analytical_minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10):
         Observed labels.
     eps : float, optional
         Clipping value to avoid numerical issues. Default is 1e-10.
+    sample_weights : np.ndarray, optional
+        Per-sample weights. If empty (default), all samples are weighted equally.
 
     Returns
     -------
@@ -186,7 +208,7 @@ def analytical_minus_log_likelihood_local(thetas, Xs, ys, eps=1e-10):
         Negative log-likelihood value.
     """
     pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
-    return -calc_logistic_regression_predictions_log_likelihood(pred, ys)[0][0]
+    return -calc_logistic_regression_predictions_log_likelihood(pred, ys, sample_weights=sample_weights)[0][0]
 
 
 def analytical_minus_log_likelihood_distributed(thetas, data_path):
@@ -236,7 +258,7 @@ def analytical_logistic_regression_predictions_distributed(thetas, data_path):
     )[0]
 
 
-def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10):
+def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10, sample_weights=np.empty(0)):
     """
     Compute negative log-likelihood gradient for local optimization.
 
@@ -250,6 +272,8 @@ def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10):
         Observed labels.
     eps : float, optional
         Clipping value. Default is 1e-10.
+    sample_weights : np.ndarray, optional
+        Per-sample weights. If empty (default), all samples are weighted equally.
 
     Returns
     -------
@@ -257,10 +281,10 @@ def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10):
         Negative gradient vector.
     """
     pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
-    return -calc_logistic_regression_log_likelihood_grad(Xs, pred, ys).reshape(thetas.size, )
+    return -calc_logistic_regression_log_likelihood_grad(Xs, pred, ys, sample_weights=sample_weights).reshape(thetas.size, )
 
 
-def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10):
+def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10, sample_weights=np.empty(0)):
     """
     Compute negative log-likelihood Hessian for local optimization.
 
@@ -274,6 +298,8 @@ def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10):
         Observed labels.
     eps : float, optional
         Clipping value. Default is 1e-10.
+    sample_weights : np.ndarray, optional
+        Per-sample weights. If empty (default), all samples are weighted equally.
 
     Returns
     -------
@@ -281,7 +307,7 @@ def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10):
         Negative Hessian matrix.
     """
     pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
-    return -calc_logistic_regression_log_likelihood_hessian(Xs, pred)
+    return -calc_logistic_regression_log_likelihood_hessian(Xs, pred, sample_weights=sample_weights)
 
 
 def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_edges_per_job):
@@ -310,6 +336,7 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
 def mple_logistic_regression_optimization(metrics_collection: MetricsCollection, observed_networks: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
                                           is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
+                                          sample_weights: np.ndarray | None = None,
                                           **kwargs):
     """
     Optimize the parameters of a Logistic Regression model by maximizing the likelihood using scipy.optimize.minimize.
@@ -327,6 +354,9 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         Whether the calculations are carried locally or distributed over many compute nodes of an IBM LSF cluster.
     optimization_method
         The optimization method to use. Currently only 'L-BFGS-B' and 'Newton-CG' are supported.
+    sample_weights
+        An (n, n) matrix of non-negative edge weights. If provided, each edge's contribution to the
+        log-likelihood is scaled by its weight. If `None`, all edges are weighted equally.
     num_edges_per_job
         The number of graph edges (representing data points in this optimization) to consider for each job. Relevant
         only for distributed optimization.
@@ -340,6 +370,8 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
     success: bool
         Whether the optimization was successful
     """
+    if sample_weights is not None and is_distributed:
+        raise NotImplementedError("Sample weights are not supported with distributed optimization.")
 
     # TODO: this code is duplicated, but the scoping of the nonlocal variables makes it not trivial to export out of
     #  the scope of each function using it.
@@ -374,12 +406,21 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
     if not is_distributed:
         Xs = metrics_collection.prepare_mple_regressors(observed_networks[..., 0])
         ys = metrics_collection.prepare_mple_labels(observed_networks)
+
+        if sample_weights is not None:
+            flat_weights = flatten_square_matrix_to_edge_list(sample_weights, metrics_collection.is_directed)
+            if metrics_collection.mask is not None:
+                flat_weights = flat_weights[metrics_collection.mask]
+            flat_weights = flat_weights.reshape(-1, 1)
+        else:
+            flat_weights = np.empty(0)
+
         if optimization_method == "Newton-CG":
-            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
+            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, flat_weights),
                            jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
                            callback=_after_optim_iteration_callback, method=optimization_method)
         elif optimization_method == "L-BFGS-B":
-            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys),
+            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, flat_weights),
                            jac=analytical_minus_log_like_grad_local, method=optimization_method,
                            callback=_after_optim_iteration_callback)
         else:
