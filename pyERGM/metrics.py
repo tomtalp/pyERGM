@@ -21,23 +21,14 @@ class Metric(ABC):
     methods for calculating metrics, change scores, and handling sampling operations.
     All concrete metric implementations must inherit from this class.
 
-    Parameters
-    ----------
-    metric_type : str, optional
-        Type of metric: 'binary_edge' or 'non_binary_edge'. Default is 'binary_edge'.
     """
-    def __init__(self, metric_type='binary_edge'):
+    def __init__(self):
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
         self._is_directed = None
         self._is_dyadic_independent = True
         self._n_nodes = None
         self._indices_to_ignore = None
-        self._metric_type = metric_type  # can have values "binary_edge", "non_binary_edge"
-        if self._metric_type not in ['binary_edge', 'non_binary_edge']:
-            raise ValueError(
-                f"invalid metric type: {self._metric_type}. Should be one of: 'binary_edge', 'non_binary_edge'")
-
         self.does_support_mask = False
 
     def initialize_indices_to_ignore(self):
