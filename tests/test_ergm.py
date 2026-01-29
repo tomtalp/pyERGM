@@ -937,54 +937,64 @@ class TestERGM(unittest.TestCase):
 
         np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=3e-6)
 
-    def test_edge_weights_upweighting_shifts_theta(self):
+    def test_edge_weights_half_weight_equals_half_edges(self):
         """
-        Upweighting present edges (y=1) of a specific type pair shifts the fitted theta.
+        Verify that weight=0.5 is semantically equivalent to "half an edge".
 
-        With NumberOfEdgesTypesDirected, the MPLE solution for each type pair theta is:
-            theta = log(p / (1-p)) where p is the (weighted) density.
+        By adjusting the number of possible AB edges in Model 2, we make the
+        absent counts equal, so thetas should match exactly:
+        - Model 1: N_AB=100, k=32 present (w=0.5), 68 absent → θ = log(16/68)
+        - Model 2: N_AB=84,  k/2=16 present (w=1.0), 68 absent → θ = log(16/68)
 
-        If we have k edges out of N possible in the A->B region, and upweight present
-        edges by W, the weighted density becomes:
-            p_weighted = (W * k) / (W * k + (N - k)) = W * k / (W * k + N - k)
-
-        We verify that the fitted theta matches this theoretical value.
+        Key insight: N_AB2 = N_AB1 - k/2 makes absent counts equal.
         """
-        set_seed(445566)
+        set_seed(123456)
         n = 20
-        weight_factor = 3.0
-        types = np.array(["A"] * 10 + ["B"] * 10)
-        type_A_indices = np.where(types == "A")[0]
-        type_B_indices = np.where(types == "B")[0]
-        ab_mask = np.outer(np.isin(np.arange(n), type_A_indices),
-                           np.isin(np.arange(n), type_B_indices))
 
-        data = generate_binomial_tensor(net_size=n, num_samples=1, p=0.3)[..., 0]
-        np.fill_diagonal(data, 0)
+        # Model 1: 10 A × 10 B = 100 possible AB edges, k=32 present
+        n_A1, n_B1 = 10, 10
+        k = 32  # chosen so N_AB2 = 100 - 16 = 84 = 6 × 14
 
-        # Count A->B edges
-        n_ab_possible = ab_mask.sum()
-        n_ab_edges = (ab_mask & (data == 1)).sum()
+        types1 = np.array(["A"] * n_A1 + ["B"] * n_B1)
+        ab_mask1 = np.outer(types1 == "A", types1 == "B")
 
-        # Weighted model: upweight present A->B edges by weight_factor
-        weights = np.ones((n, n))
-        weights[ab_mask & (data == 1)] = weight_factor
-        np.fill_diagonal(weights, 0)
+        # Select k random AB positions to turn on
+        ab_positions1 = np.argwhere(ab_mask1)
+        np.random.shuffle(ab_positions1)
+        selected_edges = ab_positions1[:k]
 
-        metrics = [NumberOfEdgesTypesDirected(types)]
-        model = ERGM(n_nodes=n, metrics_collection=metrics, is_directed=True)
-        result = model.fit(data, edge_weights=weights)
-        self.assertTrue(result["success"])
+        data1 = np.zeros((n, n), dtype=int)
+        data1[selected_edges[:, 0], selected_edges[:, 1]] = 1
 
-        ab_idx = metrics[0]._sorted_type_pairs_indices[("A", "B")]
+        # Weights: 0.5 for present AB edges, 1.0 elsewhere
+        weights1 = np.ones((n, n))
+        weights1[ab_mask1 & (data1 == 1)] = 0.5
 
-        # Theoretical weighted density and theta
-        weighted_ones = weight_factor * n_ab_edges
-        weighted_zeros = n_ab_possible - n_ab_edges  # zeros still have weight 1
-        p_weighted = weighted_ones / (weighted_ones + weighted_zeros)
-        expected_theta = np.log(p_weighted / (1 - p_weighted))
+        model1 = ERGM(n_nodes=n, metrics_collection=[NumberOfEdgesTypesDirected(types1)], is_directed=True)
+        result1 = model1.fit(data1, edge_weights=weights1)
+        self.assertTrue(result1["success"])
+        theta1 = model1._thetas[model1._metrics_collection.metrics[0]._sorted_type_pairs_indices[("A", "B")]]
 
-        np.testing.assert_allclose(model._thetas[ab_idx], expected_theta, rtol=1e-5)
+        # Model 2: 6 A × 14 B = 84 possible AB edges, k/2=16 present
+        n_A2, n_B2 = 6, 14
+
+        types2 = np.array(["A"] * n_A2 + ["B"] * n_B2)
+        ab_mask2 = np.outer(types2 == "A", types2 == "B")
+
+        # Select k/2 random AB positions to turn on
+        ab_positions2 = np.argwhere(ab_mask2)
+        np.random.shuffle(ab_positions2)
+        selected_edges2 = ab_positions2[:k // 2]
+
+        data2 = np.zeros((n, n), dtype=int)
+        data2[selected_edges2[:, 0], selected_edges2[:, 1]] = 1
+
+        model2 = ERGM(n_nodes=n, metrics_collection=[NumberOfEdgesTypesDirected(types2)], is_directed=True)
+        result2 = model2.fit(data2)
+        self.assertTrue(result2["success"])
+        theta2 = model2._thetas[model2._metrics_collection.metrics[0]._sorted_type_pairs_indices[("A", "B")]]
+
+        np.testing.assert_allclose(theta1, theta2, rtol=1e-5)
 
     def test_edge_weights_validation(self):
         """Test that invalid edge weights raise appropriate errors."""
