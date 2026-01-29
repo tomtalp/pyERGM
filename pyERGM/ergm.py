@@ -260,7 +260,8 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_networks, optimization_method: str = 'L-BFGS-B', **kwargs):
+    def _mple_fit(self, observed_networks, optimization_method: str = 'L-BFGS-B',
+                  edge_weights: np.ndarray | None = None, **kwargs):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -274,7 +275,10 @@ class ERGM():
         ----------
         observed_networks : np.ndarray
             The adjacency matrix of the observed network, or an array of adjacency matrices.
-        
+        edge_weights : np.ndarray or None, optional
+            Non-negative edge weights as a flattened array. If provided, each edge's contribution
+            to the log-likelihood is scaled by its weight. Default is None (unweighted).
+
         Returns
         -------
         thetas: np.ndarray
@@ -287,6 +291,7 @@ class ERGM():
             observed_networks,
             is_distributed=self._is_distributed_optimization,
             optimization_method=optimization_method,
+            sample_weights=edge_weights,
             num_edges_per_job=num_edges_per_job,
         )
 
@@ -580,6 +585,7 @@ class ERGM():
             mcmc_steps_per_sample=10,
             mcmc_sample_size=100,
             edge_proposal_method='uniform',
+            edge_weights: np.ndarray | None = None,
             **kwargs
             ):
         """
@@ -696,13 +702,34 @@ class ERGM():
             self._thetas = self._get_random_thetas(sampling_method="uniform")
             is_theta_init = True
 
+        if edge_weights is None:
+            self._edge_weights = None
+        else:
+            n = self._n_nodes
+            flat_size = (n * n - n) if self._is_directed else (n * n - n) // 2
+            if edge_weights.shape == (n, n):
+                self._edge_weights = flatten_square_matrix_to_edge_list(edge_weights, self._is_directed)
+            elif edge_weights.shape == (flat_size,):
+                self._edge_weights = edge_weights.copy()
+            else:
+                raise ValueError(
+                    f"edge_weights must have shape ({n}, {n}) or ({flat_size},), "
+                    f"got {edge_weights.shape}")
+            if np.any(self._edge_weights < 0):
+                raise ValueError("edge_weights must be non-negative")
+
         optimization_scheme = kwargs.get("optimization_scheme", "AUTO")
         if optimization_scheme == "AUTO":
             optimization_scheme = self._metrics_collection.choose_optimization_scheme()
+
+        if self._edge_weights is not None and optimization_scheme != "MPLE":
+            raise NotImplementedError("edge_weights are only supported for MPLE optimization.")
+
         if optimization_scheme == "MPLE" or (theta_init_method == 'mple' and optimization_scheme == 'MCMLE'):
             self._thetas, success = self._mple_fit(observed_networks,
                                                    optimization_method=kwargs.get('mple_optimization_method',
                                                                                   'L-BFGS-B'),
+                                                   edge_weights=self._edge_weights,
                                                    num_edges_per_job=kwargs.get('num_edges_per_job', 100000))
             if optimization_scheme == "MPLE":
                 logger.info("Done training model using MPLE")
