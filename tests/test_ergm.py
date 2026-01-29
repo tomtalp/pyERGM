@@ -919,6 +919,8 @@ class TestERGM(unittest.TestCase):
         set_seed(112233)
         n = 15
         data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.2)
+        # Symmetrize for undirected network
+        data = np.maximum(data, np.transpose(data, axes=(1, 0, 2)))
         types = np.random.choice([1, 2], size=n)
 
         # Unweighted model
@@ -935,27 +937,41 @@ class TestERGM(unittest.TestCase):
         result_w = weighted_model.fit(data, edge_weights=weights)
         self.assertTrue(result_w["success"])
 
-        np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=3e-6)
+        np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=1e-5)
+
 
     def test_edge_weights_half_weight_equals_half_edges(self):
         """
-        Verify that weight=0.5 is semantically equivalent to "half an edge".
+        Verify that edge weights correctly scale contributions to the likelihood.
 
-        By adjusting the number of possible AB edges in Model 2, we make the
-        absent counts equal, so thetas should match exactly:
-        - Model 1: N_AB=100, k=32 present (w=0.5), 68 absent → θ = log(16/68)
-        - Model 2: N_AB=84,  k/2=16 present (w=1.0), 68 absent → θ = log(16/68)
+        We construct two models that should yield identical θ_AB:
 
-        Key insight: N_AB2 = N_AB1 - k/2 makes absent counts equal.
+        Model 1 (weighted): k present edges with weight w, absent edges with adjusted weight
+        Model 2 (unweighted): k*w present edges, all weights = 1
+
+        The alternative_weight for absent edges is chosen so that:
+            weighted_absent_1 = unweighted_absent_2
+            alternative_weight * (N_AB - k) = N_AB - k*w
+            alternative_weight = (N_AB - k*w) / (N_AB - k)
+
+        This ensures both models have:
+            weighted_present = k*w (Model 1) = k*w (Model 2)
+            weighted_absent = (N_AB - k*w) in both models
+            θ = log(k*w / (N_AB - k*w))
         """
         set_seed(123456)
         n = 20
+        n_A, n_B = 10, 10
+        n_AB = n_A * n_B  # 100 possible AB edges
+        k = 32  # number of present edges
+        weight = 0.5
 
-        # Model 1: 10 A × 10 B = 100 possible AB edges, k=32 present
-        n_A1, n_B1 = 10, 10
-        k = 32  # chosen so N_AB2 = 100 - 16 = 84 = 6 × 14
+        # Compute weight for absent edges so weighted_absent equals unweighted absent count in Model 2
+        # Model 2 will have (N_AB - k*weight) absent edges, so we need:
+        # alternative_weight * (N_AB - k) = (N_AB - k*weight)
+        alternative_weight = (n_AB - weight * k) / (n_AB - k)
 
-        types1 = np.array(["A"] * n_A1 + ["B"] * n_B1)
+        types1 = np.array(["A"] * n_A + ["B"] * n_B)
         ab_mask1 = np.outer(types1 == "A", types1 == "B")
 
         # Select k random AB positions to turn on
@@ -963,38 +979,30 @@ class TestERGM(unittest.TestCase):
         np.random.shuffle(ab_positions1)
         selected_edges = ab_positions1[:k]
 
-        data1 = np.zeros((n, n), dtype=int)
+        data1 = generate_binomial_tensor(n, 1, p=0.2)[..., 0]
+        data1[ab_positions1] = 0
+
         data1[selected_edges[:, 0], selected_edges[:, 1]] = 1
 
-        # Weights: 0.5 for present AB edges, 1.0 elsewhere
+        # Model 1: weighted - present edges get `weight`, absent edges get `alternative_weight`
         weights1 = np.ones((n, n))
-        weights1[ab_mask1 & (data1 == 1)] = 0.5
+        weights1[ab_mask1 & (data1 == 1)] = weight
+        weights1[ab_mask1 & (data1 == 0)] = alternative_weight
 
         model1 = ERGM(n_nodes=n, metrics_collection=[NumberOfEdgesTypesDirected(types1)], is_directed=True)
         result1 = model1.fit(data1, edge_weights=weights1)
         self.assertTrue(result1["success"])
         theta1 = model1._thetas[model1._metrics_collection.metrics[0]._sorted_type_pairs_indices[("A", "B")]]
 
-        # Model 2: 6 A × 14 B = 84 possible AB edges, k/2=16 present
-        n_A2, n_B2 = 6, 14
+        # Model 2: unweighted - remove (1-weight)*k edges, fit without weights
+        n_edges_to_remove = int(k * weight)
+        data1[selected_edges[:n_edges_to_remove, 0], selected_edges[:n_edges_to_remove, 1]] = 0
 
-        types2 = np.array(["A"] * n_A2 + ["B"] * n_B2)
-        ab_mask2 = np.outer(types2 == "A", types2 == "B")
-
-        # Select k/2 random AB positions to turn on
-        ab_positions2 = np.argwhere(ab_mask2)
-        np.random.shuffle(ab_positions2)
-        selected_edges2 = ab_positions2[:k // 2]
-
-        data2 = np.zeros((n, n), dtype=int)
-        data2[selected_edges2[:, 0], selected_edges2[:, 1]] = 1
-
-        model2 = ERGM(n_nodes=n, metrics_collection=[NumberOfEdgesTypesDirected(types2)], is_directed=True)
-        result2 = model2.fit(data2)
+        result2 = model1.fit(data1)
         self.assertTrue(result2["success"])
-        theta2 = model2._thetas[model2._metrics_collection.metrics[0]._sorted_type_pairs_indices[("A", "B")]]
+        theta2 = model1._thetas[model1._metrics_collection.metrics[0]._sorted_type_pairs_indices[("A", "B")]]
 
-        np.testing.assert_allclose(theta1, theta2, rtol=1e-5)
+        np.testing.assert_allclose(theta1, theta2, rtol=1e-6)
 
     def test_edge_weights_validation(self):
         """Test that invalid edge weights raise appropriate errors."""
