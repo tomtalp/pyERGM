@@ -355,7 +355,7 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
     optimization_method
         The optimization method to use. Currently only 'L-BFGS-B' and 'Newton-CG' are supported.
     sample_weights
-        An (n, n) matrix of non-negative edge weights. If provided, each edge's contribution to the
+        A flattened array of non-negative edge weights. If provided, each edge's contribution to the
         log-likelihood is scaled by its weight. If `None`, all edges are weighted equally.
     num_edges_per_job
         The number of graph edges (representing data points in this optimization) to consider for each job. Relevant
@@ -406,19 +406,19 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         ys = metrics_collection.prepare_mple_labels(observed_networks)
 
         if sample_weights is not None:
-            flat_weights = flatten_square_matrix_to_edge_list(sample_weights, metrics_collection.is_directed)
+            weights = sample_weights
             if metrics_collection.mask is not None:
-                flat_weights = flat_weights[metrics_collection.mask]
-            flat_weights = flat_weights.reshape(-1, 1)
+                weights = weights[metrics_collection.mask]
+            weights = weights.reshape(-1, 1)
         else:
-            flat_weights = np.empty(0)
+            weights = np.empty(0)
 
         if optimization_method == "Newton-CG":
-            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, flat_weights),
+            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, weights),
                            jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
                            callback=_after_optim_iteration_callback, method=optimization_method)
         elif optimization_method == "L-BFGS-B":
-            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, flat_weights),
+            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, weights),
                            jac=analytical_minus_log_like_grad_local, method=optimization_method,
                            callback=_after_optim_iteration_callback)
         else:

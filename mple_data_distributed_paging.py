@@ -33,16 +33,11 @@ def main():
     Xs_chunk = metric_collection.prepare_mple_regressors(observed_network=None, edge_indices_lims=edge_indices)
     ys_chunk = metric_collection.prepare_mple_labels(observed_networks, edge_indices)
 
-    # Flatten and chunk sample weights using the same edge indexing as Xs/ys
+    # Chunk sample weights using the same edge indexing as Xs/ys
     save_dict = dict(Xs_chunk=Xs_chunk, ys_chunk=ys_chunk)
     if sample_weights is not None:
-        flat_weights = flatten_square_matrix_to_edge_list(sample_weights, metric_collection.is_directed)
-        if metric_collection.mask is not None:
-            global_mask = metric_collection.mask
-        else:
-            global_mask = np.ones(flat_weights.shape[0], dtype=bool)
-        weights_chunk = flat_weights[np.where(global_mask)[0][edge_indices[0]:edge_indices[1]]].reshape(-1, 1)
-        save_dict['weights_chunk'] = weights_chunk
+        weights_chunk = metric_collection.slice_flat_array_by_edge_indices(sample_weights, edge_indices)
+        save_dict['weights_chunk'] = weights_chunk.reshape(-1, 1)
 
     chunks_out_path = os.path.join(out_dir_path, 'mple_data_paged_chunks')
     os.makedirs(chunks_out_path, exist_ok=True)
