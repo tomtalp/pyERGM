@@ -808,3 +808,215 @@ class TestERGM(unittest.TestCase):
 
         thetas_ccc = ccc(normal_model._thetas, masked_model._thetas)
         self.assertTrue(thetas_ccc > 0.99)
+
+    def test_edge_weights_mask_equivalence_directed(self):
+        """
+        A masked model with independent metrics should produce the same thetas as an unmasked model
+        with weights=0 for masked edges and weights=1 for unmasked edges.
+        This works because independent metrics' change scores are purely determined by node attributes
+        (not network state), so the Xs rows are identical whether computed over the masked or full network.
+
+        Tests multiple independent metrics with random exogenous attributes and a random mask.
+        """
+        set_seed(123456)
+        n = 20
+        data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.3)
+        types = np.random.choice(['A', 'B', 'C'], size=n)
+        positions = np.random.rand(n, 2)
+
+        # Random mask
+        mask = (np.random.rand(n, n) > 0.3).astype(bool)
+        mask[np.diag_indices(n)] = False
+
+        # Masked model with multiple independent metrics
+        metrics_masked = [
+            NumberOfEdgesDirected(),
+            NumberOfEdgesTypesDirected(types),
+            SumDistancesConnectedNeurons(positions, is_directed=True),
+        ]
+        masked_model = ERGM(n_nodes=n, metrics_collection=metrics_masked, is_directed=True, mask=mask)
+        result_masked = masked_model.fit(data)
+        self.assertTrue(result_masked["success"])
+
+        # Weighted model (no mask, but weights=0 where mask=False, weights=1 where mask=True)
+        weights = mask.astype(float)
+        metrics_weighted = [
+            NumberOfEdgesDirected(),
+            NumberOfEdgesTypesDirected(types),
+            SumDistancesConnectedNeurons(positions, is_directed=True),
+        ]
+        weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=True)
+        result_weighted = weighted_model.fit(data, edge_weights=weights)
+        self.assertTrue(result_weighted["success"])
+
+        np.testing.assert_allclose(masked_model._thetas, weighted_model._thetas, rtol=1e-3)
+
+    def test_edge_weights_mask_equivalence_undirected(self):
+        """
+        Same as directed test but for undirected networks.
+        Tests multiple independent metrics with random exogenous attributes and a random symmetric mask.
+        """
+        set_seed(123456)
+        n = 20
+        data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.3)
+        data = np.round((data + data.transpose(1, 0, 2)) / 2)
+        types = np.random.choice(['A', 'B', 'C'], size=n)
+        positions = np.random.rand(n, 2)
+
+        # Random symmetric mask
+        mask_upper = np.triu(np.random.rand(n, n) > 0.3, k=1)
+        mask = mask_upper | mask_upper.T
+        mask = mask.astype(bool)
+
+        # Masked model with multiple independent metrics
+        metrics_masked = [
+            NumberOfEdgesUndirected(),
+            NumberOfEdgesTypesUndirected(types),
+            SumDistancesConnectedNeurons(positions, is_directed=False),
+        ]
+        masked_model = ERGM(n_nodes=n, metrics_collection=metrics_masked, is_directed=False, mask=mask)
+        result_masked = masked_model.fit(data)
+        self.assertTrue(result_masked["success"])
+
+        # Weighted model
+        weights = mask.astype(float)
+        metrics_weighted = [
+            NumberOfEdgesUndirected(),
+            NumberOfEdgesTypesUndirected(types),
+            SumDistancesConnectedNeurons(positions, is_directed=False),
+        ]
+        weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=False)
+        result_weighted = weighted_model.fit(data, edge_weights=weights)
+        self.assertTrue(result_weighted["success"])
+
+        np.testing.assert_allclose(masked_model._thetas, weighted_model._thetas, rtol=1e-3)
+
+    def test_edge_weights_constant_weight_equivalence(self):
+        """Model with all weights = c should produce the same thetas as unweighted model."""
+        set_seed(67890)
+        n = 15
+        data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.2)
+        types = np.random.choice([1, 2], size=n)
+
+        # Unweighted model
+        metrics_unweighted = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
+        unweighted_model = ERGM(n_nodes=n, metrics_collection=metrics_unweighted, is_directed=True)
+        result_unw = unweighted_model.fit(data)
+        self.assertTrue(result_unw["success"])
+
+        # Weighted model with constant weight = 5
+        weights = 5.0 * np.ones((n, n))
+        np.fill_diagonal(weights, 0)
+        metrics_weighted = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
+        weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=True)
+        result_w = weighted_model.fit(data, edge_weights=weights)
+        self.assertTrue(result_w["success"])
+
+        np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=1e-3)
+
+    def test_edge_weights_ones_equals_no_weights(self):
+        """Model with all weights = 1 should produce exactly the same thetas as unweighted model."""
+        set_seed(112233)
+        n = 15
+        data = generate_binomial_tensor(net_size=n, num_samples=3, p=0.2)
+        # Symmetrize for undirected network
+        data = np.maximum(data, np.transpose(data, axes=(1, 0, 2)))
+        types = np.random.choice([1, 2], size=n)
+
+        # Unweighted model
+        metrics_unweighted = [NumberOfEdgesTypesUndirected(types)]
+        unweighted_model = ERGM(n_nodes=n, metrics_collection=metrics_unweighted, is_directed=False)
+        result_unw = unweighted_model.fit(data)
+        self.assertTrue(result_unw["success"])
+
+        # Weighted model with all weights = 1
+        weights = np.ones((n, n))
+        np.fill_diagonal(weights, 0)
+        metrics_weighted = [NumberOfEdgesTypesUndirected(types)]
+        weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=False)
+        result_w = weighted_model.fit(data, edge_weights=weights)
+        self.assertTrue(result_w["success"])
+
+        np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=1e-5)
+
+
+    def test_edge_weights_half_weight_equals_half_edges(self):
+        """
+        Verify that edge weights correctly scale contributions to the likelihood.
+
+        We construct two models that should yield identical θ_AB:
+
+        Model 1 (weighted): k present edges with weight w, absent edges with adjusted weight
+        Model 2 (unweighted): k*w present edges, all weights = 1
+
+        The alternative_weight for absent edges is chosen so that:
+            weighted_absent_1 = unweighted_absent_2
+            alternative_weight * (N_AB - k) = N_AB - k*w
+            alternative_weight = (N_AB - k*w) / (N_AB - k)
+
+        This ensures both models have:
+            weighted_present = k*w (Model 1) = k*w (Model 2)
+            weighted_absent = (N_AB - k*w) in both models
+            θ = log(k*w / (N_AB - k*w))
+        """
+        set_seed(123456)
+        n = 20
+        n_A, n_B = 10, 10
+        n_AB = n_A * n_B  # 100 possible AB edges
+        k = 32  # number of present edges
+        weight = 0.5
+
+        # Compute weight for absent edges so weighted_absent equals unweighted absent count in Model 2
+        # Model 2 will have (N_AB - k*weight) absent edges, so we need:
+        # alternative_weight * (N_AB - k) = (N_AB - k*weight)
+        alternative_weight = (n_AB - weight * k) / (n_AB - k)
+
+        types1 = np.array(["A"] * n_A + ["B"] * n_B)
+        ab_mask1 = np.outer(types1 == "A", types1 == "B")
+
+        # Select k random AB positions to turn on
+        ab_positions1 = np.argwhere(ab_mask1)
+        np.random.shuffle(ab_positions1)
+        selected_edges = ab_positions1[:k]
+
+        data1 = generate_binomial_tensor(n, 1, p=0.2)[..., 0]
+        data1[ab_positions1] = 0
+
+        data1[selected_edges[:, 0], selected_edges[:, 1]] = 1
+
+        # Model 1: weighted - present edges get `weight`, absent edges get `alternative_weight`
+        weights1 = np.ones((n, n))
+        weights1[ab_mask1 & (data1 == 1)] = weight
+        weights1[ab_mask1 & (data1 == 0)] = alternative_weight
+
+        model1 = ERGM(n_nodes=n, metrics_collection=[NumberOfEdgesTypesDirected(types1)], is_directed=True)
+        result1 = model1.fit(data1, edge_weights=weights1)
+        self.assertTrue(result1["success"])
+        theta1 = model1._thetas[model1._metrics_collection.metrics[0]._sorted_type_pairs_indices[("A", "B")]]
+
+        # Model 2: unweighted - remove (1-weight)*k edges, fit without weights
+        n_edges_to_remove = int(k * weight)
+        data1[selected_edges[:n_edges_to_remove, 0], selected_edges[:n_edges_to_remove, 1]] = 0
+
+        result2 = model1.fit(data1)
+        self.assertTrue(result2["success"])
+        theta2 = model1._thetas[model1._metrics_collection.metrics[0]._sorted_type_pairs_indices[("A", "B")]]
+
+        np.testing.assert_allclose(theta1, theta2, rtol=1e-6)
+
+    def test_edge_weights_validation(self):
+        """Test that invalid edge weights raise appropriate errors."""
+        n = 10
+        data = np.random.randint(0, 2, (n, n))
+        np.fill_diagonal(data, 0)
+
+        metrics = [NumberOfEdgesDirected()]
+        model = ERGM(n_nodes=n, metrics_collection=metrics, is_directed=True)
+
+        # Wrong shape
+        with self.assertRaises(ValueError):
+            model.fit(data, edge_weights=np.ones((5, 5)))
+
+        # Negative weights
+        with self.assertRaises(ValueError):
+            model.fit(data, edge_weights=-np.ones((n, n)))

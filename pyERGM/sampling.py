@@ -83,9 +83,6 @@ class NaiveMetropolisHastings(Sampler):
         the edge would cause divided by the average change over all edges.
         If the average influence is 0 (the feature does not change by flipping any edge), the influence of all edges is
         0.
-        TODO: maybe we need to handle these all-0 cases separately (e.g., on the empty network, no edge flip will change
-         the reciprocity, but obviously all edges have influence on the reciprocity). Or maybe this is not a good
-         definition for the influence of an edge.
         For example, each edge has an influence of 1 on NumberOfEdges (no matter what edge we flip, it changes by 1).
         Similarly, an edge (i,j) has an influence of n on OutDegree of node i, and 0 on OutDegree of other nodes (the
         out degree of node 1 would change by 1 as a result of flipping the edge, and there are exactly n-1 such edges,
@@ -170,6 +167,12 @@ class NaiveMetropolisHastings(Sampler):
 
         sampled_networks = np.zeros((net_size, net_size, num_of_nets))
 
+        if burn_in is None:
+            burn_in = 100 * (net_size ** 2)
+
+        if steps_per_sample is None:
+            steps_per_sample = net_size ** 2
+
         num_flips = burn_in + (num_of_nets * steps_per_sample)
         if edge_proposal_method == 'uniform':
             edges_to_flip = get_uniform_random_edges_to_flip(net_size, num_flips)
@@ -177,12 +180,12 @@ class NaiveMetropolisHastings(Sampler):
             if edge_proposal_method not in self._edge_proposal_dists.keys():
                 self._calc_proposal_dist_features_influence__sum(current_network)
             edges_to_flip = get_custom_distribution_random_edges_to_flip(num_flips, self._edge_proposal_dists[
-                'features_influence__sum'])
+                'features_influence__sum'], self.metrics_collection.is_directed)
         elif edge_proposal_method == 'features_influence__softmax':
             if edge_proposal_method not in self._edge_proposal_dists.keys():
                 self._calc_proposal_dist_features_influence__softmax(current_network)
             edges_to_flip = get_custom_distribution_random_edges_to_flip(num_flips, self._edge_proposal_dists[
-                'features_influence__softmax'])
+                'features_influence__softmax'], self.metrics_collection.is_directed)
         else:
             raise ValueError(f"Got an unsupported edge proposal method {edge_proposal_method}")
 
