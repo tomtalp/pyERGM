@@ -21,23 +21,14 @@ class Metric(ABC):
     methods for calculating metrics, change scores, and handling sampling operations.
     All concrete metric implementations must inherit from this class.
 
-    Parameters
-    ----------
-    metric_type : str, optional
-        Type of metric: 'binary_edge' or 'non_binary_edge'. Default is 'binary_edge'.
     """
-    def __init__(self, metric_type='binary_edge'):
+    def __init__(self):
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
         self._is_directed = None
         self._is_dyadic_independent = True
         self._n_nodes = None
         self._indices_to_ignore = None
-        self._metric_type = metric_type  # can have values "binary_edge", "non_binary_edge"
-        if self._metric_type not in ['binary_edge', 'non_binary_edge']:
-            raise ValueError(
-                f"invalid metric type: {self._metric_type}. Should be one of: 'binary_edge', 'non_binary_edge'")
-
         self.does_support_mask = False
 
     def initialize_indices_to_ignore(self):
@@ -1656,17 +1647,21 @@ class MetricsCollection:
 
         return change_scores
 
-    def _get_mple_data_chunk_mask(
-            self,
-            edge_indices_lims: tuple[int, int] | None,
-    ) -> npt.NDArray[bool]:
+    def _get_global_mask(self) -> npt.NDArray[bool]:
+        """Return the global mask for edge indices, or a mask of all True if no mask is set."""
         full_net_size = self.n_nodes * self.n_nodes - self.n_nodes
         if not self.is_directed:
             full_net_size //= 2
-        data_chunk_mask = np.zeros(full_net_size, dtype=bool)
-        global_mask = self.mask if self.mask is not None else np.ones(full_net_size, dtype=bool)
+        return self.mask if self.mask is not None else np.ones(full_net_size, dtype=bool)
+
+    def _validate_edge_indices_lims(
+            self,
+            edge_indices_lims: tuple[int, int] | None,
+            global_mask: npt.NDArray[bool],
+    ) -> tuple[int, int]:
+        """Validate and return edge index limits, defaulting to full range if None."""
         if edge_indices_lims is None:
-            edge_indices_lims = (0, global_mask.sum())
+            return (0, global_mask.sum())
         if (
                 edge_indices_lims[0] < 0 or edge_indices_lims[1] < 0 or
                 edge_indices_lims[0] > global_mask.sum() or edge_indices_lims[1] > global_mask.sum() or
@@ -1676,9 +1671,55 @@ class MetricsCollection:
                 'edge_indices_lims out of bounds. expected strictly monotonic increasing limits between 0 '
                 'and the number of considered edges (the size of the dataset for MPLE optimization), which is '
                 f'{global_mask.sum()}. Got {edge_indices_lims}')
-        # First constraint to the "universe" of edge indices to consider by the global mask, then slice according to the
+        return edge_indices_lims
+
+    def _get_masked_indices_slice(
+            self,
+            edge_indices_lims: tuple[int, int],
+            global_mask: npt.NDArray[bool],
+    ) -> npt.NDArray[np.intp]:
+        """Get the actual array indices for a slice within the masked edge space."""
+        return np.where(global_mask)[0][edge_indices_lims[0]:edge_indices_lims[1]]
+
+    def slice_flat_array_by_edge_indices(
+            self,
+            flat_array: npt.NDArray,
+            edge_indices_lims: tuple[int, int] | None = None,
+    ) -> npt.NDArray:
+        """
+        Slice a flattened edge array using the same indexing logic as MPLE data chunks.
+
+        Parameters
+        ----------
+        flat_array : np.ndarray
+            A flattened array of edge values (e.g., weights) with length matching
+            the full network edge count.
+        edge_indices_lims : tuple[int, int] or None
+            The (start, end) indices within the masked edge space. If None, returns all masked edges.
+
+        Returns
+        -------
+        np.ndarray
+            The sliced portion of the array.
+        """
+        global_mask = self._get_global_mask()
+        edge_indices_lims = self._validate_edge_indices_lims(edge_indices_lims, global_mask)
+        indices = self._get_masked_indices_slice(edge_indices_lims, global_mask)
+        return flat_array[indices]
+
+    def _get_mple_data_chunk_mask(
+            self,
+            edge_indices_lims: tuple[int, int] | None,
+    ) -> npt.NDArray[bool]:
+        full_net_size = self.n_nodes * self.n_nodes - self.n_nodes
+        if not self.is_directed:
+            full_net_size //= 2
+        data_chunk_mask = np.zeros(full_net_size, dtype=bool)
+        global_mask = self._get_global_mask()
+        edge_indices_lims = self._validate_edge_indices_lims(edge_indices_lims, global_mask)
+        # First constrain to the "universe" of edge indices to consider by the global mask, then slice according to the
         # limits within the subset of considered edges.
-        data_chunk_mask[np.where(global_mask)[0][edge_indices_lims[0]:edge_indices_lims[1]]] = True
+        data_chunk_mask[self._get_masked_indices_slice(edge_indices_lims, global_mask)] = True
         return data_chunk_mask
 
     def prepare_mple_regressors(
