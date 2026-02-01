@@ -50,7 +50,7 @@ class BruteForceERGM(ERGM):
         super().__init__(n_nodes,
                          metrics_collection,
                          is_directed,
-                         initial_thetas)
+                         initial_thetas=initial_thetas)
 
         if is_directed:
             num_connections = (n_nodes ** 2 - n_nodes)
@@ -374,7 +374,7 @@ class TestERGM(unittest.TestCase):
         types = ["A", "A", "B", "B"]
         metrics = [NumberOfEdgesTypesDirected(types)]
         model = ERGM(n, metrics, is_directed=True)
-        result = model.fit(M1, mple_lr=1)
+        result = model.fit(M1)
 
         self.assertTrue(result["success"])
 
@@ -399,7 +399,7 @@ class TestERGM(unittest.TestCase):
         types = ["A", "A", "B", "B"]
         metrics = [NumberOfEdgesTypesDirected(types)]
         model = ERGM(n, metrics, is_directed=True)
-        model.fit(M1, mple_max_iter=1000, mple_lr=1000, mple_stopping_thr=1e-10)
+        model.fit(M1)
 
         inferred_probas_per_type_pairs = list(np.exp(model._thetas) / (1 + np.exp(model._thetas)))
 
@@ -420,7 +420,6 @@ class TestERGM(unittest.TestCase):
                                              opt_steps=10,
                                              steps_for_decay=1,
                                              lr=1,
-                                             mple_lr=0.5,
                                              convergence_criterion="model_bootstrap",
                                              mcmc_burn_in=0,
                                              mcmc_steps_per_sample=n_nodes ** 2,
@@ -507,7 +506,6 @@ class TestERGM(unittest.TestCase):
                                              opt_steps=10,
                                              steps_for_decay=1,
                                              lr=1,
-                                             mple_lr=0.5,
                                              convergence_criterion="model_bootstrap",
                                              mcmc_burn_in=0,
                                              mcmc_steps_per_sample=n_nodes ** 2,
@@ -709,7 +707,7 @@ class TestERGM(unittest.TestCase):
             mcmc_sample_size=n_nodes ** 3,
             mcmc_steps_per_sample=n_nodes ** 2,
             bootstrap_convergence_confidence=0.99,
-            bootstrap_convergence_stds_away_thr=0.75,
+            bootstrap_convergence_num_stds_away_thr=0.75,
         )
 
         thetas_ccc = ccc(base_model._thetas, tested_model._thetas)

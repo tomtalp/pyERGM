@@ -5,6 +5,7 @@ import glob
 
 from pyERGM.logging_config import logger
 from pyERGM.metrics import *
+from pyERGM.constants import MPLEOptimizationMethod
 
 
 @njit
@@ -335,7 +336,8 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
 
 def mple_logistic_regression_optimization(metrics_collection: MetricsCollection, observed_networks: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
-                                          is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
+                                          is_distributed: bool = False,
+                                          optimization_method: MPLEOptimizationMethod | str = MPLEOptimizationMethod.L_BFGS_B,
                                           sample_weights: np.ndarray | None = None,
                                           **kwargs):
     """

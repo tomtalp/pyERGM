@@ -10,6 +10,15 @@ from pyERGM.logging_config import logger
 from pyERGM.sampling import NaiveMetropolisHastings
 from pyERGM.mple_optimization import *
 from pyERGM.utils import generate_erdos_renyi_matrix, ConvergenceTester
+from pyERGM.constants import (
+    OptimizationScheme,
+    OptimizationMethod,
+    MPLEOptimizationMethod,
+    ConvergenceCriterion,
+    CovMatrixEstimationMethod,
+    ThetaInitMethod,
+    EdgeProposalMethod,
+)
 
 
 class ERGM():
@@ -17,6 +26,7 @@ class ERGM():
                  n_nodes,
                  metrics_collection: Collection[Metric],
                  is_directed: bool,
+                 *,
                  initial_thetas: dict = None,
                  initial_normalization_factor=None,
                  seed_MCMC_proba=0.25,
@@ -26,7 +36,10 @@ class ERGM():
                  is_distributed_optimization=False,
                  optimization_options={},
                  mask: npt.NDArray[bool] | None = None,
-                 **kwargs):
+                 num_samples_per_job_collinearity_fixer: int = 5,
+                 ratio_threshold_collinearity_fixer: float = 5e-6,
+                 nonzero_threshold_collinearity_fixer: float = 0.1,
+                 ):
         """
         An ERGM model object. 
         
@@ -93,12 +106,9 @@ class ERGM():
                                                      fix_collinearity=fix_collinearity and (initial_thetas is None),
                                                      collinearity_fixer_sample_size=collinearity_fixer_sample_size,
                                                      is_collinearity_distributed=self._is_distributed_optimization,
-                                                     num_samples_per_job_collinearity_fixer=kwargs.get(
-                                                         'num_samples_per_job_collinearity_fixer', 5),
-                                                     ratio_threshold_collinearity_fixer=kwargs.get(
-                                                         'ratio_threshold_collinearity_fixer', 5e-6),
-                                                     nonzero_threshold_collinearity_fixer=kwargs.get(
-                                                         'nonzero_threshold_collinearity_fixer', 0.1),
+                                                     num_samples_per_job_collinearity_fixer=num_samples_per_job_collinearity_fixer,
+                                                     ratio_threshold_collinearity_fixer=ratio_threshold_collinearity_fixer,
+                                                     nonzero_threshold_collinearity_fixer=nonzero_threshold_collinearity_fixer,
                                                      mask=self._mask,
                                                      )
         if "MPLE" != self._metrics_collection.choose_optimization_scheme() and self._mask is not None:
@@ -260,8 +270,10 @@ class ERGM():
             return True
         return False
 
-    def _mple_fit(self, observed_networks, optimization_method: str = 'L-BFGS-B',
-                  edge_weights: np.ndarray | None = None, **kwargs):
+    def _mple_fit(self, observed_networks,
+                  optimization_method: MPLEOptimizationMethod | str = MPLEOptimizationMethod.L_BFGS_B,
+                  edge_weights: np.ndarray | None = None,
+                  num_edges_per_job: int = 100000):
         """
         Perform MPLE estimation of the ERGM parameters.
         This is done by fitting a logistic regression model, where the X values are the change statistics
@@ -278,6 +290,8 @@ class ERGM():
         edge_weights : np.ndarray or None, optional
             Non-negative edge weights as a flattened array. If provided, each edge's contribution
             to the log-likelihood is scaled by its weight. Default is None (unweighted).
+        num_edges_per_job : int, optional
+            Number of edges per job for distributed MPLE. Default is 100000.
 
         Returns
         -------
@@ -285,7 +299,6 @@ class ERGM():
             The estimated coefficients of the ERGM.
         """
         logger.info("Using MPLE optimization")
-        num_edges_per_job = kwargs.get("num_edges_per_job", 100000)
         trained_thetas, prediction, success = mple_logistic_regression_optimization(
             self._metrics_collection,
             observed_networks,
@@ -321,7 +334,7 @@ class ERGM():
     #  average matrix of the model, so should be computed once and stored. If the model is dyadic dependent, this is an
     #  approximation, and the degree to which changes in the observed_network will change the prediction depend on the
     #  metrics and the specific networks, it can not be pre-determined.
-    def get_mple_prediction(self, observed_networks: np.ndarray | None = None, **kwargs):
+    def get_mple_prediction(self, observed_networks: np.ndarray | None = None, num_edges_per_job: int = 100000):
         """
         Get the MPLE-based edge probability predictions.
 
@@ -335,8 +348,8 @@ class ERGM():
             (e.g., NumberOfTriangles, Reciprocity). Optional for dyadic-independent
             models (e.g., NumberOfEdges, InDegree, OutDegree).
             If provided as 3D array, uses the first network (observed_networks[..., 0]).
-        **kwargs
-            Additional keyword arguments (e.g., num_edges_per_job for distributed computation).
+        num_edges_per_job : int, optional
+            Number of edges per job for distributed computation. Default is 100000.
 
         Returns
         -------
@@ -381,7 +394,7 @@ class ERGM():
             data_path = distributed_mple_data_chunks_calculations(
                 self._metrics_collection,
                 observed_networks,
-                num_edges_per_job=kwargs.get("num_edges_per_job", 100000),
+                num_edges_per_job=num_edges_per_job,
             )
             pred = analytical_logistic_regression_predictions_distributed(self._thetas, data_path).flatten()
         else:
@@ -565,28 +578,37 @@ class ERGM():
 
     def fit(self,
             observed_networks,
-            lr=0.1,
-            opt_steps=1000,
-            steps_for_decay=100,
-            lr_decay_pct=0.01,
-            l2_grad_thresh=0.001,
-            sliding_grad_window_k=10,
-            max_sliding_window_size=100,
-            max_nets_for_sample=1000,
-            sample_pct_growth=0.02,
-            optimization_method="newton_raphson",
-            convergence_criterion="model_bootstrap",
-            cov_matrix_estimation_method="naive",
-            cov_matrix_num_batches=25,
-            hotelling_confidence=0.99,
-            theta_init_method="mple",
-            mcmc_burn_in=1000,
+            *,
+            lr: float = 0.1,
+            opt_steps: int = 1000,
+            steps_for_decay: int = 100,
+            lr_decay_pct: float = 0.01,
+            l2_grad_thresh: float = 0.001,
+            sliding_grad_window_k: int = 10,
+            max_sliding_window_size: int = 100,
+            max_nets_for_sample: int = 1000,
+            sample_pct_growth: float = 0.02,
+            optimization_method: OptimizationMethod | str = OptimizationMethod.NEWTON_RAPHSON,
+            convergence_criterion: ConvergenceCriterion | str = ConvergenceCriterion.MODEL_BOOTSTRAP,
+            cov_matrix_estimation_method: CovMatrixEstimationMethod | str = CovMatrixEstimationMethod.NAIVE,
+            cov_matrix_num_batches: int = 25,
+            hotelling_confidence: float = 0.99,
+            theta_init_method: ThetaInitMethod | str = ThetaInitMethod.MPLE,
+            mcmc_burn_in: int = 1000,
             mcmc_seed_network=None,
-            mcmc_steps_per_sample=10,
-            mcmc_sample_size=100,
-            edge_proposal_method='uniform',
+            mcmc_steps_per_sample: int = 10,
+            mcmc_sample_size: int = 100,
+            edge_proposal_method: EdgeProposalMethod | str = EdgeProposalMethod.UNIFORM,
             edge_weights: np.ndarray | None = None,
-            **kwargs
+            optimization_scheme: OptimizationScheme | str = OptimizationScheme.AUTO,
+            mple_optimization_method: MPLEOptimizationMethod | str = MPLEOptimizationMethod.L_BFGS_B,
+            num_edges_per_job: int = 100000,
+            num_subsamples_data: int = 1000,
+            data_splitting_method: str = "uniform",
+            bootstrap_convergence_confidence: float = 0.95,
+            bootstrap_convergence_num_stds_away_thr: float = 1.0,
+            num_model_sub_samples: int = 100,
+            model_subsample_size: int = 1000,
             ):
         """
         Fit an ERGM model to a given network with one of the two fitting methods - MPLE or MCMLE.
@@ -630,58 +652,78 @@ class ERGM():
             Optional. The percentage growth of the number of networks to sample, which we want to increase over time.
             *Defaults to 0.02*. #TODO - Same as `max_nets_for_sample`. Do we still need this?
 
-        optimization_method : str
-            Optional. The optimization method to use. Can be either "newton_raphson" or "gradient_descent".
-            *Defaults to "newton_raphson"*.
+        optimization_method : OptimizationMethod or str
+            The optimization method for MCMLE. Options: "newton_raphson", "gradient_descent".
+            *Defaults to OptimizationMethod.NEWTON_RAPHSON*.
 
-        convergence_criterion : str
-            Optional. The criterion for convergence. Can be either "hotelling" or "zero_grad_norm".
-            *Defaults to "zero_grad_norm"*.
-            # TODO - Revisit this when we fix convergence criterion.
-            
-        cov_matrix_estimation_method : str
-            Optional. The method to estimate the covariance matrix. 
-            Supported methods - `naive`, `batch`, `multivariate_initial_sequence`. *Defaults to "batch"*.
-        
+        convergence_criterion : ConvergenceCriterion or str
+            The criterion for convergence. Options: "hotelling", "zero_grad_norm", "observed_bootstrap", "model_bootstrap".
+            *Defaults to ConvergenceCriterion.MODEL_BOOTSTRAP*.
+
+        cov_matrix_estimation_method : CovMatrixEstimationMethod or str
+            The method to estimate the covariance matrix.
+            Options: "naive", "batch", "multivariate_initial_sequence". *Defaults to CovMatrixEstimationMethod.NAIVE*.
+
         cov_matrix_num_batches : int
-            Optional. The number of batches to use for estimating the covariance matrix.
+            The number of batches to use for estimating the covariance matrix.
             Relevant only for `cov_matrix_estimation_method="batch"`. *Defaults to 25*.
 
         hotelling_confidence : float
-            Optional. The confidence level for the Hotelling's T-squared test. *Defaults to 0.99*.
-        
-        theta_init_method : str
-            Optional. The method to initialize the theta values. Can be either "uniform", "mple" or "use_existing" (which uses the current thetas).
+            The confidence level for the Hotelling's T-squared test. *Defaults to 0.99*.
+
+        theta_init_method : ThetaInitMethod or str
+            The method to initialize the theta values. Options: "uniform", "mple", "use_existing".
             The MPLE method can be used even for dyadic dependent models, since it serves as a good starting point for the MCMLE.
-            *Defaults to "mple"*.
-        
+            *Defaults to ThetaInitMethod.MPLE*.
+
         mcmc_burn_in : int
-            Optional. The number of burn-in steps for the MCMC sampler. *Defaults to 1000*.
-        
+            The number of burn-in steps for the MCMC sampler. *Defaults to 1000*.
+
         mcmc_steps_per_sample : int
-            Optional. The number of steps to run the MCMC sampler for each sample. *Defaults to 10*.
-        
+            The number of steps to run the MCMC sampler for each sample. *Defaults to 10*.
+
         mcmc_seed_network : np.ndarray
-            Optional. The seed network for the MCMC sampler. If not provided, the thetas that are currently set are used to 
+            The seed network for the MCMC sampler. If not provided, the thetas that are currently set are used to
             calculate the MPLE prediction, from which the sample is drawn. *Defaults to None*.
-        
+
         mcmc_sample_size : int
-            Optional. The number of networks to sample with the MCMC sampler. *Defaults to 100*.
+            The number of networks to sample with the MCMC sampler. *Defaults to 100*.
 
-        edge_proposal_method : str
-            Optional. The method for the MCMC proposal distribution. This is defined as a distribution over the edges
-            of the network, which implies how to choose a proposed graph out of all graphs that are 1-edge-away from the
-            current graph. *Defaults to "uniform"*.
+        edge_proposal_method : EdgeProposalMethod or str
+            The method for the MCMC proposal distribution. Options: "uniform", "features_influence__sum", "features_influence__softmax".
+            *Defaults to EdgeProposalMethod.UNIFORM*.
 
-        **kwargs : dict
-            Additional keyword arguments:
+        edge_weights : np.ndarray or None
+            Non-negative edge weights for MPLE optimization. *Defaults to None*.
 
-            - **optimization_scheme** (*str*): The optimization scheme to use. Options: "AUTO" (default),
-              "MPLE", "MPLE_RECIPROCITY", "MCMLE".
-            - **mple_optimization_method** (*str*): Optimization method for MPLE. *Defaults to "L-BFGS-B"*.
-            - **num_edges_per_job** (*int*): Number of edges per job for distributed MPLE. *Defaults to 100000*.
-            - **num_subsamples_data** (*int*): Number of subsamples for observed bootstrap. *Defaults to 1000*.
-            - **data_splitting_method** (*str*): Method for data splitting. *Defaults to "uniform"*.
+        optimization_scheme : OptimizationScheme or str
+            The optimization scheme to use. Options: "AUTO", "MPLE", "MPLE_RECIPROCITY", "MCMLE".
+            *Defaults to OptimizationScheme.AUTO*.
+
+        mple_optimization_method : MPLEOptimizationMethod or str
+            Optimization method for MPLE (scipy.optimize). Options: "L-BFGS-B", "Newton-CG".
+            *Defaults to MPLEOptimizationMethod.L_BFGS_B*.
+
+        num_edges_per_job : int
+            Number of edges per job for distributed MPLE. *Defaults to 100000*.
+
+        num_subsamples_data : int
+            Number of subsamples for observed bootstrap. *Defaults to 1000*.
+
+        data_splitting_method : str
+            Method for data splitting in bootstrap. *Defaults to "uniform"*.
+
+        bootstrap_convergence_confidence : float
+            Confidence level for bootstrap convergence tests. *Defaults to 0.95*.
+
+        bootstrap_convergence_num_stds_away_thr : float
+            Number of standard deviations threshold for bootstrap convergence. *Defaults to 1.0*.
+
+        num_model_sub_samples : int
+            Number of model subsamples for bootstrap convergence. *Defaults to 100*.
+
+        model_subsample_size : int
+            Size of each model subsample for bootstrap convergence. *Defaults to 1000*.
 
         Returns 
         -------
@@ -718,8 +760,7 @@ class ERGM():
             if np.any(self._edge_weights < 0):
                 raise ValueError("edge_weights must be non-negative")
 
-        optimization_scheme = kwargs.get("optimization_scheme", "AUTO")
-        if optimization_scheme == "AUTO":
+        if optimization_scheme == OptimizationScheme.AUTO or optimization_scheme == "AUTO":
             optimization_scheme = self._metrics_collection.choose_optimization_scheme()
 
         if self._edge_weights is not None and optimization_scheme != "MPLE":
@@ -727,10 +768,9 @@ class ERGM():
 
         if optimization_scheme == "MPLE" or (theta_init_method == 'mple' and optimization_scheme == 'MCMLE'):
             self._thetas, success = self._mple_fit(observed_networks,
-                                                   optimization_method=kwargs.get('mple_optimization_method',
-                                                                                  'L-BFGS-B'),
+                                                   optimization_method=mple_optimization_method,
                                                    edge_weights=self._edge_weights,
-                                                   num_edges_per_job=kwargs.get('num_edges_per_job', 100000))
+                                                   num_edges_per_job=num_edges_per_job)
             if optimization_scheme == "MPLE":
                 logger.info("Done training model using MPLE")
                 return {"success": success}
@@ -740,9 +780,7 @@ class ERGM():
                 raise ValueError("There is not meaning for reciprocity in undirected graphs, "
                                  "can't perform MPLE_RECIPROCITY optimization.")
             self._thetas, success = self._mple_reciprocity_fit(observed_networks,
-                                                               optimization_method=kwargs.get(
-                                                                   'mple_optimization_method',
-                                                                   'L-BFGS-B'))
+                                                               optimization_method=mple_optimization_method)
             logger.info("Done training model using MPLE_RECIPROCITY")
             return {"success": success}
         elif optimization_scheme != "MCMLE":
@@ -767,8 +805,6 @@ class ERGM():
                     raise ValueError(
                         f"metric {metric.name} does not have a calculate_bootstrapped_features method, the "
                         f"model doesn't support observed_bootstrap as a convergence criterion.")
-            num_subsamples_data = kwargs.get("num_subsamples_data", 1000)
-            data_splitting_method = kwargs.get("data_splitting_method", "uniform")
             bootstrapped_features = self._metrics_collection.bootstrap_observed_features(observed_networks,
                                                                                          num_subsamples=num_subsamples_data,
                                                                                          splitting_method=data_splitting_method)
@@ -871,22 +907,19 @@ class ERGM():
                     break
 
             elif convergence_criterion == "observed_bootstrap":
-                confidence = kwargs.get("bootstrap_convergence_confidence", 0.95)
-                stds_away_thr = kwargs.get("bootstrap_convergence_stds_away_thr", 1)
-
                 convergence_results = convergence_tester.bootstrapped_mahalanobis_from_observed(
                     observed_features,
                     features_of_net_samples,
                     inv_observed_covariance,
-                    num_subsamples=kwargs.get("num_model_sub_samples", 100),
-                    subsample_size=kwargs.get("model_subsample_size", 1000),
-                    confidence=confidence,
-                    stds_away_thr=stds_away_thr,
+                    num_subsamples=num_model_sub_samples,
+                    subsample_size=model_subsample_size,
+                    confidence=bootstrap_convergence_confidence,
+                    stds_away_thr=bootstrap_convergence_num_stds_away_thr,
                 )
 
                 if convergence_results["success"]:
-                    logger.info(f"Reached a confidence of {confidence} with the bootstrap convergence "
-                          f"test! The model is likely to be up to {stds_away_thr} stds from "
+                    logger.info(f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
+                          f"test! The model is likely to be up to {bootstrap_convergence_num_stds_away_thr} stds from "
                           f"the data, according to the estimated data variability. DONE!")
                     grads = grads[:i]
                     break
@@ -895,16 +928,16 @@ class ERGM():
                 convergence_results = convergence_tester.bootstrapped_mahalanobis_from_model(
                     observed_features,
                     features_of_net_samples,
-                    num_subsamples=kwargs.get("num_model_sub_samples", 100),
-                    subsample_size=kwargs.get("model_subsample_size", 1000),
-                    confidence=kwargs.get("bootstrap_convergence_confidence", 0.95),
-                    stds_away_thr=kwargs.get("bootstrap_convergence_stds_away_thr", 1),
+                    num_subsamples=num_model_sub_samples,
+                    subsample_size=model_subsample_size,
+                    confidence=bootstrap_convergence_confidence,
+                    stds_away_thr=bootstrap_convergence_num_stds_away_thr,
                 )
                 logger.debug("Done with model_bootstrap test")
                 if convergence_results["success"]:
                     logger.info(
-                        f"Reached a confidence of {kwargs.get('bootstrap_convergence_confidence', 0.95)} with the bootstrap convergence "
-                        f"test! The model is likely to be up to {kwargs.get('bootstrap_convergence_stds_away_thr', 1)} stds from "
+                        f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
+                        f"test! The model is likely to be up to {bootstrap_convergence_num_stds_away_thr} stds from "
                         f"the data, according to the estimated data variability. DONE!")
                     grads = grads[:i]
                     break

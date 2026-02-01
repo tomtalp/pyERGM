@@ -4,6 +4,7 @@ import numpy as np
 from pyERGM.logging_config import logger
 from pyERGM.utils import *
 from pyERGM.metrics import MetricsCollection
+from pyERGM.constants import EdgeProposalMethod
 import time
 from scipy.special import softmax
 
@@ -130,7 +131,7 @@ class NaiveMetropolisHastings(Sampler):
                initial_state,
                num_of_nets,
                replace=True,
-               edge_proposal_method="uniform",
+               edge_proposal_method: EdgeProposalMethod | str = EdgeProposalMethod.UNIFORM,
                # TODO - these two params need to be dependent on the network size
                burn_in=1000,
                steps_per_sample=10):

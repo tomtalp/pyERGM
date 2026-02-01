@@ -22,7 +22,7 @@ class TestMPLENoneHandling(unittest.TestCase):
              [NumberOfEdgesDirected(), InDegree(), OutDegree()],
             is_directed=True
         )
-        model.fit(self.observed_network, method='MPLE')
+        model.fit(self.observed_network, optimization_scheme='MPLE')
 
         # This should work without error
         probs = model.get_mple_prediction()
@@ -42,7 +42,7 @@ class TestMPLENoneHandling(unittest.TestCase):
         )
 
         # Fit the model first
-        model.fit(self.observed_network, method='MPLE')
+        model.fit(self.observed_network, optimization_scheme='MPLE')
 
         # This should raise ValueError
         with self.assertRaises(ValueError) as context:
@@ -67,7 +67,7 @@ class TestMPLENoneHandling(unittest.TestCase):
         networks_3d = np.stack([self.observed_network] * 3, axis=-1)
 
         # Fit the model
-        model.fit(self.observed_network, method='MPLE')
+        model.fit(self.observed_network, optimization_scheme='MPLE')
 
         # This should work and extract first network
         probs = model.get_mple_prediction(observed_networks=networks_3d)
@@ -85,7 +85,7 @@ class TestMPLENoneHandling(unittest.TestCase):
     #     )
 
     #     # Fit the model
-    #     model.fit(self.observed_network, method='MPLE')
+    #     model.fit(self.observed_network, optimization_scheme='MPLE')
 
     #     # Enable distributed optimization
     #     model._is_distributed_optimization = True
