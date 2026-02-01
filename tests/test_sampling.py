@@ -1,6 +1,7 @@
 import unittest
 import numpy as np
 from scipy.stats import chi2
+from scipy.spatial.distance import jensenshannon
 
 from pyERGM.utils import *
 from pyERGM.metrics import *
@@ -254,9 +255,12 @@ class Test_MetropolisHastings(unittest.TestCase):
         """
         Verify that the proposal distribution is actually non-uniform when using
         metrics that create different influences for different edges.
+
+        Uses Jensen-Shannon divergence to measure distance from uniform distribution.
+        JS divergence is symmetric and bounded [0, 1] when using base-2 log.
         """
         set_seed(67890)
-        n = 50
+        n = 5
 
         # OutDegree should create non-uniform influence since the first node's
         # OutDegree is removed due to collinearity, making edges from node 0
@@ -277,13 +281,19 @@ class Test_MetropolisHastings(unittest.TestCase):
         sampler._calc_proposal_dist_features_influence__softmax(adj_mat)
         edge_probs = sampler._edge_proposal_dists['features_influence__softmax']
 
-        # The distribution should NOT be uniform
-        uniform_prob = 1.0 / (n * (n - 1))
-        max_deviation_from_uniform = np.abs(edge_probs - uniform_prob).max()
+        # Compare to uniform distribution using Jensen-Shannon divergence
+        num_edges = n * (n - 1)
+        uniform_dist = np.ones(num_edges) / num_edges
 
-        print(f"Uniform - {uniform_prob}")
-        print(f"max_deviation_from_uniform - {max_deviation_from_uniform}")
+        # edge_probs = uniform_dist + np.random.normal(0, 1e-5, num_edges)
 
-        # With OutDegree, we expect meaningful deviation from uniform
-        self.assertGreater(max_deviation_from_uniform, 0.001,
-            "Expected non-uniform distribution but got approximately uniform")
+        js_divergence = jensenshannon(edge_probs, uniform_dist)
+
+        # With OutDegree, we expect meaningful divergence from uniform
+        # JS divergence > 0.01 indicates the distribution is noticeably non-uniform
+        self.assertGreater(js_divergence, 0.01,
+            f"Expected non-uniform distribution but JS divergence from uniform is only {js_divergence:.6f}")
+        
+        cv = np.std(edge_probs) / np.mean(edge_probs)
+
+        self.assertGreater(cv, 0.1, f"Expected at least 10% relative variation")
