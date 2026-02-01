@@ -86,15 +86,12 @@ def generate_erdos_renyi_matrix(n_nodes: int, p: float, is_directed: bool) -> np
     np.ndarray
         Adjacency matrix of shape (n_nodes, n_nodes) with no self-loops.
     """
-    if is_directed:
-        # Sample all off-diagonal entries independently
-        matrix = np.random.binomial(1, p, size=(n_nodes, n_nodes))
-        np.fill_diagonal(matrix, 0)
-    else:
-        # Sample upper triangle, then mirror to lower triangle
-        matrix = np.zeros((n_nodes, n_nodes))
-        upper_tri_indices = np.triu_indices(n_nodes, k=1)
-        matrix[upper_tri_indices] = np.random.binomial(1, p, size=len(upper_tri_indices[0]))
+    matrix = generate_binomial_tensor(n_nodes, 1, p)[:, :, 0].astype(np.float64)
+    np.fill_diagonal(matrix, 0)
+
+    if not is_directed:
+        # Symmetrize: use upper triangle and mirror to lower
+        matrix = np.triu(matrix, k=1)
         matrix = matrix + matrix.T
 
     return matrix

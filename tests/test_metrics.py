@@ -260,9 +260,11 @@ class TestDegreeMetrics(unittest.TestCase):
             [1, 0, 0, 0]
         ])
 
-        # Calculate in-degrees and out-degrees directly from adjacency matrix
-        expected_in_degrees = np.sum(W, axis=0)  # Sum over columns
-        expected_out_degrees = np.sum(W, axis=1)  # Sum over rows
+        # Hardcoded expected values:
+        # In-degrees (column sums): node0=3, node1=2, node2=0, node3=3
+        # Out-degrees (row sums): node0=2, node1=2, node2=3, node3=1
+        expected_in_degrees = np.array([3, 2, 0, 3])
+        expected_out_degrees = np.array([2, 2, 3, 1])
 
         receiver = InDegree()
         indegree = receiver.calculate(W)
@@ -275,17 +277,17 @@ class TestDegreeMetrics(unittest.TestCase):
         self.assertTrue(np.all(outdegree == expected_out_degrees))
 
         undirected_degree = UndirectedDegree()
-        W = np.array([
+        W_undirected = np.array([
             [0, 1, 0, 1],
             [1, 0, 0, 1],
             [0, 0, 0, 1],
             [1, 1, 1, 0]
         ])
 
-        # For undirected graphs, degree is sum of each row (or column, they're the same)
-        expected_degrees = np.sum(W, axis=1)
+        # Hardcoded expected values (row/column sums): node0=2, node1=2, node2=1, node3=3
+        expected_degrees = np.array([2, 2, 1, 3])
 
-        degrees = undirected_degree.calculate(W)
+        degrees = undirected_degree.calculate(W_undirected)
         self.assertTrue(np.all(degrees == expected_degrees))
 
     def test_out_degree_on_sample(self):

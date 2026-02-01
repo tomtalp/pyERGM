@@ -1319,6 +1319,15 @@ class MetricsCollection:
                                  f"masks!")
         self.n_nodes = n_nodes
 
+        self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
+        if is_collinearity_distributed and self._has_dyadic_dependent_metrics:
+            raise ValueError(
+                "Distributed optimization is only supported for dyadic-independent models. "
+                "This model contains dyadic-dependent metrics: "
+                f"{[str(m) for m in self.metrics if not m._is_dyadic_independent]}"
+            )
+
+
         # Returns the number of features that are being calculated. Since a single metric might return more than one
         # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
         # on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count
@@ -1326,11 +1335,9 @@ class MetricsCollection:
         self.num_of_features = self.calc_num_of_features()
         self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
 
-        self._fix_collinearity = fix_collinearity
-        self.collinearity_fixer_sample_size = collinearity_fixer_sample_size
-        if self._fix_collinearity:
+        if fix_collinearity:
             logger.debug("Starting collinearity fix")
-            self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
+            self.collinearity_fixer(sample_size=collinearity_fixer_sample_size,
                                     is_distributed=is_collinearity_distributed,
                                     num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5),
                                     ratio_threshold=kwargs.get('ratio_threshold_collinearity_fixer', 5e-6),
@@ -1339,7 +1346,7 @@ class MetricsCollection:
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
-        self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
+        
 
     def _delete_metric(self, metric: Metric):
         self.metrics = tuple([m for m in self.metrics if m != metric])
