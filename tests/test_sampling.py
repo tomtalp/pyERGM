@@ -1,5 +1,6 @@
 import unittest
 import numpy as np
+from scipy.stats import chi2
 
 from pyERGM.utils import *
 from pyERGM.metrics import *
@@ -187,10 +188,10 @@ class Test_MetropolisHastings(unittest.TestCase):
         3. Sample many edges
         4. Compare empirical frequencies to theoretical probabilities using chi-squared test
         """
-        from scipy.stats import chi2
+        
 
         set_seed(12345)
-        n = 5
+        n = 10
         is_directed = True
         # OutDegree creates non-uniform influence: edges from node i affect
         # node i's out-degree differently than other nodes
@@ -220,7 +221,7 @@ class Test_MetropolisHastings(unittest.TestCase):
             self.assertTrue(np.all(edge_probs >= 0))
 
             # Sample many edges
-            num_samples = 100000
+            num_samples = 5000000
             sampled_edges = get_custom_distribution_random_edges_to_flip(num_samples, edge_probs, is_directed=True)
 
             # Convert (i,j) pairs back to flat-no-diagonal indices
@@ -230,20 +231,23 @@ class Test_MetropolisHastings(unittest.TestCase):
             # Count empirical frequencies
             empirical_counts = np.bincount(flat_indices, minlength=n*(n-1))
 
-            # Chi-squared test for goodness of fit
+        
             expected_counts = edge_probs * num_samples
-            # Only test bins with expected count > 5 (chi-squared assumption)
-            valid_bins = expected_counts > 5
-            self.assertGreater(valid_bins.sum(), 1,
-                f"Not enough bins with expected count > 5 for chi-squared test ({valid_bins.sum()} bins)")
+
+            valid_bins = expected_counts > n
+            self.assertGreater(valid_bins.sum(), n,
+                f"Not enough bins with expected count > {n} for chi-squared test ({valid_bins.sum()} bins)")
 
             chi_squared = np.sum((empirical_counts[valid_bins] - expected_counts[valid_bins])**2
                                  / expected_counts[valid_bins])
             dof = valid_bins.sum() - 1
 
             p_value = 1 - chi2.cdf(chi_squared, dof)
+            print(f"chi_squared - {chi_squared}")
+            print(f"dof - {dof}")
+            print(f"p_value - {p_value}")
 
-            self.assertGreater(p_value, 0.01,
+            self.assertGreater(p_value, 0.05,
                 f"Chi-squared test failed for {method}: chi2={chi_squared:.2f}, dof={dof}, p={p_value:.4f}")
 
     def test_proposal_distribution_creates_non_uniform_probs(self):
@@ -252,7 +256,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         metrics that create different influences for different edges.
         """
         set_seed(67890)
-        n = 6
+        n = 50
 
         # OutDegree should create non-uniform influence since the first node's
         # OutDegree is removed due to collinearity, making edges from node 0
@@ -276,6 +280,9 @@ class Test_MetropolisHastings(unittest.TestCase):
         # The distribution should NOT be uniform
         uniform_prob = 1.0 / (n * (n - 1))
         max_deviation_from_uniform = np.abs(edge_probs - uniform_prob).max()
+
+        print(f"Uniform - {uniform_prob}")
+        print(f"max_deviation_from_uniform - {max_deviation_from_uniform}")
 
         # With OutDegree, we expect meaningful deviation from uniform
         self.assertGreater(max_deviation_from_uniform, 0.001,
