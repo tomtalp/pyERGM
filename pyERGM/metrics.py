@@ -21,23 +21,14 @@ class Metric(ABC):
     methods for calculating metrics, change scores, and handling sampling operations.
     All concrete metric implementations must inherit from this class.
 
-    Parameters
-    ----------
-    metric_type : str, optional
-        Type of metric: 'binary_edge' or 'non_binary_edge'. Default is 'binary_edge'.
     """
-    def __init__(self, metric_type='binary_edge'):
+    def __init__(self):
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
         self._is_directed = None
         self._is_dyadic_independent = True
         self._n_nodes = None
         self._indices_to_ignore = None
-        self._metric_type = metric_type  # can have values "binary_edge", "non_binary_edge"
-        if self._metric_type not in ['binary_edge', 'non_binary_edge']:
-            raise ValueError(
-                f"invalid metric type: {self._metric_type}. Should be one of: 'binary_edge', 'non_binary_edge'")
-
         self.does_support_mask = False
 
     def initialize_indices_to_ignore(self):
@@ -62,9 +53,25 @@ class Metric(ABC):
             return res[:, ~self._indices_to_ignore]
         return res[~self._indices_to_ignore]
 
-    @abstractmethod
     def calculate(self, input: np.ndarray):
-        pass
+        """
+        Calculate metric statistic for a single network.
+
+        Parameters
+        ----------
+        input : np.ndarray
+            A network with shape (n, n).
+
+        Returns
+        -------
+        np.ndarray or scalar
+            The metric statistic(s) for the network.
+        """
+        result = self.calculate_for_sample(expand_net_dims(input))
+        # Single-feature metrics return (k,), multi-feature return (m, k)
+        if result.ndim == 1:
+            return result[0]
+        return result[..., 0]
 
     def _get_effective_feature_count(self):
         """
@@ -113,6 +120,7 @@ class Metric(ABC):
         current_network_stat = self.calculate(current_network)
         return proposed_network_stat - current_network_stat
 
+    @abstractmethod
     def calculate_for_sample(self, networks_sample: np.ndarray):
         """
         Calculate metric statistics for a sample of networks.
@@ -125,15 +133,10 @@ class Metric(ABC):
         Returns
         -------
         np.ndarray
-            Array of shape (num_features, sample_size) containing statistics for each network.
+            Array of statistics. Shape is (sample_size,) for scalar metrics,
+            or (num_features, sample_size) for vector metrics.
         """
-        num_of_samples = networks_sample.shape[2]
-
-        result = np.zeros((self._get_effective_feature_count(), num_of_samples))
-        for i in range(num_of_samples):
-            network = networks_sample[:, :, i]
-            result[:, i] = self.calculate(network)
-        return result
+        pass
 
     def calculate_mple_regressors(
             self,
@@ -267,8 +270,7 @@ class NumberOfEdges(Metric):
         )
 
     def calculate(self, W: np.ndarray, mask: npt.NDArray[bool] | None = None) -> float:
-        mat_sum = np.sum(W) if mask is None else np.sum(W * mask)
-        return mat_sum // self._get_num_edges_in_mat_factor()
+        return self.calculate_for_sample(expand_net_dims(W), mask=mask)[0]
 
     @staticmethod
     @njit
@@ -391,12 +393,7 @@ class NumberOfTriangles(Metric):
     def calculate(self, W: np.ndarray):
         if not np.all(W.T == W):
             raise ValueError("NumOfTriangles not implemented for directed graphs")
-        # the (i,j)-th entry of W^3 counts the number of 3-length paths from node i to node j. Thus, the i-th element on
-        # the diagonal counts the number of triangles that node 1 is part of (3-length paths from i to itself). As the
-        # graph is undirected, we get that each path is counted twice ("forward and backwards"), thus the division by 2.
-        # Additionally, each triangle is counted 3 times by diagonal elements (once for each node that takes part in
-        # forming it), thus the division by 3.
-        return (np.linalg.matrix_power(W, 3)).diagonal().sum() // (3 * 2)
+        return self.calculate_for_sample(expand_net_dims(W))[0]
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple):
         # The triangles that are affected by the edge toggling are those that involve it, namely, if the (i,j)-th edge
@@ -463,9 +460,6 @@ class BaseDegreeVector(Metric, abc.ABC):
 
     def _get_total_feature_count(self):
         return self._n_nodes
-
-    def calculate(self, W: np.ndarray):
-        return self.calculate_for_sample(W)
 
     def calc_change_score(self, current_network: np.ndarray, indices: tuple[int, int]):
         n = current_network.shape[0]
@@ -702,8 +696,14 @@ class Reciprocity(Metric):
         self._is_directed = True
         self._is_dyadic_independent = False
 
-    def calculate(self, W: np.ndarray):
-        return (W * W.T)[np.triu_indices(W.shape[0], 1)]
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        n = networks_sample.shape[0]
+        # Element-wise multiply each network with its transpose
+        # networks_sample is (n, n, sample_size), transpose swaps axes 0 and 1
+        reciprocal = networks_sample * np.transpose(networks_sample, (1, 0, 2))
+        # Extract upper triangular elements for each sample
+        triu_indices = np.triu_indices(n, 1)
+        return reciprocal[triu_indices[0], triu_indices[1], :]
 
     def _get_total_feature_count(self):
         # n choose 2
@@ -747,9 +747,6 @@ class TotalReciprocity(Metric):
         self._is_directed = True
         self._is_dyadic_independent = False
 
-    def calculate(self, W: np.ndarray):
-        return (W * W.T).sum() / 2
-
     @staticmethod
     @njit
     def calc_change_score(current_network: np.ndarray, indices: tuple):
@@ -762,9 +759,7 @@ class TotalReciprocity(Metric):
         else:
             return 0
 
-    @staticmethod
-    # @njit # Not supporting np.einsum
-    def calculate_for_sample(networks_sample: np.ndarray):
+    def calculate_for_sample(self, networks_sample: np.ndarray):
         return np.einsum("ijk,jik->k", networks_sample, networks_sample) / 2
 
     def calculate_bootstrapped_features(self, first_halves_to_use: np.ndarray,
@@ -1652,17 +1647,21 @@ class MetricsCollection:
 
         return change_scores
 
-    def _get_mple_data_chunk_mask(
-            self,
-            edge_indices_lims: tuple[int, int] | None,
-    ) -> npt.NDArray[bool]:
+    def _get_global_mask(self) -> npt.NDArray[bool]:
+        """Return the global mask for edge indices, or a mask of all True if no mask is set."""
         full_net_size = self.n_nodes * self.n_nodes - self.n_nodes
         if not self.is_directed:
             full_net_size //= 2
-        data_chunk_mask = np.zeros(full_net_size, dtype=bool)
-        global_mask = self.mask if self.mask is not None else np.ones(full_net_size, dtype=bool)
+        return self.mask if self.mask is not None else np.ones(full_net_size, dtype=bool)
+
+    def _validate_edge_indices_lims(
+            self,
+            edge_indices_lims: tuple[int, int] | None,
+            global_mask: npt.NDArray[bool],
+    ) -> tuple[int, int]:
+        """Validate and return edge index limits, defaulting to full range if None."""
         if edge_indices_lims is None:
-            edge_indices_lims = (0, global_mask.sum())
+            return (0, global_mask.sum())
         if (
                 edge_indices_lims[0] < 0 or edge_indices_lims[1] < 0 or
                 edge_indices_lims[0] > global_mask.sum() or edge_indices_lims[1] > global_mask.sum() or
@@ -1672,9 +1671,55 @@ class MetricsCollection:
                 'edge_indices_lims out of bounds. expected strictly monotonic increasing limits between 0 '
                 'and the number of considered edges (the size of the dataset for MPLE optimization), which is '
                 f'{global_mask.sum()}. Got {edge_indices_lims}')
-        # First constraint to the "universe" of edge indices to consider by the global mask, then slice according to the
+        return edge_indices_lims
+
+    def _get_masked_indices_slice(
+            self,
+            edge_indices_lims: tuple[int, int],
+            global_mask: npt.NDArray[bool],
+    ) -> npt.NDArray[np.intp]:
+        """Get the actual array indices for a slice within the masked edge space."""
+        return np.where(global_mask)[0][edge_indices_lims[0]:edge_indices_lims[1]]
+
+    def slice_flat_array_by_edge_indices(
+            self,
+            flat_array: npt.NDArray,
+            edge_indices_lims: tuple[int, int] | None = None,
+    ) -> npt.NDArray:
+        """
+        Slice a flattened edge array using the same indexing logic as MPLE data chunks.
+
+        Parameters
+        ----------
+        flat_array : np.ndarray
+            A flattened array of edge values (e.g., weights) with length matching
+            the full network edge count.
+        edge_indices_lims : tuple[int, int] or None
+            The (start, end) indices within the masked edge space. If None, returns all masked edges.
+
+        Returns
+        -------
+        np.ndarray
+            The sliced portion of the array.
+        """
+        global_mask = self._get_global_mask()
+        edge_indices_lims = self._validate_edge_indices_lims(edge_indices_lims, global_mask)
+        indices = self._get_masked_indices_slice(edge_indices_lims, global_mask)
+        return flat_array[indices]
+
+    def _get_mple_data_chunk_mask(
+            self,
+            edge_indices_lims: tuple[int, int] | None,
+    ) -> npt.NDArray[bool]:
+        full_net_size = self.n_nodes * self.n_nodes - self.n_nodes
+        if not self.is_directed:
+            full_net_size //= 2
+        data_chunk_mask = np.zeros(full_net_size, dtype=bool)
+        global_mask = self._get_global_mask()
+        edge_indices_lims = self._validate_edge_indices_lims(edge_indices_lims, global_mask)
+        # First constrain to the "universe" of edge indices to consider by the global mask, then slice according to the
         # limits within the subset of considered edges.
-        data_chunk_mask[np.where(global_mask)[0][edge_indices_lims[0]:edge_indices_lims[1]]] = True
+        data_chunk_mask[self._get_masked_indices_slice(edge_indices_lims, global_mask)] = True
         return data_chunk_mask
 
     def prepare_mple_regressors(
