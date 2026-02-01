@@ -62,9 +62,25 @@ class Metric(ABC):
             return res[:, ~self._indices_to_ignore]
         return res[~self._indices_to_ignore]
 
-    @abstractmethod
     def calculate(self, input: np.ndarray):
-        pass
+        """
+        Calculate metric statistic for a single network.
+
+        Parameters
+        ----------
+        input : np.ndarray
+            A network with shape (n, n).
+
+        Returns
+        -------
+        np.ndarray or scalar
+            The metric statistic(s) for the network.
+        """
+        result = self.calculate_for_sample(expand_net_dims(input))
+        # Single-feature metrics return (k,), multi-feature return (m, k)
+        if result.ndim == 1:
+            return result[0]
+        return result[..., 0]
 
     def _get_effective_feature_count(self):
         """
@@ -113,6 +129,7 @@ class Metric(ABC):
         current_network_stat = self.calculate(current_network)
         return proposed_network_stat - current_network_stat
 
+    @abstractmethod
     def calculate_for_sample(self, networks_sample: np.ndarray):
         """
         Calculate metric statistics for a sample of networks.
@@ -125,15 +142,10 @@ class Metric(ABC):
         Returns
         -------
         np.ndarray
-            Array of shape (num_features, sample_size) containing statistics for each network.
+            Array of statistics. Shape is (sample_size,) for scalar metrics,
+            or (num_features, sample_size) for vector metrics.
         """
-        num_of_samples = networks_sample.shape[2]
-
-        result = np.zeros((self._get_effective_feature_count(), num_of_samples))
-        for i in range(num_of_samples):
-            network = networks_sample[:, :, i]
-            result[:, i] = self.calculate(network)
-        return result
+        pass
 
     def calculate_mple_regressors(
             self,
@@ -458,9 +470,6 @@ class BaseDegreeVector(Metric, abc.ABC):
     def _get_total_feature_count(self):
         return self._n_nodes
 
-    def calculate(self, W: np.ndarray):
-        return self.calculate_for_sample(W)
-
     def calc_change_score(self, current_network: np.ndarray, indices: tuple[int, int]):
         n = current_network.shape[0]
         diff = np.zeros(n)
@@ -696,9 +705,6 @@ class Reciprocity(Metric):
         self._is_directed = True
         self._is_dyadic_independent = False
 
-    def calculate(self, W: np.ndarray):
-        return self.calculate_for_sample(expand_net_dims(W))[:, 0]
-
     def calculate_for_sample(self, networks_sample: np.ndarray):
         n = networks_sample.shape[0]
         # Element-wise multiply each network with its transpose
@@ -749,9 +755,6 @@ class TotalReciprocity(Metric):
         super().__init__()
         self._is_directed = True
         self._is_dyadic_independent = False
-
-    def calculate(self, W: np.ndarray):
-        return self.calculate_for_sample(expand_net_dims(W))[0]
 
     @staticmethod
     @njit
