@@ -1,13 +1,19 @@
 """
 Enum constants for ERGM configuration options.
-
-All enums inherit from str for backward compatibility - string values
-can be used interchangeably with enum values.
 """
-from enum import Enum
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Optional
+
+@dataclass
+class OptimizationResult:
+    """Result of an ERGM optimization (fitting) procedure."""
+    success: bool
+    statistic: Optional[float] = None
+    threshold: Optional[float] = None
 
 
-class OptimizationScheme(str, Enum):
+class OptimizationScheme(StrEnum):
     """Scheme for model fitting (determines MPLE vs MCMLE path)."""
     AUTO = "AUTO"
     MPLE = "MPLE"
@@ -15,19 +21,19 @@ class OptimizationScheme(str, Enum):
     MCMLE = "MCMLE"
 
 
-class OptimizationMethod(str, Enum):
+class OptimizationMethod(StrEnum):
     """Optimization method for MCMLE."""
     NEWTON_RAPHSON = "newton_raphson"
     GRADIENT_DESCENT = "gradient_descent"
 
 
-class MPLEOptimizationMethod(str, Enum):
+class MPLEOptimizationMethod(StrEnum):
     """Optimization method for MPLE (scipy.optimize methods)."""
     L_BFGS_B = "L-BFGS-B"
     NEWTON_CG = "Newton-CG"
 
 
-class ConvergenceCriterion(str, Enum):
+class ConvergenceCriterion(StrEnum):
     """Convergence criterion for MCMLE."""
     HOTELLING = "hotelling"
     ZERO_GRAD_NORM = "zero_grad_norm"
@@ -35,34 +41,34 @@ class ConvergenceCriterion(str, Enum):
     MODEL_BOOTSTRAP = "model_bootstrap"
 
 
-class CovMatrixEstimationMethod(str, Enum):
+class CovMatrixEstimationMethod(StrEnum):
     """Method for estimating the covariance matrix."""
     NAIVE = "naive"
     BATCH = "batch"
     MULTIVARIATE_INITIAL_SEQUENCE = "multivariate_initial_sequence"
 
 
-class ThetaInitMethod(str, Enum):
+class ThetaInitMethod(StrEnum):
     """Method for initializing theta parameters."""
     UNIFORM = "uniform"
     MPLE = "mple"
     USE_EXISTING = "use_existing"
 
 
-class EdgeProposalMethod(str, Enum):
+class EdgeProposalMethod(StrEnum):
     """Edge proposal distribution for MCMC sampling."""
     UNIFORM = "uniform"
     FEATURES_INFLUENCE_SUM = "features_influence__sum"
     FEATURES_INFLUENCE_SOFTMAX = "features_influence__softmax"
 
 
-class SamplingMethod(str, Enum):
+class SamplingMethod(StrEnum):
     """Network sampling method."""
     METROPOLIS_HASTINGS = "metropolis_hastings"
     EXACT = "exact"
 
 
-class Reduction(str, Enum):
+class Reduction(StrEnum):
     """Reduction method for aggregating values."""
     SUM = "sum"
     MEAN = "mean"
