@@ -25,7 +25,7 @@ def main():
     if 'weights_chunk' in mple_data_chunk:
         weights_chunk = mple_data_chunk['weights_chunk'].astype(np.float32)
     else:
-        weights_chunk = np.empty(0)
+        weights_chunk = np.empty(0, dtype=np.float32)
     mple_data_chunk.close()
 
     chunk_prediction = calc_logistic_regression_predictions(Xs_chunk, thetas)
