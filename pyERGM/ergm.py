@@ -714,6 +714,14 @@ class ERGM():
         # TODO - what do we want to return?
         """
 
+        # Validate that the input matrix is binary
+        unique_values = np.unique(observed_networks)
+        if not np.all(np.isin(unique_values, [0, 1])):
+            raise ValueError(
+                f"observed_networks must be a binary matrix containing only 0s and 1s. "
+                f"Found values: {unique_values}"
+            )
+
         # This is because we assume the sample size is even when estimating the covariance matrix (in
         # calc_capital_gammas).
         if mcmc_sample_size % 2 != 0:
