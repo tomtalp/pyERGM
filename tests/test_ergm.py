@@ -1105,4 +1105,191 @@ class TestMPLENoneHandling(unittest.TestCase):
         # Verify output
         self.assertEqual(probs.shape, (self.n_nodes, self.n_nodes))
 
-     
+
+class TestSamplingMethodAutoDetection(unittest.TestCase):
+    """Tests for automatic sampling method detection in generate_networks_for_sample"""
+
+    def test_auto_detect_exact_for_mple_model(self):
+        """MPLE models (dyadic-independent) should auto-select EXACT sampling"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected(), InDegree()], is_directed=True)
+        model.fit(sampson_matrix[:n_nodes, :n_nodes])
+
+        # sampling_method=None should auto-detect EXACT
+        sample = model.generate_networks_for_sample(sample_size=10)
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, 10))
+
+    def test_auto_detect_exact_for_mple_reciprocity_model(self):
+        """MPLE_RECIPROCITY models should auto-select EXACT sampling"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected(), TotalReciprocity()], is_directed=True)
+        model.fit(sampson_matrix[:n_nodes, :n_nodes])
+
+        # sampling_method=None should auto-detect EXACT
+        sample = model.generate_networks_for_sample(sample_size=10)
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, 10))
+
+    def test_auto_detect_mcmc_for_mcmle_model(self):
+        """MCMLE models should auto-select METROPOLIS_HASTINGS sampling"""
+        n_nodes = 5
+        # NumberOfTriangles makes this an MCMLE model
+        model = ERGM(n_nodes, [NumberOfEdgesUndirected(), NumberOfTriangles()], is_directed=False)
+
+        # Set thetas since we won't fit
+        model._thetas = np.array([0.0, 0.0])
+
+        # sampling_method=None should auto-detect METROPOLIS_HASTINGS
+        sample = model.generate_networks_for_sample(sample_size=5, burn_in=100, mcmc_steps_per_sample=10)
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, 5))
+
+    def test_explicit_sampling_method_overrides_auto(self):
+        """Explicit sampling_method should override auto-detection"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
+        model.fit(sampson_matrix[:n_nodes, :n_nodes])
+
+        # Even though MPLE would auto-select EXACT, explicit MCMC should work
+        sample = model.generate_networks_for_sample(
+            sample_size=5,
+            sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
+            burn_in=100,
+            mcmc_steps_per_sample=10
+        )
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, 5))
+
+
+class TestMPLEBasedSeedGeneration(unittest.TestCase):
+    """Tests for MPLE-based MCMC seed generation"""
+
+    def test_mcmc_auto_seed_dyadic_independent(self):
+        """MCMC with no seed on dyadic-independent model should use MPLE seed"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
+        model.fit(sampson_matrix[:n_nodes, :n_nodes])
+
+        # Should work without providing seed_network
+        sample = model.generate_networks_for_sample(
+            sample_size=5,
+            sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
+            burn_in=100,
+            mcmc_steps_per_sample=10
+        )
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, 5))
+
+    def test_mcmc_auto_seed_mcmle_model(self):
+        """MCMC with no seed on MCMLE model should generate MPLE-based seed"""
+        n_nodes = 5
+        model = ERGM(n_nodes, [NumberOfEdgesUndirected(), NumberOfTriangles()], is_directed=False)
+        model._thetas = np.array([-0.5, 0.5])
+
+        # Should work without providing seed_network
+        sample = model.generate_networks_for_sample(
+            sample_size=5,
+            sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
+            burn_in=100,
+            mcmc_steps_per_sample=10
+        )
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, 5))
+
+    def test_generate_mple_based_seed_produces_valid_network(self):
+        """_generate_mple_based_seed should return a valid binary network"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected(), InDegree()], is_directed=True)
+        model.fit(sampson_matrix[:n_nodes, :n_nodes])
+
+        seed = model._generate_mple_based_seed()
+
+        # Check shape
+        self.assertEqual(seed.shape, (n_nodes, n_nodes))
+        # Check binary
+        self.assertTrue(np.all((seed == 0) | (seed == 1)))
+        # Check no self-loops
+        self.assertTrue(np.all(np.diag(seed) == 0))
+
+    def test_explicit_seed_takes_precedence(self):
+        """Explicit seed_network should be used even when MPLE seed is available"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
+        model.fit(sampson_matrix[:n_nodes, :n_nodes])
+
+        # Use all-zeros as explicit seed
+        explicit_seed = np.zeros((n_nodes, n_nodes))
+
+        sample = model.generate_networks_for_sample(
+            sample_size=5,
+            seed_network=explicit_seed,
+            sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
+            burn_in=100,
+            mcmc_steps_per_sample=10
+        )
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, 5))
+
+
+class TestCalculateStatisticsAPI(unittest.TestCase):
+    """Tests for ERGM.calculate_statistics and calculate_sample_statistics"""
+
+    def test_calculate_statistics_single_network(self):
+        """calculate_statistics should return correct statistics for a single network"""
+        n_nodes = 5
+        metrics = [NumberOfEdgesDirected(), InDegree()]
+        model = ERGM(n_nodes, metrics, is_directed=True)
+
+        # Create a simple network with 5 edges
+        W = np.array([
+            [0, 1, 0, 0, 0],
+            [0, 0, 1, 0, 0],
+            [0, 0, 0, 1, 0],
+            [0, 0, 0, 0, 1],
+            [1, 0, 0, 0, 0]
+        ])
+
+        stats = model.calculate_statistics(W)
+
+        # Verify shape
+        num_features = model._metrics_collection.num_of_features
+        self.assertEqual(stats.shape, (num_features,))
+
+        # Verify first stat is number of edges (should be 5)
+        self.assertEqual(stats[0], 5)
+
+    def test_calculate_statistics_matches_internal(self):
+        """calculate_statistics should match _metrics_collection.calculate_statistics"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected(), OutDegree()], is_directed=True)
+
+        W = np.random.randint(0, 2, (n_nodes, n_nodes))
+        np.fill_diagonal(W, 0)
+
+        stats_api = model.calculate_statistics(W)
+        stats_internal = model._metrics_collection.calculate_statistics(W)
+
+        np.testing.assert_array_equal(stats_api, stats_internal)
+
+    def test_calculate_sample_statistics(self):
+        """calculate_sample_statistics should return correct shape and values"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected(), InDegree()], is_directed=True)
+        model.fit(sampson_matrix[:n_nodes, :n_nodes])
+
+        sample_size = 20
+        sample = model.generate_networks_for_sample(sample_size=sample_size)
+
+        stats = model.calculate_sample_statistics(sample)
+
+        # Verify shape: (num_features, sample_size)
+        num_features = model._metrics_collection.num_of_features
+        self.assertEqual(stats.shape, (num_features, sample_size))
+
+    def test_calculate_sample_statistics_matches_internal(self):
+        """calculate_sample_statistics should match _metrics_collection method"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
+
+        sample = np.random.randint(0, 2, (n_nodes, n_nodes, 5))
+        for i in range(5):
+            np.fill_diagonal(sample[:, :, i], 0)
+
+        stats_api = model.calculate_sample_statistics(sample)
+        stats_internal = model._metrics_collection.calculate_sample_statistics(sample)
+
+        np.testing.assert_array_equal(stats_api, stats_internal)
