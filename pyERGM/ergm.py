@@ -105,15 +105,6 @@ class ERGM():
                                                      )
         if OptimizationScheme.MPLE != self._metrics_collection.choose_optimization_scheme() and self._mask is not None:
             raise NotImplementedError("Masking is currently supported only for edge independent models.")
-        
-
-        if self._is_distributed_optimization and not self._metrics_collection._has_dyadic_dependent_metrics:
-            raise ValueError(
-                "Distributed optimization is only supported for dyadic-independent models. "
-                "This model contains dyadic-dependent metrics: "
-                f"{[str(m) for m in self._metrics_collection.metrics if not m._is_dyadic_independent]}"
-            )
-
 
         if initial_thetas is not None:
             if type(initial_thetas) != dict:
@@ -187,7 +178,7 @@ class ERGM():
         ValueError
             If the dimensions of W don't match the expected network size.
         """
-        if len(W.shape) != 2 or W.shape[0] != self._n_nodes or W.shape[1] != self._n_nodes:
+        if W.ndim != 2 or W.shape != (self._n_nodes, self._n_nodes):
             raise ValueError(f"The dimensions of the given adjacency matrix, {W.shape}, don't comply with the number of"
                              f" nodes in the network: {self._n_nodes}")
         features = self._metrics_collection.calculate_statistics(W)

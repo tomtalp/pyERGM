@@ -53,9 +53,25 @@ class Metric(ABC):
             return res[:, ~self._indices_to_ignore]
         return res[~self._indices_to_ignore]
 
-    @abstractmethod
     def calculate(self, input: np.ndarray):
-        pass
+        """
+        Calculate metric statistic for a single network.
+
+        Parameters
+        ----------
+        input : np.ndarray
+            A network with shape (n, n).
+
+        Returns
+        -------
+        np.ndarray or scalar
+            The metric statistic(s) for the network.
+        """
+        result = self.calculate_for_sample(expand_net_dims(input))
+        # Single-feature metrics return (k,), multi-feature return (m, k)
+        if result.ndim == 1:
+            return result[0]
+        return result[..., 0]
 
     def _get_effective_feature_count(self):
         """
@@ -104,6 +120,7 @@ class Metric(ABC):
         current_network_stat = self.calculate(current_network)
         return proposed_network_stat - current_network_stat
 
+    @abstractmethod
     def calculate_for_sample(self, networks_sample: np.ndarray):
         """
         Calculate metric statistics for a sample of networks.
@@ -116,15 +133,10 @@ class Metric(ABC):
         Returns
         -------
         np.ndarray
-            Array of shape (num_features, sample_size) containing statistics for each network.
+            Array of statistics. Shape is (sample_size,) for scalar metrics,
+            or (num_features, sample_size) for vector metrics.
         """
-        num_of_samples = networks_sample.shape[2]
-
-        result = np.zeros((self._get_effective_feature_count(), num_of_samples))
-        for i in range(num_of_samples):
-            network = networks_sample[:, :, i]
-            result[:, i] = self.calculate(network)
-        return result
+        pass
 
     def calculate_mple_regressors(
             self,
@@ -449,9 +461,6 @@ class BaseDegreeVector(Metric, abc.ABC):
     def _get_total_feature_count(self):
         return self._n_nodes
 
-    def calculate(self, W: np.ndarray):
-        return self.calculate_for_sample(W)
-
     def calc_change_score(self, current_network: np.ndarray, indices: tuple[int, int]):
         n = current_network.shape[0]
         diff = np.zeros(n)
@@ -687,9 +696,6 @@ class Reciprocity(Metric):
         self._is_directed = True
         self._is_dyadic_independent = False
 
-    def calculate(self, W: np.ndarray):
-        return self.calculate_for_sample(expand_net_dims(W))[:, 0]
-
     def calculate_for_sample(self, networks_sample: np.ndarray):
         n = networks_sample.shape[0]
         # Element-wise multiply each network with its transpose
@@ -740,9 +746,6 @@ class TotalReciprocity(Metric):
         super().__init__()
         self._is_directed = True
         self._is_dyadic_independent = False
-
-    def calculate(self, W: np.ndarray):
-        return self.calculate_for_sample(expand_net_dims(W))[0]
 
     @staticmethod
     @njit
@@ -1316,6 +1319,15 @@ class MetricsCollection:
                                  f"masks!")
         self.n_nodes = n_nodes
 
+        self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
+        if is_collinearity_distributed and self._has_dyadic_dependent_metrics:
+            raise ValueError(
+                "Distributed optimization is only supported for dyadic-independent models. "
+                "This model contains dyadic-dependent metrics: "
+                f"{[str(m) for m in self.metrics if not m._is_dyadic_independent]}"
+            )
+
+
         # Returns the number of features that are being calculated. Since a single metric might return more than one
         # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
         # on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count
@@ -1323,11 +1335,9 @@ class MetricsCollection:
         self.num_of_features = self.calc_num_of_features()
         self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
 
-        self._fix_collinearity = fix_collinearity
-        self.collinearity_fixer_sample_size = collinearity_fixer_sample_size
-        if self._fix_collinearity:
+        if fix_collinearity:
             logger.debug("Starting collinearity fix")
-            self.collinearity_fixer(sample_size=self.collinearity_fixer_sample_size,
+            self.collinearity_fixer(sample_size=collinearity_fixer_sample_size,
                                     is_distributed=is_collinearity_distributed,
                                     num_samples_per_job=kwargs.get('num_samples_per_job_collinearity_fixer', 5),
                                     ratio_threshold=kwargs.get('ratio_threshold_collinearity_fixer', 5e-6),
@@ -1336,7 +1346,7 @@ class MetricsCollection:
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
-        self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
+        
 
     def _delete_metric(self, metric: Metric):
         self.metrics = tuple([m for m in self.metrics if m != metric])

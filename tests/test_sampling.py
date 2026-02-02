@@ -298,3 +298,4 @@ class Test_MetropolisHastings(unittest.TestCase):
         cv = np.std(edge_probs) / np.mean(edge_probs)
 
         self.assertGreater(cv, 0.1, f"Expected at least 10% relative variation")
+
