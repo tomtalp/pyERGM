@@ -7,6 +7,7 @@ from pyERGM.utils import *
 from pyERGM.metrics import MetricsCollection, NumberOfEdgesDirected, TotalReciprocity, OutDegree, InDegree
 from pyERGM.datasets import sampson_matrix
 from pyERGM.ergm import ERGM
+from pyERGM.constants import SamplingMethod, CovMatrixEstimationMethod
 from scipy.linalg import eigh
 
 from matplotlib import pyplot as plt
@@ -59,13 +60,13 @@ class GeneralUtilsTester(unittest.TestCase):
         convergence_result = p1_sampson_model.fit(sampson_matrix)
 
         sample_size = 50000
-        sampled_networks = p1_sampson_model.generate_networks_for_sample(sampling_method="exact",
+        sampled_networks = p1_sampson_model.generate_networks_for_sample(sampling_method=SamplingMethod.EXACT,
                                                                          sample_size=sample_size)
         sample_mean = sampled_networks.mean(axis=-1)
         exact_marginals = get_exact_marginals_from_dyads_distribution(p1_sampson_model._exact_dyadic_distributions)
 
         self.assertEqual(sampled_networks.shape, (n_nodes, n_nodes, sample_size))
-        self.assertEqual(convergence_result["success"], True)
+        self.assertEqual(convergence_result.success, True)
         self.assertTrue(np.abs(exact_marginals - sample_mean).max() < 1e-2)
         self.assertTrue(pearsonr(exact_marginals[~np.eye(n_nodes, dtype=bool)].flatten(),
                                  sampled_networks.mean(axis=-1)[
@@ -270,7 +271,7 @@ class TestCovarianceMatrixEstimation(unittest.TestCase):
         mean_features = features_of_sample.mean(axis=1)
 
         sys.setrecursionlimit(2000)
-        batch_estimation = covariance_matrix_estimation(features_of_sample, mean_features, method='batch',
+        batch_estimation = covariance_matrix_estimation(features_of_sample, mean_features, method=CovMatrixEstimationMethod.BATCH,
                                                         num_batches=3)
         self.assertTrue(np.abs(expected_covariance_batch_estimation - batch_estimation).max() < 10 ** -15)
 
@@ -284,7 +285,7 @@ class TestCovarianceMatrixEstimation(unittest.TestCase):
         mean_features = features_of_sample.mean(axis=1)
 
         sys.setrecursionlimit(2000)
-        naive_estimation = covariance_matrix_estimation(features_of_sample, mean_features, method='naive')
+        naive_estimation = covariance_matrix_estimation(features_of_sample, mean_features, method=CovMatrixEstimationMethod.NAIVE)
         self.assertTrue(np.abs(expected_covariance_naive_estimation - naive_estimation).max() < 10 ** -14)
 
     def test_auto_correlation_function(self):
@@ -471,7 +472,7 @@ class TestCovarianceMatrixEstimation(unittest.TestCase):
 
         sys.setrecursionlimit(2000)
         multivariate_initial_seq_estimation = covariance_matrix_estimation(features_of_sample, mean_features,
-                                                                           method='multivariate_initial_sequence')
+                                                                           method=CovMatrixEstimationMethod.MULTIVARIATE_INITIAL_SEQUENCE)
         self.assertTrue(np.abs(
             expected_covariance_multivariate_initial_seq_estimation - multivariate_initial_seq_estimation).max() <
                         10 ** -14)

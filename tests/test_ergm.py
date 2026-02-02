@@ -6,6 +6,10 @@ from pyERGM.utils import *
 from pyERGM.metrics import *
 from pyERGM.ergm import ERGM
 from pyERGM.datasets import sampson_matrix
+from pyERGM.constants import (
+    OptimizationScheme, SamplingMethod, ConvergenceCriterion,
+    Reduction, ThetaInitMethod
+)
 import sys
 from scipy.linalg import eigh
 
@@ -50,7 +54,7 @@ class BruteForceERGM(ERGM):
         super().__init__(n_nodes,
                          metrics_collection,
                          is_directed,
-                         initial_thetas)
+                         initial_thetas=initial_thetas)
 
         if is_directed:
             num_connections = (n_nodes ** 2 - n_nodes)
@@ -84,8 +88,8 @@ class BruteForceERGM(ERGM):
         adj_mat_idx = construct_int_from_adj_mat(W, self._is_directed)
         return self._all_weights[adj_mat_idx]
 
-    def generate_networks_for_sample(self, sample_size, sampling_method="Exact"):
-        if sampling_method != "Exact":
+    def generate_networks_for_sample(self, sample_size, sampling_method=SamplingMethod.EXACT):
+        if sampling_method != SamplingMethod.EXACT:
             raise ValueError("BruteForceERGM supports only exact sampling (this is its whole purpose)")
 
         all_nets_probs = self._all_weights / self._normalization_factor
@@ -385,9 +389,9 @@ class TestERGM(unittest.TestCase):
         types = ["A", "A", "B", "B"]
         metrics = [NumberOfEdgesTypesDirected(types)]
         model = ERGM(n, metrics, is_directed=True)
-        result = model.fit(M1, mple_lr=1)
+        result = model.fit(M1)
 
-        self.assertTrue(result["success"])
+        self.assertTrue(result.success)
 
         inferred_probas_per_type_pairs = list(np.exp(model._thetas) / (1 + np.exp(model._thetas)))
 
@@ -410,7 +414,7 @@ class TestERGM(unittest.TestCase):
         types = ["A", "A", "B", "B"]
         metrics = [NumberOfEdgesTypesDirected(types)]
         model = ERGM(n, metrics, is_directed=True)
-        model.fit(M1, mple_max_iter=1000, mple_lr=1000, mple_stopping_thr=1e-10)
+        model.fit(M1)
 
         inferred_probas_per_type_pairs = list(np.exp(model._thetas) / (1 + np.exp(model._thetas)))
 
@@ -431,8 +435,7 @@ class TestERGM(unittest.TestCase):
                                              opt_steps=10,
                                              steps_for_decay=1,
                                              lr=1,
-                                             mple_lr=0.5,
-                                             convergence_criterion="model_bootstrap",
+                                             convergence_criterion=ConvergenceCriterion.MODEL_BOOTSTRAP,
                                              mcmc_burn_in=0,
                                              mcmc_steps_per_sample=n_nodes ** 2,
                                              mcmc_sample_size=1000,
@@ -440,7 +443,7 @@ class TestERGM(unittest.TestCase):
                                              model_subsample_size=1000,
                                              bootstrap_convergence_confidence=0.95,
                                              bootstrap_convergence_num_stds_away_thr=1,
-                                             optimization_scheme='MCMLE'
+                                             optimization_scheme=OptimizationScheme.MCMLE
                                              )
 
         model_thethas = mcmle_model._thetas
@@ -463,7 +466,7 @@ class TestERGM(unittest.TestCase):
 
         thetas_ccc = ccc(model_thethas, expected_thetas)
         self.assertTrue(thetas_ccc > 0.99)
-        self.assertTrue(convergence_result["success"])
+        self.assertTrue(convergence_result.success)
 
     def test_assigning_model_initial_thetas(self):
         # TODO: seems like convergence of the model in this test depends on the seed...
@@ -518,8 +521,7 @@ class TestERGM(unittest.TestCase):
                                              opt_steps=10,
                                              steps_for_decay=1,
                                              lr=1,
-                                             mple_lr=0.5,
-                                             convergence_criterion="model_bootstrap",
+                                             convergence_criterion=ConvergenceCriterion.MODEL_BOOTSTRAP,
                                              mcmc_burn_in=0,
                                              mcmc_steps_per_sample=n_nodes ** 2,
                                              mcmc_sample_size=1000,
@@ -527,7 +529,7 @@ class TestERGM(unittest.TestCase):
                                              model_subsample_size=1000,
                                              bootstrap_convergence_confidence=0.95,
                                              bootstrap_convergence_num_stds_away_thr=1,
-                                             optimization_scheme='MPLE_RECIPROCITY'
+                                             optimization_scheme=OptimizationScheme.MPLE_RECIPROCITY
                                              )
 
         model_thethas = mcmle_model._thetas
@@ -550,7 +552,7 @@ class TestERGM(unittest.TestCase):
 
         thetas_ccc = ccc(model_thethas, expected_thetas)
         self.assertTrue(thetas_ccc > 0.99)
-        self.assertTrue(convergence_result["success"])
+        self.assertTrue(convergence_result.success)
 
     def test_mple_reciprocity_sampling(self):
         set_seed(8765)
@@ -560,14 +562,14 @@ class TestERGM(unittest.TestCase):
         mcmle_model = ERGM(n_nodes, metrics, is_directed=True)
 
         convergence_result = mcmle_model.fit(sampson_matrix,
-                                             optimization_scheme='MPLE_RECIPROCITY'
+                                             optimization_scheme=OptimizationScheme.MPLE_RECIPROCITY
                                              )
 
         sample_size = 10
-        sampled_networks = mcmle_model.generate_networks_for_sample(sampling_method="exact", sample_size=sample_size)
+        sampled_networks = mcmle_model.generate_networks_for_sample(sampling_method=SamplingMethod.EXACT, sample_size=sample_size)
 
         self.assertEqual(sampled_networks.shape, (n_nodes, n_nodes, sample_size))
-        self.assertEqual(convergence_result["success"], True)
+        self.assertEqual(convergence_result.success, True)
 
     def test_model_initialization_from_existing_params(self):
         set_seed(1234)
@@ -600,7 +602,7 @@ class TestERGM(unittest.TestCase):
 
         model = ERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
         result = model.fit(observed_net)
-        self.assertTrue(result["success"])
+        self.assertTrue(result.success)
 
         self.assertTrue(np.abs(model._thetas - expected_theta) < 1e-5)
 
@@ -616,10 +618,10 @@ class TestERGM(unittest.TestCase):
         expected_individual_likes[network_for_likelihood == 0] = 1 - observed_p
         expected_individual_likes[np.diag_indices(network_for_likelihood.shape[0])] = 1
 
-        all_edges_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction='none')
+        all_edges_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.NONE)
         self.assertTrue(np.all(np.abs(all_edges_likes - np.log(expected_individual_likes))) < 1e-5)
 
-        log_like_sum = model.calc_model_log_likelihood(network_for_likelihood, reduction='sum', log_base=10)
+        log_like_sum = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.SUM, log_base=10)
         self.assertTrue(np.abs(log_like_sum - np.log10(expected_individual_likes).sum()) < 1e-5)
 
         # Model with reciprocity
@@ -636,7 +638,7 @@ class TestERGM(unittest.TestCase):
         model = ERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
 
         result = model.fit(observed_net)
-        self.assertTrue(result["success"])
+        self.assertTrue(result.success)
 
         self.assertTrue(np.abs(model._thetas - expected_theta) < 1e-5)
 
@@ -650,7 +652,7 @@ class TestERGM(unittest.TestCase):
         dyad_states_for_likelihood = convert_connectivity_to_dyad_states(network_for_likelihood)
         reciprocal_dyads_indices = np.where(dyad_states_for_likelihood.sum(axis=0) == 1)[0]
 
-        all_dyad_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction='none')
+        all_dyad_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.NONE)
         # TODO: we assert here only the likelihood of having a reciprocal dyad. Should find a way (may be numerical) to
         #  evaluate the expected probabilities for the other 3 dyadic states and validate all of them.
         self.assertTrue(
@@ -659,7 +661,7 @@ class TestERGM(unittest.TestCase):
         brute_force_ergm = BruteForceERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
         brute_force_ergm._thetas = model._thetas
         true_likelihood_net_for_like = brute_force_ergm.calculate_probability(network_for_likelihood)
-        calculated_likelihood = model.calc_model_log_likelihood(network_for_likelihood, reduction='sum', log_base=10)
+        calculated_likelihood = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.SUM, log_base=10)
         # TODO: the diff is larger than expected. Not probable that it's a problem, but maybe we should dig into this.
         self.assertTrue(np.abs(np.log10(true_likelihood_net_for_like) - calculated_likelihood) < 0.1)
 
@@ -714,13 +716,13 @@ class TestERGM(unittest.TestCase):
         tested_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
         tested_model.fit(
             sample,
-            optimization_scheme='MCMLE',
-            theta_init_method='uniform',
+            optimization_scheme=OptimizationScheme.MCMLE,
+            theta_init_method=ThetaInitMethod.UNIFORM,
             lr=0.1,
             mcmc_sample_size=n_nodes ** 3,
             mcmc_steps_per_sample=n_nodes ** 2,
             bootstrap_convergence_confidence=0.99,
-            bootstrap_convergence_stds_away_thr=0.75,
+            bootstrap_convergence_num_stds_away_thr=0.75,
         )
 
         thetas_ccc = ccc(base_model._thetas, tested_model._thetas)
@@ -770,7 +772,7 @@ class TestERGM(unittest.TestCase):
 
         masked_model = ERGM(n_nodes=n, metrics_collection=metrics_to_mask, is_directed=True, mask=mask)
         result = masked_model.fit(data)
-        self.assertTrue(result["success"])
+        self.assertTrue(result.success)
 
         metrics_no_mask = [
             NumberOfEdgesDirected(),
@@ -779,7 +781,7 @@ class TestERGM(unittest.TestCase):
         ]
         normal_model = ERGM(n_nodes=n - num_nodes_to_mask, metrics_collection=metrics_no_mask, is_directed=True)
         result = normal_model.fit(data[:-num_nodes_to_mask, :-num_nodes_to_mask, ...])
-        self.assertTrue(result["success"])
+        self.assertTrue(result.success)
 
         thetas_ccc = ccc(normal_model._thetas, masked_model._thetas)
         self.assertTrue(thetas_ccc > 0.99)
@@ -806,7 +808,7 @@ class TestERGM(unittest.TestCase):
 
         masked_model = ERGM(n_nodes=n, metrics_collection=metrics_to_mask, is_directed=False, mask=mask)
         result = masked_model.fit(data)
-        self.assertTrue(result["success"])
+        self.assertTrue(result.success)
 
         metrics_no_mask = [
             NumberOfEdgesUndirected(),
@@ -815,7 +817,7 @@ class TestERGM(unittest.TestCase):
         ]
         normal_model = ERGM(n_nodes=n - num_nodes_to_mask, metrics_collection=metrics_no_mask, is_directed=False)
         result = normal_model.fit(data[:-num_nodes_to_mask, :-num_nodes_to_mask, ...])
-        self.assertTrue(result["success"])
+        self.assertTrue(result.success)
 
         thetas_ccc = ccc(normal_model._thetas, masked_model._thetas)
         self.assertTrue(thetas_ccc > 0.99)
@@ -847,7 +849,7 @@ class TestERGM(unittest.TestCase):
         ]
         masked_model = ERGM(n_nodes=n, metrics_collection=metrics_masked, is_directed=True, mask=mask)
         result_masked = masked_model.fit(data)
-        self.assertTrue(result_masked["success"])
+        self.assertTrue(result_masked.success)
 
         # Weighted model (no mask, but weights=0 where mask=False, weights=1 where mask=True)
         weights = mask.astype(float)
@@ -858,7 +860,7 @@ class TestERGM(unittest.TestCase):
         ]
         weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=True)
         result_weighted = weighted_model.fit(data, edge_weights=weights)
-        self.assertTrue(result_weighted["success"])
+        self.assertTrue(result_weighted.success)
 
         np.testing.assert_allclose(masked_model._thetas, weighted_model._thetas, rtol=1e-3)
 
@@ -887,7 +889,7 @@ class TestERGM(unittest.TestCase):
         ]
         masked_model = ERGM(n_nodes=n, metrics_collection=metrics_masked, is_directed=False, mask=mask)
         result_masked = masked_model.fit(data)
-        self.assertTrue(result_masked["success"])
+        self.assertTrue(result_masked.success)
 
         # Weighted model
         weights = mask.astype(float)
@@ -898,7 +900,7 @@ class TestERGM(unittest.TestCase):
         ]
         weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=False)
         result_weighted = weighted_model.fit(data, edge_weights=weights)
-        self.assertTrue(result_weighted["success"])
+        self.assertTrue(result_weighted.success)
 
         np.testing.assert_allclose(masked_model._thetas, weighted_model._thetas, rtol=1e-3)
 
@@ -913,7 +915,7 @@ class TestERGM(unittest.TestCase):
         metrics_unweighted = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
         unweighted_model = ERGM(n_nodes=n, metrics_collection=metrics_unweighted, is_directed=True)
         result_unw = unweighted_model.fit(data)
-        self.assertTrue(result_unw["success"])
+        self.assertTrue(result_unw.success)
 
         # Weighted model with constant weight = 5
         weights = 5.0 * np.ones((n, n))
@@ -921,7 +923,7 @@ class TestERGM(unittest.TestCase):
         metrics_weighted = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
         weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=True)
         result_w = weighted_model.fit(data, edge_weights=weights)
-        self.assertTrue(result_w["success"])
+        self.assertTrue(result_w.success)
 
         np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=1e-3)
 
@@ -938,7 +940,7 @@ class TestERGM(unittest.TestCase):
         metrics_unweighted = [NumberOfEdgesTypesUndirected(types)]
         unweighted_model = ERGM(n_nodes=n, metrics_collection=metrics_unweighted, is_directed=False)
         result_unw = unweighted_model.fit(data)
-        self.assertTrue(result_unw["success"])
+        self.assertTrue(result_unw.success)
 
         # Weighted model with all weights = 1
         weights = np.ones((n, n))
@@ -946,7 +948,7 @@ class TestERGM(unittest.TestCase):
         metrics_weighted = [NumberOfEdgesTypesUndirected(types)]
         weighted_model = ERGM(n_nodes=n, metrics_collection=metrics_weighted, is_directed=False)
         result_w = weighted_model.fit(data, edge_weights=weights)
-        self.assertTrue(result_w["success"])
+        self.assertTrue(result_w.success)
 
         np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=1e-5)
 
@@ -1002,7 +1004,7 @@ class TestERGM(unittest.TestCase):
 
         model1 = ERGM(n_nodes=n, metrics_collection=[NumberOfEdgesTypesDirected(types1)], is_directed=True)
         result1 = model1.fit(data1, edge_weights=weights1)
-        self.assertTrue(result1["success"])
+        self.assertTrue(result1.success)
         theta1 = model1._thetas[model1._metrics_collection.metrics[0]._sorted_type_pairs_indices[("A", "B")]]
 
         # Model 2: unweighted - remove (1-weight)*k edges, fit without weights
@@ -1010,7 +1012,7 @@ class TestERGM(unittest.TestCase):
         data1[selected_edges[:n_edges_to_remove, 0], selected_edges[:n_edges_to_remove, 1]] = 0
 
         result2 = model1.fit(data1)
-        self.assertTrue(result2["success"])
+        self.assertTrue(result2.success)
         theta2 = model1._thetas[model1._metrics_collection.metrics[0]._sorted_type_pairs_indices[("A", "B")]]
 
         np.testing.assert_allclose(theta1, theta2, rtol=1e-6)

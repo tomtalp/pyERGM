@@ -4,6 +4,7 @@ import numpy as np
 from pyERGM.logging_config import logger
 from pyERGM.utils import *
 from pyERGM.metrics import MetricsCollection
+from pyERGM.constants import EdgeProposalMethod
 import time
 from scipy.special import softmax
 
@@ -112,7 +113,7 @@ class NaiveMetropolisHastings(Sampler):
             The network using which the change scores for all edges is calculated.
         """
         edge_influence = self._calc_edge_influence_on_features(net_for_change_scores)
-        self._edge_proposal_dists['features_influence__sum'] = edge_influence / edge_influence.sum()
+        self._edge_proposal_dists[EdgeProposalMethod.FEATURES_INFLUENCE_SUM] = edge_influence / edge_influence.sum()
 
     def _calc_proposal_dist_features_influence__softmax(self, net_for_change_scores: np.ndarray):
         """
@@ -124,16 +125,15 @@ class NaiveMetropolisHastings(Sampler):
             The network using which the change scores for all edges is calculated.
         """
         edge_influence = self._calc_edge_influence_on_features(net_for_change_scores)
-        self._edge_proposal_dists['features_influence__softmax'] = softmax(edge_influence)
+        self._edge_proposal_dists[EdgeProposalMethod.FEATURES_INFLUENCE_SOFTMAX] = softmax(edge_influence)
 
     def sample(self,
                initial_state,
                num_of_nets,
                replace=True,
-               edge_proposal_method="uniform",
-               # TODO - these two params need to be dependent on the network size
-               burn_in=1000,
-               steps_per_sample=10):
+               edge_proposal_method: EdgeProposalMethod = EdgeProposalMethod.UNIFORM,
+               burn_in: int | None = None,
+               steps_per_sample: int | None = None):
         """
         Sample networks using the Metropolis-Hastings algorithm.
 
@@ -147,10 +147,10 @@ class NaiveMetropolisHastings(Sampler):
 
         burn_in : int
             Optional. The number of burn-in steps for the sampler (number of steps in the chain that are discarded
-            before the sampler starts to take samples). *Defaults to 1000*.
+            before the sampler starts to take samples). *Defaults to 100 * net_size**2*.
 
         steps_per_sample : int
-            Optional. The number of steps to advance the chain between samples. *Defaults to 10*.
+            Optional. The number of steps to advance the chain between samples. *Defaults to net_size**2*.
 
         replace : bool
             A boolean flag indicating whether we sample with our without replacement. replace=True means networks can be
@@ -174,18 +174,18 @@ class NaiveMetropolisHastings(Sampler):
             steps_per_sample = net_size ** 2
 
         num_flips = burn_in + (num_of_nets * steps_per_sample)
-        if edge_proposal_method == 'uniform':
+        if edge_proposal_method == EdgeProposalMethod.UNIFORM:
             edges_to_flip = get_uniform_random_edges_to_flip(net_size, num_flips)
-        elif edge_proposal_method == 'features_influence__sum':
+        elif edge_proposal_method == EdgeProposalMethod.FEATURES_INFLUENCE_SUM:
             if edge_proposal_method not in self._edge_proposal_dists.keys():
                 self._calc_proposal_dist_features_influence__sum(current_network)
             edges_to_flip = get_custom_distribution_random_edges_to_flip(num_flips, self._edge_proposal_dists[
-                'features_influence__sum'], self.metrics_collection.is_directed)
-        elif edge_proposal_method == 'features_influence__softmax':
+                EdgeProposalMethod.FEATURES_INFLUENCE_SUM], self.metrics_collection.is_directed)
+        elif edge_proposal_method == EdgeProposalMethod.FEATURES_INFLUENCE_SOFTMAX:
             if edge_proposal_method not in self._edge_proposal_dists.keys():
                 self._calc_proposal_dist_features_influence__softmax(current_network)
             edges_to_flip = get_custom_distribution_random_edges_to_flip(num_flips, self._edge_proposal_dists[
-                'features_influence__softmax'], self.metrics_collection.is_directed)
+                EdgeProposalMethod.FEATURES_INFLUENCE_SOFTMAX], self.metrics_collection.is_directed)
         else:
             raise ValueError(f"Got an unsupported edge proposal method {edge_proposal_method}")
 

@@ -5,6 +5,7 @@ import glob
 
 from pyERGM.logging_config import logger
 from pyERGM.metrics import *
+from pyERGM.constants import MPLEOptimizationMethod, Reduction
 
 
 @njit
@@ -48,9 +49,8 @@ def calc_logistic_regression_predictions(Xs: np.ndarray, thetas: np.ndarray):
     return sigmoid(Xs @ thetas)
 
 
-@njit
 def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray, ys: np.ndarray, eps=1e-10,
-                                                        reduction: str = 'sum', log_base: float = np.exp(1),
+                                                        reduction: Reduction = Reduction.SUM, log_base: float = np.exp(1),
                                                         sample_weights: np.ndarray = np.empty(0)):
     """
     Calculate the log-likelihood of observations given model predictions.
@@ -85,13 +85,13 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
         1 - trimmed_predictions)) / np.log(log_base)
     if sample_weights.size > 0:
         minus_binary_cross_entropy_per_edge = sample_weights * minus_binary_cross_entropy_per_edge
-    if reduction == 'none':
+    if reduction == Reduction.NONE:
         return minus_binary_cross_entropy_per_edge
     # The wrapping into a numpy array and reshape to 2D is necessary for numba to compile the function properly
     # (returned types must be unified).
-    elif reduction == 'sum':
+    elif reduction == Reduction.SUM:
         return np.array([minus_binary_cross_entropy_per_edge.sum()]).reshape(1, 1)
-    elif reduction == 'mean':
+    elif reduction == Reduction.MEAN:
         return np.array([minus_binary_cross_entropy_per_edge.mean()]).reshape(1, 1)
     else:
         raise ValueError(f"{reduction} is an unsupported reduction method, options are 'none', 'sum', or 'mean'")
@@ -335,7 +335,8 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
 
 def mple_logistic_regression_optimization(metrics_collection: MetricsCollection, observed_networks: np.ndarray,
                                           initial_thetas: np.ndarray | None = None,
-                                          is_distributed: bool = False, optimization_method: str = 'L-BFGS-B',
+                                          is_distributed: bool = False,
+                                          optimization_method: MPLEOptimizationMethod = MPLEOptimizationMethod.L_BFGS_B,
                                           sample_weights: np.ndarray | None = None,
                                           **kwargs):
     """
@@ -413,11 +414,11 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         else:
             weights = np.empty(0)
 
-        if optimization_method == "Newton-CG":
+        if optimization_method == MPLEOptimizationMethod.NEWTON_CG:
             res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, weights),
                            jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
                            callback=_after_optim_iteration_callback, method=optimization_method)
-        elif optimization_method == "L-BFGS-B":
+        elif optimization_method == MPLEOptimizationMethod.L_BFGS_B:
             res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, weights),
                            jac=analytical_minus_log_like_grad_local, method=optimization_method,
                            callback=_after_optim_iteration_callback)
@@ -429,10 +430,10 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         data_path = distributed_mple_data_chunks_calculations(metrics_collection, observed_networks,
                                                             kwargs.get('num_edges_per_job', 100000),
                                                             sample_weights=sample_weights)
-        if optimization_method == "L-BFGS-B":
+        if optimization_method == MPLEOptimizationMethod.L_BFGS_B:
             res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path,),
                            jac=True, callback=_after_optim_iteration_callback, method=optimization_method)
-        elif optimization_method == "Newton-CG":
+        elif optimization_method == MPLEOptimizationMethod.NEWTON_CG:
             res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path,),
                            jac=True,
                            hess=analytical_minus_log_likelihood_hessian_distributed,
@@ -440,7 +441,7 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method} for distributed optimization. "
-                f"Options are: Newton-CG, L-BFGS-B")
+                f"Options are: {MPLEOptimizationMethod.NEWTON_CG}, {MPLEOptimizationMethod.L_BFGS_B}")
         pred = analytical_logistic_regression_predictions_distributed(res.x.reshape(-1, 1), data_path).flatten()
 
         # Clean up MPLE data (metrics_collection, observed_networks and Xs,ys chunks).
@@ -610,14 +611,14 @@ def log_likelihood_multi_class_logistic_regression(true_labels, predictions, red
     """
     predictions = np.maximum(predictions, eps)
     individual_data_samples_minus_cross_ent = ((np.log(predictions) / np.log(log_base)) * true_labels).sum(axis=1)
-    if reduction == 'none':
+    if reduction == Reduction.NONE:
         return individual_data_samples_minus_cross_ent
-    elif reduction == 'sum':
+    elif reduction == Reduction.SUM:
         return individual_data_samples_minus_cross_ent.sum()
-    elif reduction == 'mean':
+    elif reduction == Reduction.MEAN:
         return individual_data_samples_minus_cross_ent.mean()
     else:
-        raise ValueError(f"reduction {reduction} not supported, options are 'none', 'sum', or 'mean'")
+        raise ValueError(f"reduction {reduction} not supported, options are '{Reduction.NONE}', '{Reduction.MEAN}', or '{Reduction.SUM}'")
 
 
 def minus_log_likelihood_multi_class_logistic_regression(thetas, Xs, ys):
@@ -721,13 +722,13 @@ def mple_reciprocity_logistic_regression_optimization(
     else:
         thetas = initial_thetas.copy()
 
-    if optimization_method == "L-BFGS-B":
+    if optimization_method == MPLEOptimizationMethod.L_BFGS_B:
         res = minimize(minus_log_likelihood_multi_class_logistic_regression, thetas, args=(Xs, ys),
-                       jac=minus_log_likelihood_gradient_multi_class_logistic_regression, method="L-BFGS-B",
+                       jac=minus_log_likelihood_gradient_multi_class_logistic_regression, method=MPLEOptimizationMethod.L_BFGS_B,
                        callback=_after_optim_iteration_callback)
     else:
         raise ValueError(
-            f"Unsupported optimization method: {optimization_method}. Options are: L-BFGS-B")
+            f"Unsupported optimization method: {optimization_method}. Options are: {MPLEOptimizationMethod.L_BFGS_B}")
     pred = predict_multi_class_logistic_regression(Xs, res.x)
     logger.debug(f"Optimization result: {res}")
     return res.x, pred, res.success

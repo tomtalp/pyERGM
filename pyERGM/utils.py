@@ -9,6 +9,8 @@ import random
 from scipy.stats import f
 import pickle
 
+from pyERGM.constants import OptimizationResult
+
 # Dyad states indexing convention
 EMPTY_IDX = 0
 UPPER_IDX = 1
@@ -978,11 +980,11 @@ class ConvergenceTester:
 
         hotelling_critical_value = f.ppf(1 - confidence, num_of_features, sample_size - num_of_features)
 
-        return {
-            "success": hotelling_as_f_statistic <= hotelling_critical_value,
-            "statistic": hotelling_as_f_statistic,
-            "threshold": hotelling_critical_value
-        }
+        return OptimizationResult(
+            success=hotelling_as_f_statistic <= hotelling_critical_value,
+            statistic=hotelling_as_f_statistic,
+            threshold=hotelling_critical_value
+        )
 
     @staticmethod
     def bootstrapped_mahalanobis_from_observed(
@@ -1038,11 +1040,11 @@ class ConvergenceTester:
 
         empirical_threshold = np.quantile(mahalanobis_dists, confidence)
 
-        return {
-            "success": empirical_threshold < stds_away_thr,
-            "statistic": empirical_threshold,
-            "threshold": stds_away_thr
-        }
+        return OptimizationResult(
+            success=empirical_threshold < stds_away_thr,
+            statistic=empirical_threshold,
+            threshold=stds_away_thr
+        )
 
     @staticmethod
     def bootstrapped_mahalanobis_from_model(
@@ -1105,8 +1107,8 @@ class ConvergenceTester:
 
         empirical_threshold = np.quantile(mahalanobis_dists, confidence)
 
-        return {
-            "success": empirical_threshold < stds_away_thr,
-            "statistic": empirical_threshold,
-            "threshold": stds_away_thr
-        }
+        return OptimizationResult(
+            success=empirical_threshold < stds_away_thr,
+            statistic=empirical_threshold,
+            threshold=stds_away_thr
+        )

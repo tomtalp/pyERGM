@@ -6,6 +6,7 @@ from scipy.spatial.distance import jensenshannon
 from pyERGM.utils import *
 from pyERGM.metrics import *
 from pyERGM import sampling
+from pyERGM.constants import EdgeProposalMethod
 
 
 class Test_MetropolisHastings(unittest.TestCase):
@@ -175,8 +176,8 @@ class Test_MetropolisHastings(unittest.TestCase):
         sampler = sampling.NaiveMetropolisHastings(np.zeros(n),
                                                    MetricsCollection([NumberOfEdgesDirected(), OutDegree()],
                                                                      is_directed=True, n_nodes=n))
-        sampler.sample(initial_state=adj_mat, num_of_nets=10, edge_proposal_method='features_influence__sum')
-        sampler.sample(initial_state=adj_mat, num_of_nets=10, edge_proposal_method='features_influence__softmax')
+        sampler.sample(initial_state=adj_mat, num_of_nets=10, edge_proposal_method=EdgeProposalMethod.FEATURES_INFLUENCE_SUM)
+        sampler.sample(initial_state=adj_mat, num_of_nets=10, edge_proposal_method=EdgeProposalMethod.FEATURES_INFLUENCE_SOFTMAX)
 
     def test_custom_edge_proposal_distribution_sampling(self):
         """
@@ -297,3 +298,4 @@ class Test_MetropolisHastings(unittest.TestCase):
         cv = np.std(edge_probs) / np.mean(edge_probs)
 
         self.assertGreater(cv, 0.1, f"Expected at least 10% relative variation")
+
