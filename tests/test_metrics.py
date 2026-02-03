@@ -2246,3 +2246,78 @@ class TestEdgeCases(unittest.TestCase):
         result = metric.calculate(W)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0], 0)
+
+
+class TestMetricParameterNaming(unittest.TestCase):
+    """Tests for metric parameter naming and disambiguation."""
+
+    def test_auto_disambiguation_without_name(self):
+        """Test that duplicate parameter names are auto-disambiguated with _1, _2 suffixes."""
+        n = 4
+        metrics = [
+            NumberOfEdgesTypesDirected(['A', 'B', 'A', 'B']),
+            NumberOfEdgesTypesDirected(['A', 'B', 'C', 'A'])
+        ]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
+        param_names = collection.get_parameter_names()
+
+        # All names should be unique
+        self.assertEqual(len(param_names), len(set(param_names)))
+
+        # Common names like A__B should have _1, _2 suffixes
+        self.assertIn('num_edges_between_types_directed_A__B_1', param_names)
+        self.assertIn('num_edges_between_types_directed_A__B_2', param_names)
+
+    def test_explicit_name_parameter(self):
+        """Test that explicit name parameter creates prefixed parameter names."""
+        n = 4
+        metrics = [
+            NumberOfEdgesTypesDirected(['A', 'B', 'A', 'B'], name="attr1"),
+            NumberOfEdgesTypesDirected(['A', 'B', 'C', 'A'], name="attr2")
+        ]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
+        param_names = collection.get_parameter_names()
+
+        # All names should be unique
+        self.assertEqual(len(param_names), len(set(param_names)))
+
+        # Names should have prefixes
+        self.assertIn('attr1_num_edges_between_types_directed_A__B', param_names)
+        self.assertIn('attr2_num_edges_between_types_directed_A__B', param_names)
+
+    def test_undirected_naming(self):
+        """Test naming for undirected metrics."""
+        n = 4
+        metrics = [
+            NumberOfEdgesTypesUndirected(['A', 'B', 'A', 'B'], name="attr1"),
+            NumberOfEdgesTypesUndirected(['A', 'B', 'C', 'A'], name="attr2")
+        ]
+        collection = MetricsCollection(metrics, is_directed=False, n_nodes=n)
+        param_names = collection.get_parameter_names()
+
+        # All names should be unique
+        self.assertEqual(len(param_names), len(set(param_names)))
+
+        # Check prefixes exist
+        attr1_names = [n for n in param_names if n.startswith('attr1_')]
+        attr2_names = [n for n in param_names if n.startswith('attr2_')]
+        self.assertGreater(len(attr1_names), 0)
+        self.assertGreater(len(attr2_names), 0)
+
+    def test_no_duplicates_no_disambiguation(self):
+        """Test that unique names are not modified when there are no duplicates."""
+        n = 4
+        metrics = [
+            NumberOfEdgesTypesDirected(['A', 'B', 'A', 'B']),  # Only A and B types
+            NumberOfEdgesTypesDirected(['C', 'D', 'C', 'D'])   # Only C and D types
+        ]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
+        param_names = collection.get_parameter_names()
+
+        # All names should be unique (no overlapping types between the two metrics)
+        self.assertEqual(len(param_names), len(set(param_names)))
+
+        # No names should have _1, _2 suffixes since there are no duplicate names
+        for name in param_names:
+            self.assertFalse(name.endswith('_1') or name.endswith('_2'),
+                           f"Name '{name}' should not have disambiguation suffix")

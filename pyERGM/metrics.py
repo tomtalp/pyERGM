@@ -22,9 +22,10 @@ class Metric(ABC):
     All concrete metric implementations must inherit from this class.
 
     """
-    def __init__(self):
+    def __init__(self, name: str = None):
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
+        self._name = name  # optional user-provided label for disambiguation
         self._is_directed = None
         self._is_dyadic_independent = True
         self._n_nodes = None
@@ -86,6 +87,12 @@ class Metric(ABC):
         How many features does this metric produce, including the ignored ones. Defaults to 1
         """
         return 1
+
+    def _get_name_prefix(self):
+        """
+        Returns the name prefix for parameter names (label if set, else empty).
+        """
+        return f"{self._name}_" if self._name else ""
 
     def update_indices_to_ignore(self, indices_to_ignore):
         """
@@ -930,13 +937,13 @@ class NumberOfEdgesTypes(Metric):
         """
         raise NotImplementedError(NumberOfEdgesTypes.not_implemented_error_message)
 
-    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None):
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str = None):
         self.exogenous_attr = exogenous_attr
 
         self.unique_types = sorted(list(set(self.exogenous_attr)))
 
         self._indices_from_user = indices_from_user.copy() if indices_from_user is not None else None
-        super().__init__()
+        super().__init__(name=name)
 
         self.does_support_mask = True
 
@@ -1080,8 +1087,8 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
     def _get_num_edges_in_mat_factor():
         return 2
 
-    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None):
-        super().__init__(exogenous_attr, indices_from_user)
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str = None):
+        super().__init__(exogenous_attr, indices_from_user, name=name)
         self._is_directed = False
 
     def _get_total_feature_count(self):
@@ -1109,7 +1116,7 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
     def _get_metric_names(self):
         parameter_names = tuple()
 
-        metric_name = str(self)
+        metric_name = self._get_name_prefix() + str(self)
 
         sorted_canonical_type_pairs = self._get_sorted_canonical_type_pairs()
         for i in range(self._get_total_feature_count()):
@@ -1124,7 +1131,7 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
         if self._indices_to_ignore is None or not np.any(self._indices_to_ignore):
             return tuple()
 
-        metric_name = str(self)
+        metric_name = self._get_name_prefix() + str(self)
         ignored_features = ()
         sorted_canonical_type_pairs = self._get_sorted_canonical_type_pairs()
         for i in range(self._get_total_feature_count()):
@@ -1155,8 +1162,8 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
     def __str__(self):
         return "num_edges_between_types_directed"
 
-    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None):
-        super().__init__(exogenous_attr, indices_from_user)
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str = None):
+        super().__init__(exogenous_attr, indices_from_user, name=name)
         self._is_directed = True
 
     @staticmethod
@@ -1181,7 +1188,7 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
     def _get_metric_names(self):
         parameter_names = tuple()
 
-        metric_name = str(self)
+        metric_name = self._get_name_prefix() + str(self)
 
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
@@ -1195,7 +1202,7 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
         if self._indices_to_ignore is None or not np.any(self._indices_to_ignore):
             return tuple()
 
-        metric_name = str(self)
+        metric_name = self._get_name_prefix() + str(self)
         ignored_features = ()
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
@@ -1814,13 +1821,32 @@ class MetricsCollection:
     def get_parameter_names(self):
         """
         Returns the names of the parameters of the metrics in the collection.
+
+        If duplicate parameter names exist (e.g., from multiple metrics with
+        overlapping type labels), they are automatically disambiguated by
+        appending _1, _2, etc. suffixes.
         """
-        parameter_names = tuple()
+        parameter_names = []
 
         for metric in self.metrics:
-            parameter_names += metric._get_metric_names()
+            parameter_names.extend(metric._get_metric_names())
 
-        return parameter_names
+        # Count occurrences of each name
+        counts = {}
+        for name in parameter_names:
+            counts[name] = counts.get(name, 0) + 1
+
+        # Disambiguate duplicates by appending _1, _2, etc.
+        seen = {}
+        result = []
+        for name in parameter_names:
+            if counts[name] > 1:
+                seen[name] = seen.get(name, 0) + 1
+                result.append(f"{name}_{seen[name]}")
+            else:
+                result.append(name)
+
+        return tuple(result)
 
     def get_ignored_features(self):
         """
