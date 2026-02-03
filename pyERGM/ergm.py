@@ -186,6 +186,38 @@ class ERGM():
 
         return weight
 
+    def calculate_statistics(self, W: np.ndarray) -> np.ndarray:
+        """
+        Calculate sufficient statistics g(y) for a single network.
+
+        Parameters
+        ----------
+        W : np.ndarray
+            Network adjacency matrix of shape (n, n).
+
+        Returns
+        -------
+        np.ndarray
+            Statistics array of shape (num_features,).
+        """
+        return self._metrics_collection.calculate_statistics(W)
+
+    def calculate_sample_statistics(self, networks_sample: np.ndarray) -> np.ndarray:
+        """
+        Calculate sufficient statistics for a sample of networks.
+
+        Parameters
+        ----------
+        networks_sample : np.ndarray
+            Array of networks with shape (n, n, sample_size).
+
+        Returns
+        -------
+        np.ndarray
+            Statistics array of shape (num_features, sample_size).
+        """
+        return self._metrics_collection.calculate_sample_statistics(networks_sample)
+
     def _get_random_thetas(self, sampling_method=ThetaInitMethod.UNIFORM):
         if sampling_method == ThetaInitMethod.UNIFORM:
             return np.random.uniform(-1, 1, self._metrics_collection.num_of_features)
@@ -198,7 +230,7 @@ class ERGM():
                                      replace=True,
                                      burn_in=10000,
                                      mcmc_steps_per_sample=1000,
-                                     sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
+                                     sampling_method=None,
                                      edge_proposal_method=EdgeProposalMethod.UNIFORM,
                                      ):
         """
@@ -209,15 +241,18 @@ class ERGM():
         sample_size : int
             Number of networks to generate.
         seed_network : np.ndarray, optional
-            Initial network for MCMC sampling. If None, an Erdos-Renyi network is generated.
+            Initial network for MCMC sampling. If None, a network is generated
+            from MPLE predictions.
         replace : bool, optional
             Whether to sample with replacement. Default is True.
         burn_in : int, optional
             Number of MCMC steps to discard before sampling. Default is 100 * (n**2).
         mcmc_steps_per_sample : int, optional
             Number of MCMC steps between samples. Default is n**2.
-        sampling_method : str, optional
-            Sampling method to use. Options: "metropolis_hastings" (default), "exact".
+        sampling_method : SamplingMethod, optional
+            Sampling method to use. Options: "metropolis_hastings", "exact".
+            If None (default), auto-detects based on model type:
+            MPLE/MPLE_RECIPROCITY models use "exact", MCMLE models use "metropolis_hastings".
         edge_proposal_method : str, optional
             Edge proposal distribution for MCMC. Default is "uniform".
 
@@ -232,11 +267,17 @@ class ERGM():
         if mcmc_steps_per_sample is None:
             mcmc_steps_per_sample = self._n_nodes ** 2
 
+        # Auto-detect sampling method if not specified
+        if sampling_method is None:
+            opt_scheme = self._metrics_collection.choose_optimization_scheme()
+            if opt_scheme in (OptimizationScheme.MPLE, OptimizationScheme.MPLE_RECIPROCITY):
+                sampling_method = SamplingMethod.EXACT
+            else:
+                sampling_method = SamplingMethod.METROPOLIS_HASTINGS
+
         if sampling_method == SamplingMethod.METROPOLIS_HASTINGS:
             if seed_network is None:
-                seed_network = generate_erdos_renyi_matrix(
-                    self._n_nodes, self._seed_MCMC_proba, self._is_directed
-                )
+                seed_network = self._generate_mple_based_seed()
 
             self.mh_sampler.set_thetas(self._thetas)
             return self.mh_sampler.sample(seed_network, sample_size, replace=replace, burn_in=burn_in,
@@ -410,6 +451,43 @@ class ERGM():
             raise ValueError(
                 "Cannot sample exactly from a model that has dependence that not comes from reciprocity"
             )
+
+    def _generate_mple_based_seed(self) -> np.ndarray:
+        """
+        Generate a seed network for MCMC sampling using MPLE predictions.
+
+        For dyadic-independent models: uses get_mple_prediction() directly.
+        For reciprocity models: uses get_mple_reciprocity_prediction().
+        For other dyadic-dependent models (MCMLE): uses get_mple_prediction()
+        with a pseudo-observed ER(0.5) network to compute change statistics.
+
+        Returns
+        -------
+        np.ndarray
+            A single network of shape (n, n) to use as MCMC seed.
+        """
+        match self._metrics_collection.choose_optimization_scheme():
+            case OptimizationScheme.MPLE_RECIPROCITY:
+                dyad_dists = self.get_mple_reciprocity_prediction()
+                sample = sample_from_dyads_distribution(dyad_dists, 1)
+                return sample[:, :, 0]
+            
+            case OptimizationScheme.MPLE: 
+                reference_network = None
+            
+            case OptimizationScheme.MCMLE:
+                # For MCMLE: use ER(0.5) as a reference network. This is meant to allow edge-dependent statistics 
+                # to change as a result of a single edge flip, so that we won't get a degenerate matrix for 
+                # the MPLE regressors. For example, if we pass None, which is equivalent to passing the empty network, 
+                # no edge flip will change the reciprocity statistic, and the corresponding column in the regressors 
+                # matrix would be all-0s.
+                reference_network = generate_erdos_renyi_matrix(self._n_nodes, 0.5, self._is_directed)
+            
+
+        prob_matrix = self.get_mple_prediction(observed_networks=reference_network)
+        sample = sample_from_independent_probabilities_matrix(prob_matrix, 1, self._is_directed)
+        return sample[:, :, 0]
+
 
     def get_mple_reciprocity_prediction(self):
         """
@@ -829,6 +907,7 @@ class ERGM():
             networks_for_sample = self.generate_networks_for_sample(sample_size=mcmc_sample_size,
                                                                     seed_network=mcmc_seed_network, burn_in=burn_in,
                                                                     mcmc_steps_per_sample=mcmc_steps_per_sample,
+                                                                    sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
                                                                     edge_proposal_method=edge_proposal_method)
             mcmc_seed_network = networks_for_sample[:, :, -1]
 

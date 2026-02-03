@@ -1,4 +1,5 @@
 import unittest
+from unittest.mock import patch, MagicMock
 
 import numpy as np
 from scipy.optimize import minimize, OptimizeResult
@@ -1105,4 +1106,133 @@ class TestMPLENoneHandling(unittest.TestCase):
         # Verify output
         self.assertEqual(probs.shape, (self.n_nodes, self.n_nodes))
 
-     
+
+class TestSamplingMethodAutoDetection(unittest.TestCase):
+    """Tests for automatic sampling method detection in generate_networks_for_sample"""
+
+    def test_auto_detect_exact_for_mple_model(self):
+        """MPLE models (dyadic-independent) should call _generate_exact_sample"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected(), InDegree()], is_directed=True)
+
+        with patch.object(model, '_generate_exact_sample', wraps=model._generate_exact_sample) as mock_exact:
+            model.generate_networks_for_sample(sample_size=10)
+            mock_exact.assert_called_once_with(10)
+
+    def test_auto_detect_exact_for_mple_reciprocity_model(self):
+        """MPLE_RECIPROCITY models should call _generate_exact_sample"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected(), TotalReciprocity()], is_directed=True)
+
+        with patch.object(model, '_generate_exact_sample', wraps=model._generate_exact_sample) as mock_exact:
+            model.generate_networks_for_sample(sample_size=10)
+            mock_exact.assert_called_once_with(10)
+
+    def test_auto_detect_mcmc_for_mcmle_model(self):
+        """MCMLE models should call mh_sampler.sample"""
+        n_nodes = 5
+        model = ERGM(n_nodes, [NumberOfEdgesUndirected(), NumberOfTriangles()], is_directed=False)
+
+        with patch.object(model.mh_sampler, 'sample', wraps=model.mh_sampler.sample) as mock_mh:
+            model.generate_networks_for_sample(sample_size=5, burn_in=100, mcmc_steps_per_sample=10)
+            mock_mh.assert_called_once()
+
+    def test_explicit_mcmc_calls_mh_sampler(self):
+        """Explicit METROPOLIS_HASTINGS should call mh_sampler.sample even for MPLE model"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
+
+        with patch.object(model.mh_sampler, 'sample', wraps=model.mh_sampler.sample) as mock_mh:
+            model.generate_networks_for_sample(
+                sample_size=5,
+                sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
+                burn_in=100,
+                mcmc_steps_per_sample=10
+            )
+            mock_mh.assert_called_once()
+
+    def test_explicit_exact_calls_exact_sample(self):
+        """Explicit EXACT should call _generate_exact_sample"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
+
+        with patch.object(model, '_generate_exact_sample', wraps=model._generate_exact_sample) as mock_exact:
+            model.generate_networks_for_sample(sample_size=10, sampling_method=SamplingMethod.EXACT)
+            mock_exact.assert_called_once_with(10)
+
+
+class TestMPLEBasedSeedGeneration(unittest.TestCase):
+    """Tests for MPLE-based MCMC seed generation"""
+
+    def test_mcmc_calls_mple_based_seed_when_no_seed_provided(self):
+        """MCMC with no seed should call _generate_mple_based_seed"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
+
+        with patch.object(model, '_generate_mple_based_seed', wraps=model._generate_mple_based_seed) as mock_seed:
+            model.generate_networks_for_sample(
+                sample_size=5,
+                sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
+                burn_in=100,
+                mcmc_steps_per_sample=10
+            )
+            mock_seed.assert_called_once()
+
+    def test_mcmc_does_not_call_mple_seed_when_seed_provided(self):
+        """MCMC with explicit seed should NOT call _generate_mple_based_seed"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
+
+        explicit_seed = np.zeros((n_nodes, n_nodes))
+
+        with patch.object(model, '_generate_mple_based_seed') as mock_seed:
+            model.generate_networks_for_sample(
+                sample_size=5,
+                seed_network=explicit_seed,
+                sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
+                burn_in=100,
+                mcmc_steps_per_sample=10
+            )
+            mock_seed.assert_not_called()
+
+    def test_generate_mple_based_seed_produces_valid_network(self):
+        """_generate_mple_based_seed should return a valid binary network"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected(), InDegree()], is_directed=True)
+
+        seed = model._generate_mple_based_seed()
+
+        self.assertEqual(seed.shape, (n_nodes, n_nodes))
+        self.assertTrue(np.all((seed == 0) | (seed == 1)))
+        self.assertTrue(np.all(np.diag(seed) == 0))
+
+
+class TestCalculateStatisticsAPI(unittest.TestCase):
+    """Tests for ERGM.calculate_statistics and calculate_sample_statistics"""
+    def test_calculate_statistics_matches_internal(self):
+        """calculate_statistics should match _metrics_collection.calculate_statistics"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected(), OutDegree()], is_directed=True)
+
+        W = np.random.randint(0, 2, (n_nodes, n_nodes))
+        np.fill_diagonal(W, 0)
+
+        stats_api = model.calculate_statistics(W)
+        stats_internal = model._metrics_collection.calculate_statistics(W)
+
+        np.testing.assert_array_equal(stats_api, stats_internal)
+
+
+    def test_calculate_sample_statistics_matches_internal(self):
+        """calculate_sample_statistics should match _metrics_collection method"""
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
+
+        sample = np.random.randint(0, 2, (n_nodes, n_nodes, 5))
+        for i in range(5):
+            np.fill_diagonal(sample[:, :, i], 0)
+
+        stats_api = model.calculate_sample_statistics(sample)
+        stats_internal = model._metrics_collection.calculate_sample_statistics(sample)
+
+        np.testing.assert_array_equal(stats_api, stats_internal)
