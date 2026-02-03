@@ -1114,7 +1114,6 @@ class TestSamplingMethodAutoDetection(unittest.TestCase):
         """MPLE models (dyadic-independent) should call _generate_exact_sample"""
         n_nodes = 10
         model = ERGM(n_nodes, [NumberOfEdgesDirected(), InDegree()], is_directed=True)
-        model.fit(sampson_matrix[:n_nodes, :n_nodes])
 
         with patch.object(model, '_generate_exact_sample', wraps=model._generate_exact_sample) as mock_exact:
             model.generate_networks_for_sample(sample_size=10)
@@ -1124,7 +1123,6 @@ class TestSamplingMethodAutoDetection(unittest.TestCase):
         """MPLE_RECIPROCITY models should call _generate_exact_sample"""
         n_nodes = 10
         model = ERGM(n_nodes, [NumberOfEdgesDirected(), TotalReciprocity()], is_directed=True)
-        model.fit(sampson_matrix[:n_nodes, :n_nodes])
 
         with patch.object(model, '_generate_exact_sample', wraps=model._generate_exact_sample) as mock_exact:
             model.generate_networks_for_sample(sample_size=10)
@@ -1134,7 +1132,6 @@ class TestSamplingMethodAutoDetection(unittest.TestCase):
         """MCMLE models should call mh_sampler.sample"""
         n_nodes = 5
         model = ERGM(n_nodes, [NumberOfEdgesUndirected(), NumberOfTriangles()], is_directed=False)
-        model._thetas = np.array([0.0, 0.0])
 
         with patch.object(model.mh_sampler, 'sample', wraps=model.mh_sampler.sample) as mock_mh:
             model.generate_networks_for_sample(sample_size=5, burn_in=100, mcmc_steps_per_sample=10)
@@ -1144,7 +1141,6 @@ class TestSamplingMethodAutoDetection(unittest.TestCase):
         """Explicit METROPOLIS_HASTINGS should call mh_sampler.sample even for MPLE model"""
         n_nodes = 10
         model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
-        model.fit(sampson_matrix[:n_nodes, :n_nodes])
 
         with patch.object(model.mh_sampler, 'sample', wraps=model.mh_sampler.sample) as mock_mh:
             model.generate_networks_for_sample(
@@ -1159,7 +1155,6 @@ class TestSamplingMethodAutoDetection(unittest.TestCase):
         """Explicit EXACT should call _generate_exact_sample"""
         n_nodes = 10
         model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
-        model.fit(sampson_matrix[:n_nodes, :n_nodes])
 
         with patch.object(model, '_generate_exact_sample', wraps=model._generate_exact_sample) as mock_exact:
             model.generate_networks_for_sample(sample_size=10, sampling_method=SamplingMethod.EXACT)
@@ -1173,7 +1168,6 @@ class TestMPLEBasedSeedGeneration(unittest.TestCase):
         """MCMC with no seed should call _generate_mple_based_seed"""
         n_nodes = 10
         model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
-        model.fit(sampson_matrix[:n_nodes, :n_nodes])
 
         with patch.object(model, '_generate_mple_based_seed', wraps=model._generate_mple_based_seed) as mock_seed:
             model.generate_networks_for_sample(
@@ -1188,7 +1182,6 @@ class TestMPLEBasedSeedGeneration(unittest.TestCase):
         """MCMC with explicit seed should NOT call _generate_mple_based_seed"""
         n_nodes = 10
         model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
-        model.fit(sampson_matrix[:n_nodes, :n_nodes])
 
         explicit_seed = np.zeros((n_nodes, n_nodes))
 
@@ -1206,7 +1199,6 @@ class TestMPLEBasedSeedGeneration(unittest.TestCase):
         """_generate_mple_based_seed should return a valid binary network"""
         n_nodes = 10
         model = ERGM(n_nodes, [NumberOfEdgesDirected(), InDegree()], is_directed=True)
-        model.fit(sampson_matrix[:n_nodes, :n_nodes])
 
         seed = model._generate_mple_based_seed()
 

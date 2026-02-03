@@ -466,23 +466,28 @@ class ERGM():
         np.ndarray
             A single network of shape (n, n) to use as MCMC seed.
         """
-        is_dyadic_independent = not self._metrics_collection._has_dyadic_dependent_metrics
-        opt_scheme = self._metrics_collection.choose_optimization_scheme()
+        match self._metrics_collection.choose_optimization_scheme():
+            case OptimizationScheme.MPLE_RECIPROCITY:
+                dyad_dists = self.get_mple_reciprocity_prediction()
+                sample = sample_from_dyads_distribution(dyad_dists, 1)
+                return sample[:, :, 0]
+            
+            case OptimizationScheme.MPLE: 
+                reference_network = None
+            
+            case OptimizationScheme.MCMLE:
+                # For MCMLE: use ER(0.5) as a reference network. This is meant to allow edge-dependent statistics 
+                # to change as a result of a single edge flip, so that we won't get a degenerate matrix for 
+                # the MPLE regressors. For example, if we pass None, which is equivalent to passing the empty network, 
+                # no edge flip will change the reciprocity statistic, and the corresponding column in the regressors 
+                # matrix would be all-0s.
+                reference_network = generate_erdos_renyi_matrix(self._n_nodes, 0.5, self._is_directed)
+            
 
-        if is_dyadic_independent:
-            prob_matrix = self.get_mple_prediction()
-            sample = sample_from_independent_probabilities_matrix(prob_matrix, 1, self._is_directed)
-            return sample[:, :, 0]
-        elif opt_scheme == OptimizationScheme.MPLE_RECIPROCITY:
-            dyad_dists = self.get_mple_reciprocity_prediction()
-            sample = sample_from_dyads_distribution(dyad_dists, 1)
-            return sample[:, :, 0]
-        else:
-            # For MCMLE: use ER(0.5) as pseudo observed network for MPLE
-            pseudo_observed = generate_erdos_renyi_matrix(self._n_nodes, 0.5, self._is_directed)
-            prob_matrix = self.get_mple_prediction(observed_networks=pseudo_observed)
-            sample = sample_from_independent_probabilities_matrix(prob_matrix, 1, self._is_directed)
-            return sample[:, :, 0]
+        prob_matrix = self.get_mple_prediction(observed_networks=reference_network)
+        sample = sample_from_independent_probabilities_matrix(prob_matrix, 1, self._is_directed)
+        return sample[:, :, 0]
+
 
     def get_mple_reciprocity_prediction(self):
         """
