@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
 from enum import Enum
+from collections import Counter
 
 from pyERGM.logging_config import logger
 from pyERGM.utils import *
@@ -22,7 +23,7 @@ class Metric(ABC):
     All concrete metric implementations must inherit from this class.
 
     """
-    def __init__(self, name: str = None):
+    def __init__(self, name: str | None = None):
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
         self._name = name  # optional user-provided label for disambiguation
@@ -92,7 +93,7 @@ class Metric(ABC):
         """
         Returns the name prefix for parameter names (label if set, else empty).
         """
-        return f"{self._name}_" if self._name else ""
+        return f"{self._name}_" if self._name is not None else ""
 
     def update_indices_to_ignore(self, indices_to_ignore):
         """
@@ -937,7 +938,7 @@ class NumberOfEdgesTypes(Metric):
         """
         raise NotImplementedError(NumberOfEdgesTypes.not_implemented_error_message)
 
-    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str = None):
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str | None = None):
         self.exogenous_attr = exogenous_attr
 
         self.unique_types = sorted(list(set(self.exogenous_attr)))
@@ -1087,7 +1088,7 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
     def _get_num_edges_in_mat_factor():
         return 2
 
-    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str = None):
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str | None = None):
         super().__init__(exogenous_attr, indices_from_user, name=name)
         self._is_directed = False
 
@@ -1162,7 +1163,7 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
     def __str__(self):
         return "num_edges_between_types_directed"
 
-    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str = None):
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str | None = None):
         super().__init__(exogenous_attr, indices_from_user, name=name)
         self._is_directed = True
 
@@ -1822,31 +1823,43 @@ class MetricsCollection:
         """
         Returns the names of the parameters of the metrics in the collection.
 
-        If duplicate parameter names exist (e.g., from multiple metrics with
-        overlapping type labels), they are automatically disambiguated by
-        appending _1, _2, etc. suffixes.
+        If multiple metrics of the same class exist and don't have user-provided
+        names, each gets a unique random suffix appended with double underscore
+        (e.g., param_name__x7k3a2). Metrics with user-provided names are not
+        given random suffixes since the name already disambiguates them.
         """
-        parameter_names = []
+        # Count metrics by class type
+        class_counts = Counter(type(m).__name__ for m in self.metrics)
 
+        # Build mapping: for duplicate classes without user-provided names, assign unique IDs
+        class_instances = {}  # class_name -> list of metrics needing disambiguation
         for metric in self.metrics:
-            parameter_names.extend(metric._get_metric_names())
+            class_name = type(metric).__name__
+            # Only add random suffix if: duplicate class AND no user-provided name
+            if class_counts[class_name] > 1 and metric._name is None:
+                class_instances.setdefault(class_name, []).append(metric)
 
-        # Count occurrences of each name
-        counts = {}
-        for name in parameter_names:
-            counts[name] = counts.get(name, 0) + 1
+        # Pre-generate unique IDs for each instance needing disambiguation
+        metric_ids = {}
+        for class_name, instances in class_instances.items():
+            used_ids = set()
+            for metric in instances:
+                metric_id = generate_short_id()
+                while metric_id in used_ids:
+                    metric_id = generate_short_id()
+                used_ids.add(metric_id)
+                metric_ids[id(metric)] = metric_id
 
-        # Disambiguate duplicates by appending _1, _2, etc.
-        seen = {}
-        result = []
-        for name in parameter_names:
-            if counts[name] > 1:
-                seen[name] = seen.get(name, 0) + 1
-                result.append(f"{name}_{seen[name]}")
-            else:
-                result.append(name)
+        # Collect parameter names with disambiguation
+        parameter_names = []
+        for metric in self.metrics:
+            metric_id = metric_ids.get(id(metric))
+            for name in metric._get_metric_names():
+                if metric_id is not None:
+                    name = f"{name}__{metric_id}"
+                parameter_names.append(name)
 
-        return tuple(result)
+        return tuple(parameter_names)
 
     def get_ignored_features(self):
         """

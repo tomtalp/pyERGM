@@ -2252,72 +2252,130 @@ class TestMetricParameterNaming(unittest.TestCase):
     """Tests for metric parameter naming and disambiguation."""
 
     def test_auto_disambiguation_without_name(self):
-        """Test that duplicate parameter names are auto-disambiguated with _1, _2 suffixes."""
+        """Test that duplicate metric classes are auto-disambiguated with random suffixes."""
         n = 4
+        attr1_types = ['A', 'B', 'A', 'B']  # 2 unique types -> 4 directed pairs
+        attr2_types = ['A', 'B', 'C', 'A']  # 3 unique types -> 9 directed pairs
         metrics = [
-            NumberOfEdgesTypesDirected(['A', 'B', 'A', 'B']),
-            NumberOfEdgesTypesDirected(['A', 'B', 'C', 'A'])
+            NumberOfEdgesTypesDirected(attr1_types),
+            NumberOfEdgesTypesDirected(attr2_types)
         ]
-        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n, fix_collinearity=False)
         param_names = collection.get_parameter_names()
 
         # All names should be unique
         self.assertEqual(len(param_names), len(set(param_names)))
 
-        # Common names like A__B should have _1, _2 suffixes
-        self.assertIn('num_edges_between_types_directed_A__B_1', param_names)
-        self.assertIn('num_edges_between_types_directed_A__B_2', param_names)
+        # Verify total count
+        expected_count = len(set(attr1_types)) ** 2 + len(set(attr2_types)) ** 2  # 4 + 9 = 13
+        self.assertEqual(len(param_names), expected_count)
+
+        # All names should have random suffix (double underscore followed by hex)
+        for name in param_names:
+            self.assertRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should end with random suffix")
 
     def test_explicit_name_parameter(self):
-        """Test that explicit name parameter creates prefixed parameter names."""
+        """Test that explicit name parameter creates prefixed parameter names without random suffix."""
         n = 4
+        attr1_types = ['A', 'B', 'A', 'B']  # 2 unique types -> 4 directed pairs
+        attr2_types = ['A', 'B', 'C', 'A']  # 3 unique types -> 9 directed pairs
         metrics = [
-            NumberOfEdgesTypesDirected(['A', 'B', 'A', 'B'], name="attr1"),
-            NumberOfEdgesTypesDirected(['A', 'B', 'C', 'A'], name="attr2")
+            NumberOfEdgesTypesDirected(attr1_types, name="attr1"),
+            NumberOfEdgesTypesDirected(attr2_types, name="attr2")
         ]
-        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n, fix_collinearity=False)
         param_names = collection.get_parameter_names()
 
         # All names should be unique
         self.assertEqual(len(param_names), len(set(param_names)))
 
-        # Names should have prefixes
-        self.assertIn('attr1_num_edges_between_types_directed_A__B', param_names)
-        self.assertIn('attr2_num_edges_between_types_directed_A__B', param_names)
+        # Verify exact counts based on number of unique types
+        attr1_names = [n for n in param_names if n.startswith('attr1_')]
+        attr2_names = [n for n in param_names if n.startswith('attr2_')]
+        self.assertEqual(len(attr1_names), len(set(attr1_types)) ** 2)
+        self.assertEqual(len(attr2_names), len(set(attr2_types)) ** 2)
+
+        # No random suffix when user provides explicit name
+        for name in param_names:
+            self.assertNotRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should not have random suffix")
 
     def test_undirected_naming(self):
         """Test naming for undirected metrics."""
         n = 4
+        attr1_types = ['A', 'B', 'A', 'B']  # 2 unique types -> 3 undirected pairs (AA, AB, BB)
+        attr2_types = ['A', 'B', 'C', 'A']  # 3 unique types -> 6 undirected pairs
         metrics = [
-            NumberOfEdgesTypesUndirected(['A', 'B', 'A', 'B'], name="attr1"),
-            NumberOfEdgesTypesUndirected(['A', 'B', 'C', 'A'], name="attr2")
+            NumberOfEdgesTypesUndirected(attr1_types, name="attr1"),
+            NumberOfEdgesTypesUndirected(attr2_types, name="attr2")
         ]
-        collection = MetricsCollection(metrics, is_directed=False, n_nodes=n)
+        collection = MetricsCollection(metrics, is_directed=False, n_nodes=n, fix_collinearity=False)
         param_names = collection.get_parameter_names()
 
         # All names should be unique
         self.assertEqual(len(param_names), len(set(param_names)))
 
-        # Check prefixes exist
+        # For undirected: n types -> n*(n+1)/2 pairs
+        n_attr1_types = len(set(attr1_types))
+        n_attr2_types = len(set(attr2_types))
         attr1_names = [n for n in param_names if n.startswith('attr1_')]
         attr2_names = [n for n in param_names if n.startswith('attr2_')]
-        self.assertGreater(len(attr1_names), 0)
-        self.assertGreater(len(attr2_names), 0)
+        self.assertEqual(len(attr1_names), n_attr1_types * (n_attr1_types + 1) // 2)
+        self.assertEqual(len(attr2_names), n_attr2_types * (n_attr2_types + 1) // 2)
 
-    def test_no_duplicates_no_disambiguation(self):
-        """Test that unique names are not modified when there are no duplicates."""
+        # No random suffix when user provides explicit name
+        for name in param_names:
+            self.assertNotRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should not have random suffix")
+
+    def test_duplicate_class_types_get_disambiguated(self):
+        """Test that duplicate metric classes are disambiguated even without name collision."""
         n = 4
+        attr1_types = ['A', 'B', 'A', 'B']  # 2 unique types -> 4 directed pairs
+        attr2_types = ['C', 'D', 'C', 'D']  # 2 unique types -> 4 directed pairs
         metrics = [
-            NumberOfEdgesTypesDirected(['A', 'B', 'A', 'B']),  # Only A and B types
-            NumberOfEdgesTypesDirected(['C', 'D', 'C', 'D'])   # Only C and D types
+            NumberOfEdgesTypesDirected(attr1_types),
+            NumberOfEdgesTypesDirected(attr2_types)
         ]
-        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n)
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n, fix_collinearity=False)
         param_names = collection.get_parameter_names()
 
-        # All names should be unique (no overlapping types between the two metrics)
+        # All names should be unique
         self.assertEqual(len(param_names), len(set(param_names)))
 
-        # No names should have _1, _2 suffixes since there are no duplicate names
+        # Verify total count
+        expected_count = len(set(attr1_types)) ** 2 + len(set(attr2_types)) ** 2  # 4 + 4 = 8
+        self.assertEqual(len(param_names), expected_count)
+
+        # Names should have random suffix since there are duplicate classes
         for name in param_names:
-            self.assertFalse(name.endswith('_1') or name.endswith('_2'),
-                           f"Name '{name}' should not have disambiguation suffix")
+            self.assertRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should end with random suffix")
+
+    def test_mixed_explicit_and_auto_naming(self):
+        """Test that metrics with explicit names don't get random suffix, while others do."""
+        n = 4
+        attr1_types = ['A', 'B', 'A', 'B']  # 2 unique types -> 4 directed pairs (has explicit name)
+        attr2_types = ['C', 'D', 'C', 'D']  # 2 unique types -> 4 directed pairs (no explicit name)
+        metrics = [
+            NumberOfEdgesTypesDirected(attr1_types, name="attr1"),
+            NumberOfEdgesTypesDirected(attr2_types)
+        ]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n, fix_collinearity=False)
+        param_names = collection.get_parameter_names()
+
+        # All names should be unique
+        self.assertEqual(len(param_names), len(set(param_names)))
+
+        # Verify total count
+        expected_count = len(set(attr1_types)) ** 2 + len(set(attr2_types)) ** 2
+        self.assertEqual(len(param_names), expected_count)
+
+        # Metric with explicit name: has prefix, no random suffix
+        attr1_names = [n for n in param_names if n.startswith('attr1_')]
+        self.assertEqual(len(attr1_names), len(set(attr1_types)) ** 2)  # 4
+        for name in attr1_names:
+            self.assertNotRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should not have random suffix")
+
+        # Metric without explicit name: no prefix, has random suffix
+        non_attr1_names = [n for n in param_names if not n.startswith('attr1_')]
+        self.assertEqual(len(non_attr1_names), len(set(attr2_types)) ** 2)  # 4
+        for name in non_attr1_names:
+            self.assertRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should end with random suffix")
