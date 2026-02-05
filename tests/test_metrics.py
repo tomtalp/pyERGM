@@ -1261,6 +1261,323 @@ class TestSumDistancesConnectedNeurons(unittest.TestCase):
         metric_5.calculate_mple_regressors(Xs_out, np.array([0]), edge_indices_mask=mask)
         self.assertTrue(np.all(Xs_out == expected_regressors_5))
 
+class TestNodeAttrSums(unittest.TestCase):
+    def test_calc_edge_weights(self):
+        node_attr = np.array([1, 2, 3, 4])
+        metric_both = NodeAttrSum(node_attr, is_directed=True)
+        expected_edge_weights = np.array([
+            [0, 3, 4, 5],
+            [3, 0, 5, 6],
+            [4, 5, 0, 7],
+            [5, 6, 7, 0]
+        ])
+        self.assertTrue(np.all(expected_edge_weights == metric_both.edge_weights))
+
+        metric_out = NodeAttrSumOut(node_attr)
+        expected_edge_weights = np.array([
+            [0, 1, 1, 1],
+            [2, 0, 2, 2],
+            [3, 3, 0, 3],
+            [4, 4, 4, 0]
+        ])
+        self.assertTrue(np.all(expected_edge_weights == metric_out.edge_weights))
+
+        metric_in = NodeAttrSumIn(node_attr)
+        self.assertTrue(np.all(expected_edge_weights.T == metric_in.edge_weights))
+
+    def test_calculate(self):
+        W = np.array([
+            [0, 1, 1, 0],
+            [0, 0, 0, 1],
+            [1, 0, 0, 0],
+            [0, 1, 1, 0]
+        ])
+
+        node_attr = np.array([1, 2, 3, 4])
+        metric_both = NodeAttrSum(node_attr, is_directed=True)
+        expected_statistic = 3 + 4 + 6 + 4 + 6 + 7
+        self.assertEqual(expected_statistic, metric_both.calculate(W)[0])
+
+        metric_out = NodeAttrSumOut(node_attr)
+        expected_statistic = 1 + 1 + 2 + 3 + 4 + 4
+        self.assertEqual(expected_statistic, metric_out.calculate(W)[0])
+
+        metric_in = NodeAttrSumIn(node_attr)
+        expected_statistic = 1 + 2 + 2 + 3 + 3 + 4
+        self.assertEqual(expected_statistic, metric_in.calculate(W)[0])
+
+    def test_calculate_for_sample(self):
+        n = 3
+        sample_size = 3
+
+        W1 = np.array([
+            [0, 1, 0],
+            [1, 0, 1],
+            [1, 0, 0]
+        ])
+        W2 = np.array([
+            [0, 0, 1],
+            [1, 0, 0],
+            [1, 1, 0]
+        ])
+        W3 = np.array([
+            [0, 0, 0],
+            [1, 0, 0],
+            [0, 1, 0]
+        ])
+
+        sample = np.zeros((n, n, sample_size))
+        sample[:, :, 0] = W1
+        sample[:, :, 1] = W2
+        sample[:, :, 2] = W3
+
+        node_attributes = np.array([2, 1, 1])
+
+        set_seed(2349876)
+        mask = generate_binomial_tensor(n, 1)[..., -1].astype(bool)
+        masked_sample = np.einsum("ijk,ij->ijk", sample, mask)
+        mask = flatten_square_matrix_to_edge_list(mask, True)
+
+        metric_both = NodeAttrSum(node_attributes, is_directed=True)
+        expected_stats_sample = np.array([11, 11, 5])
+        calculated_stats_sample = metric_both.calculate_for_sample(sample)
+        self.assertTrue(np.all(expected_stats_sample == calculated_stats_sample))
+        calculated_stats_masked_sample = metric_both.calculate_for_sample(masked_sample)
+        calculated_stats_with_mask = metric_both.calculate_for_sample(sample, mask)
+        self.assertTrue(np.all(calculated_stats_with_mask == calculated_stats_masked_sample))
+
+        metric_out = NodeAttrSumOut(node_attributes)
+        expected_stats_sample = np.array([5, 5, 2])
+        calculated_stats_sample = metric_out.calculate_for_sample(sample)
+        self.assertTrue(np.all(expected_stats_sample == calculated_stats_sample))
+        calculated_stats_masked_sample = metric_out.calculate_for_sample(masked_sample)
+        calculated_stats_with_mask = metric_out.calculate_for_sample(sample, mask)
+        self.assertTrue(np.all(calculated_stats_with_mask == calculated_stats_masked_sample))
+
+        metric_in = NodeAttrSumIn(node_attributes)
+        expected_stats_sample = np.array([6, 6, 3])
+        calculated_stats_sample = metric_in.calculate_for_sample(sample)
+        self.assertTrue(np.all(expected_stats_sample == calculated_stats_sample))
+        calculated_stats_masked_sample = metric_in.calculate_for_sample(masked_sample)
+        calculated_stats_with_mask = metric_in.calculate_for_sample(sample, mask)
+        self.assertTrue(np.all(calculated_stats_with_mask == calculated_stats_masked_sample))
+
+    def test_calc_change_score(self):
+        W_off = np.zeros((3, 3))
+        W_on = np.ones((3, 3))
+
+        node_attributes = np.array([1, 0.5, 2])
+
+        metric_both = NodeAttrSum(node_attributes, is_directed=True)
+        metric_out = NodeAttrSumOut(node_attributes)
+        metric_in = NodeAttrSumIn(node_attributes)
+
+        calculated_change_score = metric_both.calc_change_score(W_off, (2, 1))
+        expected_change_score = 2.5
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+        calculated_change_score = metric_both.calc_change_score(W_on, (2, 0))
+        expected_change_score = -3
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+        calculated_change_score = metric_out.calc_change_score(W_off, (1, 0))
+        expected_change_score = 0.5
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+        calculated_change_score = metric_out.calc_change_score(W_on, (0, 2))
+        expected_change_score = -1
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+        calculated_change_score = metric_in.calc_change_score(W_off, (0, 1))
+        expected_change_score = 0.5
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+        calculated_change_score = metric_in.calc_change_score(W_on, (1, 2))
+        expected_change_score = -2
+        self.assertEqual(expected_change_score, calculated_change_score)
+
+    def test_calculate_mple_regressors(self):
+        # directed both (in+out)
+        node_attr = np.array([3, 5, 7])
+        n = node_attr.size
+        # The edge weights matrix for reference
+        # np.array([
+        #     [0, 8, 10],
+        #     [8, 0, 12],
+        #     [10, 12, 0]
+        # ])
+
+        metric_both = NodeAttrSum(node_attr, is_directed=True)
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[metric_both], n_nodes=n, is_directed=True, fix_collinearity=False
+        )
+        indices_lims = (0, 6)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_1_1 = np.array([[8.],
+                                            [10.],
+                                            [8.],
+                                            [12.],
+                                            [10.],
+                                            [12.]])
+        regressors = np.zeros_like(expected_regressors_1_1)
+        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_1_1))
+
+        indices_lims = (1, 4)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_1_2 = np.array([[10.],
+                                            [8.],
+                                            [12.]])
+        regressors = np.zeros_like(expected_regressors_1_2)
+        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_1_2))
+
+        global_mask_squared = np.array([
+            [False, False, True],
+            [True, False, False],
+            [True, False, False],
+        ])
+        global_mask = flatten_square_matrix_to_edge_list(global_mask_squared, True)
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[metric_both], n_nodes=n, is_directed=True, fix_collinearity=False, mask=global_mask
+        )
+        indices_lims = (0, 2)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_1_masked = np.array([[10.],
+                                                 [8.]])
+        regressors = np.zeros_like(expected_regressors_1_masked)
+        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_1_masked))
+
+        # directed in
+        # The edge weights matrix for reference
+        # np.array([
+        #     [0, 5, 7],
+        #     [3, 0, 7],
+        #     [3, 5, 0]
+        # ])
+
+        metric_in = NodeAttrSumIn(node_attr)
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[metric_in], n_nodes=n, is_directed=True, fix_collinearity=False
+        )
+        indices_lims = (0, 6)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_2_1 = np.array([[5.],
+                                            [7.],
+                                            [3.],
+                                            [7.],
+                                            [3.],
+                                            [5.]])
+        regressors = np.zeros_like(expected_regressors_2_1)
+        metric_in.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_2_1))
+
+        indices_lims = (1, 4)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_2_2 = np.array([[7.],
+                                            [3.],
+                                            [7.]])
+        regressors = np.zeros_like(expected_regressors_2_2)
+        metric_in.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_2_2))
+
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[metric_in], n_nodes=n, is_directed=True, fix_collinearity=False, mask=global_mask
+        )
+        indices_lims = (1, 3)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_2_masked = np.array([[3.], [3.]])
+        regressors = np.zeros_like(expected_regressors_2_masked)
+        metric_in.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_2_masked))
+
+        # directed out
+        # The edge weights matrix for reference
+        # np.array([
+        #     [0, 3, 3],
+        #     [5, 0, 5],
+        #     [7, 7, 0]
+        # ])
+
+        metric_out = NodeAttrSumOut(node_attr)
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[metric_out], n_nodes=n, is_directed=True, fix_collinearity=False
+        )
+        indices_lims = (0, 6)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_3_1 = np.array([[3.],
+                                            [3.],
+                                            [5.],
+                                            [5.],
+                                            [7.],
+                                            [7.]])
+        regressors = np.zeros_like(expected_regressors_3_1)
+        metric_out.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_3_1))
+
+        indices_lims = (1, 4)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_3_2 = np.array([[3.],
+                                            [5.],
+                                            [5.]])
+        regressors = np.zeros_like(expected_regressors_3_2)
+        metric_out.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_3_2))
+
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[metric_out], n_nodes=n, is_directed=True, fix_collinearity=False, mask=global_mask
+        )
+        indices_lims = None
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_3_masked = np.array([[3.], [5.], [7.]])
+        regressors = np.zeros_like(expected_regressors_3_masked)
+        metric_out.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_3_masked))
+
+        # undirected (both)
+        node_attr = np.array([3, 5, 7])
+        # The edge weights matrix for reference
+        # np.array([
+        #     [0, 8, 10],
+        #     [8, 0, 12],
+        #     [10, 12, 0]
+        # ])
+
+        metric_both = NodeAttrSum(node_attr, is_directed=False)
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[metric_both], n_nodes=n, is_directed=False, fix_collinearity=False
+        )
+        indices_lims = (0, 3)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        # in undirected graphs the expected outcome is the upper triangle (without the diagonal)
+        expected_regressors_1 = np.array([[8.],
+                                          [10.],
+                                          [12.]])
+        regressors = np.zeros_like(expected_regressors_1)
+        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_1))
+
+        indices_lims = (1, 2)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_2 = np.array([[10.]])
+        regressors = np.zeros_like(expected_regressors_2)
+        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_2))
+
+        dummy_metrics_collection = MetricsCollection(
+            metrics=[metric_both],
+            n_nodes=n,
+            is_directed=False,
+            fix_collinearity=False,
+            mask=(global_mask_squared | global_mask_squared.T)[np.triu_indices(n, k=1)],
+        )
+        indices_lims = (1, 2)
+        mask = dummy_metrics_collection._get_mple_data_chunk_mask(indices_lims)
+        expected_regressors_3_masked = np.array([[10.]])
+        regressors = np.zeros_like(expected_regressors_3_masked)
+        metric_both.calculate_mple_regressors(regressors, np.array([0]), edge_indices_mask=mask)
+        self.assertTrue(np.all(regressors == expected_regressors_3_masked))
 
 class TestMetricsCollection(unittest.TestCase):
 
@@ -1382,7 +1699,14 @@ class TestMetricsCollection(unittest.TestCase):
                 "expected_num_of_features": 1 + len(set(types_3)) ** 2 + len(set(types_4)) ** 2 - 5,
                 "expected_trimmed_metrics": {},
                 "expected_eliminated_metrics": []
-            }
+            },
+            "sum_attr_both__sum_attr_in__sum_attr_out": {
+                "metrics": [NodeAttrSum(np.arange(n), is_directed=True), NodeAttrSumIn(np.arange(n)),
+                            NodeAttrSumOut(np.arange(n))],
+                "expected_num_of_features": 2,
+                "expected_trimmed_metrics": {},
+                "expected_eliminated_metrics": []
+            },
         }
 
         # We want to make sure that the changes (trimming and complete removal) are made for the right metrics, so we
@@ -2246,3 +2570,136 @@ class TestEdgeCases(unittest.TestCase):
         result = metric.calculate(W)
         self.assertEqual(len(result), 1)
         self.assertEqual(result[0], 0)
+
+
+class TestMetricParameterNaming(unittest.TestCase):
+    """Tests for metric parameter naming and disambiguation."""
+
+    def test_auto_disambiguation_without_name(self):
+        """Test that duplicate metric classes are auto-disambiguated with random suffixes."""
+        n = 4
+        attr1_types = ['A', 'B', 'A', 'B']  # 2 unique types -> 4 directed pairs
+        attr2_types = ['A', 'B', 'C', 'A']  # 3 unique types -> 9 directed pairs
+        metrics = [
+            NumberOfEdgesTypesDirected(attr1_types),
+            NumberOfEdgesTypesDirected(attr2_types)
+        ]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n, fix_collinearity=False)
+        param_names = collection.get_parameter_names()
+
+        # All names should be unique
+        self.assertEqual(len(param_names), len(set(param_names)))
+
+        # Verify total count
+        expected_count = len(set(attr1_types)) ** 2 + len(set(attr2_types)) ** 2  # 4 + 9 = 13
+        self.assertEqual(len(param_names), expected_count)
+
+        # All names should have random suffix (double underscore followed by hex)
+        for name in param_names:
+            self.assertRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should end with random suffix")
+
+    def test_explicit_name_parameter(self):
+        """Test that explicit name parameter creates prefixed parameter names without random suffix."""
+        n = 4
+        attr1_types = ['A', 'B', 'A', 'B']  # 2 unique types -> 4 directed pairs
+        attr2_types = ['A', 'B', 'C', 'A']  # 3 unique types -> 9 directed pairs
+        metrics = [
+            NumberOfEdgesTypesDirected(attr1_types, name="attr1"),
+            NumberOfEdgesTypesDirected(attr2_types, name="attr2")
+        ]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n, fix_collinearity=False)
+        param_names = collection.get_parameter_names()
+
+        # All names should be unique
+        self.assertEqual(len(param_names), len(set(param_names)))
+
+        # Verify exact counts based on number of unique types
+        attr1_names = [n for n in param_names if n.startswith('attr1_')]
+        attr2_names = [n for n in param_names if n.startswith('attr2_')]
+        self.assertEqual(len(attr1_names), len(set(attr1_types)) ** 2)
+        self.assertEqual(len(attr2_names), len(set(attr2_types)) ** 2)
+
+        # No random suffix when user provides explicit name
+        for name in param_names:
+            self.assertNotRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should not have random suffix")
+
+    def test_undirected_naming(self):
+        """Test naming for undirected metrics."""
+        n = 4
+        attr1_types = ['A', 'B', 'A', 'B']  # 2 unique types -> 3 undirected pairs (AA, AB, BB)
+        attr2_types = ['A', 'B', 'C', 'A']  # 3 unique types -> 6 undirected pairs
+        metrics = [
+            NumberOfEdgesTypesUndirected(attr1_types, name="attr1"),
+            NumberOfEdgesTypesUndirected(attr2_types, name="attr2")
+        ]
+        collection = MetricsCollection(metrics, is_directed=False, n_nodes=n, fix_collinearity=False)
+        param_names = collection.get_parameter_names()
+
+        # All names should be unique
+        self.assertEqual(len(param_names), len(set(param_names)))
+
+        # For undirected: n types -> n*(n+1)/2 pairs
+        n_attr1_types = len(set(attr1_types))
+        n_attr2_types = len(set(attr2_types))
+        attr1_names = [n for n in param_names if n.startswith('attr1_')]
+        attr2_names = [n for n in param_names if n.startswith('attr2_')]
+        self.assertEqual(len(attr1_names), n_attr1_types * (n_attr1_types + 1) // 2)
+        self.assertEqual(len(attr2_names), n_attr2_types * (n_attr2_types + 1) // 2)
+
+        # No random suffix when user provides explicit name
+        for name in param_names:
+            self.assertNotRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should not have random suffix")
+
+    def test_duplicate_class_types_get_disambiguated(self):
+        """Test that duplicate metric classes are disambiguated even without name collision."""
+        n = 4
+        attr1_types = ['A', 'B', 'A', 'B']  # 2 unique types -> 4 directed pairs
+        attr2_types = ['C', 'D', 'C', 'D']  # 2 unique types -> 4 directed pairs
+        metrics = [
+            NumberOfEdgesTypesDirected(attr1_types),
+            NumberOfEdgesTypesDirected(attr2_types)
+        ]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n, fix_collinearity=False)
+        param_names = collection.get_parameter_names()
+
+        # All names should be unique
+        self.assertEqual(len(param_names), len(set(param_names)))
+
+        # Verify total count
+        expected_count = len(set(attr1_types)) ** 2 + len(set(attr2_types)) ** 2  # 4 + 4 = 8
+        self.assertEqual(len(param_names), expected_count)
+
+        # Names should have random suffix since there are duplicate classes
+        for name in param_names:
+            self.assertRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should end with random suffix")
+
+    def test_mixed_explicit_and_auto_naming(self):
+        """Test that metrics with explicit names don't get random suffix, while others do."""
+        n = 4
+        attr1_types = ['A', 'B', 'A', 'B']  # 2 unique types -> 4 directed pairs (has explicit name)
+        attr2_types = ['C', 'D', 'C', 'D']  # 2 unique types -> 4 directed pairs (no explicit name)
+        metrics = [
+            NumberOfEdgesTypesDirected(attr1_types, name="attr1"),
+            NumberOfEdgesTypesDirected(attr2_types)
+        ]
+        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n, fix_collinearity=False)
+        param_names = collection.get_parameter_names()
+
+        # All names should be unique
+        self.assertEqual(len(param_names), len(set(param_names)))
+
+        # Verify total count
+        expected_count = len(set(attr1_types)) ** 2 + len(set(attr2_types)) ** 2
+        self.assertEqual(len(param_names), expected_count)
+
+        # Metric with explicit name: has prefix, no random suffix
+        attr1_names = [n for n in param_names if n.startswith('attr1_')]
+        self.assertEqual(len(attr1_names), len(set(attr1_types)) ** 2)  # 4
+        for name in attr1_names:
+            self.assertNotRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should not have random suffix")
+
+        # Metric without explicit name: no prefix, has random suffix
+        non_attr1_names = [n for n in param_names if not n.startswith('attr1_')]
+        self.assertEqual(len(non_attr1_names), len(set(attr2_types)) ** 2)  # 4
+        for name in non_attr1_names:
+            self.assertRegex(name, r'__[a-f0-9]{6}$', f"Name '{name}' should end with random suffix")

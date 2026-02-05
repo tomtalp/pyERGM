@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
 from enum import Enum
+from collections import Counter
 
 from pyERGM.logging_config import logger
 from pyERGM.utils import *
@@ -22,9 +23,10 @@ class Metric(ABC):
     All concrete metric implementations must inherit from this class.
 
     """
-    def __init__(self):
+    def __init__(self, name: str | None = None):
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
+        self._name = name  # optional user-provided label for disambiguation
         self._is_directed = None
         self._is_dyadic_independent = True
         self._n_nodes = None
@@ -86,6 +88,12 @@ class Metric(ABC):
         How many features does this metric produce, including the ignored ones. Defaults to 1
         """
         return 1
+
+    def _get_name_prefix(self):
+        """
+        Returns the name prefix for parameter names (label if set, else empty).
+        """
+        return f"{self._name}_" if self._name is not None else ""
 
     def update_indices_to_ignore(self, indices_to_ignore):
         """
@@ -930,13 +938,13 @@ class NumberOfEdgesTypes(Metric):
         """
         raise NotImplementedError(NumberOfEdgesTypes.not_implemented_error_message)
 
-    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None):
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str | None = None):
         self.exogenous_attr = exogenous_attr
 
         self.unique_types = sorted(list(set(self.exogenous_attr)))
 
         self._indices_from_user = indices_from_user.copy() if indices_from_user is not None else None
-        super().__init__()
+        super().__init__(name=name)
 
         self.does_support_mask = True
 
@@ -1080,8 +1088,8 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
     def _get_num_edges_in_mat_factor():
         return 2
 
-    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None):
-        super().__init__(exogenous_attr, indices_from_user)
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str | None = None):
+        super().__init__(exogenous_attr, indices_from_user, name=name)
         self._is_directed = False
 
     def _get_total_feature_count(self):
@@ -1109,7 +1117,7 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
     def _get_metric_names(self):
         parameter_names = tuple()
 
-        metric_name = str(self)
+        metric_name = self._get_name_prefix() + str(self)
 
         sorted_canonical_type_pairs = self._get_sorted_canonical_type_pairs()
         for i in range(self._get_total_feature_count()):
@@ -1124,7 +1132,7 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
         if self._indices_to_ignore is None or not np.any(self._indices_to_ignore):
             return tuple()
 
-        metric_name = str(self)
+        metric_name = self._get_name_prefix() + str(self)
         ignored_features = ()
         sorted_canonical_type_pairs = self._get_sorted_canonical_type_pairs()
         for i in range(self._get_total_feature_count()):
@@ -1155,8 +1163,8 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
     def __str__(self):
         return "num_edges_between_types_directed"
 
-    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None):
-        super().__init__(exogenous_attr, indices_from_user)
+    def __init__(self, exogenous_attr: Sequence[Any], indices_from_user=None, name: str | None = None):
+        super().__init__(exogenous_attr, indices_from_user, name=name)
         self._is_directed = True
 
     @staticmethod
@@ -1181,7 +1189,7 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
     def _get_metric_names(self):
         parameter_names = tuple()
 
-        metric_name = str(self)
+        metric_name = self._get_name_prefix() + str(self)
 
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
@@ -1195,7 +1203,7 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
         if self._indices_to_ignore is None or not np.any(self._indices_to_ignore):
             return tuple()
 
-        metric_name = str(self)
+        metric_name = self._get_name_prefix() + str(self)
         ignored_features = ()
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
@@ -1250,6 +1258,64 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
     def __str__(self):
         return "sum_distances_connected_neurons"
 
+
+class NodeAttrSum(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection, is_directed: bool):
+        super().__init__(exogenous_attr)
+        self._is_directed = is_directed
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                if i == j:
+                    continue
+                self.edge_weights[0, i, j] = self.exogenous_attr[i] + self.exogenous_attr[j]
+
+    def _get_num_weight_mats(self):
+        return 1
+
+    def __str__(self):
+        return "node_attribute_sum"
+
+
+class NodeAttrSumOut(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(exogenous_attr)
+        self._is_directed = True
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
+        for i in range(num_nodes):
+            self.edge_weights[0, i, :] = self.exogenous_attr[i] * np.ones(num_nodes)
+            self.edge_weights[0, i, i] = 0
+
+    def _get_num_weight_mats(self):
+        return 1
+
+    def __str__(self):
+        return "node_attribute_sum_out"
+
+
+class NodeAttrSumIn(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(exogenous_attr)
+        self._is_directed = True
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
+        for j in range(num_nodes):
+            self.edge_weights[0, :, j] = self.exogenous_attr[j] * np.ones(num_nodes)
+            self.edge_weights[0, j, j] = 0
+
+    def _get_num_weight_mats(self):
+        return 1
+
+    def __str__(self):
+        return "node_attribute_in"
 
 class MetricsCollection:
     """
@@ -1814,13 +1880,44 @@ class MetricsCollection:
     def get_parameter_names(self):
         """
         Returns the names of the parameters of the metrics in the collection.
+
+        If multiple metrics of the same class exist and don't have user-provided
+        names, each gets a unique random suffix appended with double underscore
+        (e.g., param_name__x7k3a2). Metrics with user-provided names are not
+        given random suffixes since the name already disambiguates them.
         """
-        parameter_names = tuple()
+        # Count metrics by class type
+        class_counts = Counter(type(m).__name__ for m in self.metrics)
 
+        # Build mapping: for duplicate classes without user-provided names, assign unique IDs
+        class_instances = {}  # class_name -> list of metrics needing disambiguation
         for metric in self.metrics:
-            parameter_names += metric._get_metric_names()
+            class_name = type(metric).__name__
+            # Only add random suffix if: duplicate class AND no user-provided name
+            if class_counts[class_name] > 1 and metric._name is None:
+                class_instances.setdefault(class_name, []).append(metric)
 
-        return parameter_names
+        # Pre-generate unique IDs for each instance needing disambiguation
+        metric_ids = {}
+        for class_name, instances in class_instances.items():
+            used_ids = set()
+            for metric in instances:
+                metric_id = generate_short_id()
+                while metric_id in used_ids:
+                    metric_id = generate_short_id()
+                used_ids.add(metric_id)
+                metric_ids[id(metric)] = metric_id
+
+        # Collect parameter names with disambiguation
+        parameter_names = []
+        for metric in self.metrics:
+            metric_id = metric_ids.get(id(metric))
+            for name in metric._get_metric_names():
+                if metric_id is not None:
+                    name = f"{name}__{metric_id}"
+                parameter_names.append(name)
+
+        return tuple(parameter_names)
 
     def get_ignored_features(self):
         """

@@ -1,4 +1,6 @@
 import itertools
+import math
+import secrets
 from collections import Counter
 from typing import Collection
 import numpy as np
@@ -16,6 +18,11 @@ EMPTY_IDX = 0
 UPPER_IDX = 1
 LOWER_IDX = 2
 RECIPROCAL_IDX = 3
+
+
+def generate_short_id(length: int = 6) -> str:
+    """Generate a short random hex ID for metric disambiguation."""
+    return secrets.token_hex(math.ceil(length / 2))[:length]
 
 
 @njit
