@@ -11,6 +11,8 @@ import time
 import re
 import sys
 
+from pyERGM.logging_config import logger
+
 LSF_ID_LIST_LEN_LIMIT = 100
 
 
@@ -131,26 +133,20 @@ def wait_for_distributed_children_outputs(num_jobs: int, out_paths: Sequence[Pat
             if not is_done:
                 children_to_resend.append(i + 1)
         if children_to_resend:
-            print("found children jobs to resend: {}".format(children_to_resend))
-            sys.stdout.flush()
+            logger.warning(f"Found children jobs to resend: {children_to_resend}")
             for child_to_resend_idx in children_to_resend:
-                print("validating children didn't fail on OOM")
-                sys.stdout.flush()
+                logger.debug("Validating children didn't fail on OOM")
                 _check_if_child_died_on_oom(children_logs_dir, child_to_resend_idx)
-                print("removing failed children logs")
-                sys.stdout.flush()
+                logger.debug("Removing failed children logs")
                 _remove_logs_of_child_job(children_logs_dir, child_to_resend_idx)
-            print("resending failed children jobs")
-            sys.stdout.flush()
+            logger.info("Resending failed children jobs")
             resent_job_array_ids = resend_failed_jobs(out_paths[0].parent, children_to_resend, array_name)
             job_array_ids += resent_job_array_ids
 
         newly_done_mask = children_statuses & ~prev_children_statuses
         if newly_done_mask.any():
-            print(f"current iteration finished children indices: {np.where(newly_done_mask)[0]}")
-            sys.stdout.flush()
-        print(f"iteration {iteration}: done with {children_statuses.sum()} / {num_jobs} children jobs")
-        sys.stdout.flush()
+            logger.debug(f"Current iteration finished children indices: {np.where(newly_done_mask)[0]}")
+        logger.info(f"Iteration {iteration}: done with {children_statuses.sum()} / {num_jobs} children jobs")
         iteration += 1
         time.sleep(60)
 
@@ -211,19 +207,16 @@ def should_check_output_files(job_array_ids: list, num_sent_jobs: int) -> npt.ND
         if stat not in {"DONE", "EXIT"}:
             should_check_out_files[idx - 1] = False
     if len(kill_cmd) > 1:
-        print(f"killing suspended jobs: {' '.join(kill_cmd[1:])}")
-        sys.stdout.flush()
+        logger.warning(f"Killing suspended jobs: {' '.join(kill_cmd[1:])}")
         subprocess.run(kill_cmd)
         # Wait for all killed jobs to actually finish (be in DONE/EXIT state). timeout of 10 min. recheck every 2 sec.
         # This avoids a racing condition between the LSF scheduler killing the job and us removing the log files:
         #   if the job is killed after the log files were removed, they will be recreated. As the job is resent, which
-        #   would create by itself new log files, we will hav duplicate log files which we don't handle.
-        print('start waiting for killed jobs to exit')
-        sys.stdout.flush()
+        #   would create by itself new log files, we will have duplicate log files which we don't handle.
+        logger.debug("Start waiting for killed jobs to exit")
         wait_expr = " && ".join([f"ended({job_id_str})" for job_id_str in kill_cmd[1:]])
         subprocess.run(["bwait", "-w", wait_expr, "-t", "600", "-r", "2"])
-        print('done waiting for killed jobs to exit')
-        sys.stdout.flush()
+        logger.debug("Done waiting for killed jobs to exit")
     return should_check_out_files
 
 
@@ -288,8 +281,7 @@ def run_distributed_children_jobs(out_path: Path, cmd_line_single_batch, single_
     send_jobs_command = f'bash {multiple_batches_bash_path} {single_batch_bash_path}'
     jobs_sending_res = subprocess.run(send_jobs_command.split(), stdout=subprocess.PIPE, stderr=subprocess.PIPE)
 
-    print("sent children jobs")
-    sys.stdout.flush()
+    logger.info("Sent children jobs")
 
     job_array_ids = parse_sent_job_array_ids(jobs_sending_res.stdout)
 

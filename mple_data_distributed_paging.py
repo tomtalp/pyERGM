@@ -1,5 +1,5 @@
 import argparse
-from pyERGM.mple_optimizaiton import *
+from pyERGM.mple_optimization import *
 
 def parse_cmd_args():
     parser = argparse.ArgumentParser()
@@ -19,6 +19,13 @@ def main():
     with open(os.path.join(out_dir_path, 'data', 'observed_networks.pkl'), 'rb') as f:
         observed_networks = pickle.load(f)
 
+    sample_weights_path = os.path.join(out_dir_path, 'data', 'sample_weights.pkl')
+    if os.path.exists(sample_weights_path):
+        with open(sample_weights_path, 'rb') as f:
+            sample_weights = pickle.load(f)
+    else:
+        sample_weights = None
+
     num_nodes = observed_networks.shape[0]
     max_edge_idx = metric_collection.mask.sum() if metric_collection.mask is not None else num_nodes ** 2 - num_nodes
     edge_indices = (func_id * num_edges_per_job,
@@ -26,10 +33,16 @@ def main():
     Xs_chunk = metric_collection.prepare_mple_regressors(observed_network=None, edge_indices_lims=edge_indices)
     ys_chunk = metric_collection.prepare_mple_labels(observed_networks, edge_indices)
 
+    # Chunk sample weights using the same edge indexing as Xs/ys
+    save_dict = dict(Xs_chunk=Xs_chunk, ys_chunk=ys_chunk)
+    if sample_weights is not None:
+        weights_chunk = metric_collection.slice_flat_array_by_edge_indices(sample_weights, edge_indices)
+        save_dict['weights_chunk'] = weights_chunk.reshape(-1, 1)
+
     chunks_out_path = os.path.join(out_dir_path, 'mple_data_paged_chunks')
     os.makedirs(chunks_out_path, exist_ok=True)
 
-    np.savez_compressed(os.path.join(chunks_out_path, f'{func_id}.npz'), Xs_chunk=Xs_chunk, ys_chunk=ys_chunk)
+    np.savez_compressed(os.path.join(chunks_out_path, f'{func_id}.npz'), **save_dict)
 
 
 if __name__ == "__main__":

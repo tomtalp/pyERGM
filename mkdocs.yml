@@ -15,12 +15,33 @@ nav:
     - Introduction to graph metrics: metrics.md
     - List of metrics: metrics_reference.md
     - Creating custom metrics: custom_metrics.md
-    
+  - API Reference:
+    - ERGM: api/ergm.md
+    - Metrics: api/metrics.md
+    - Sampling: api/sampling.md
+    - Utilities: api/utils.md
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_source: true
+            show_root_heading: true
+            show_root_full_path: false
+            heading_level: 2
+            members_order: source
+            docstring_style: numpy
+            show_signature_annotations: true
+            separate_signature: true
 
 markdown_extensions:
-  - pymdownx.superfences 
+  - pymdownx.superfences
   - pymdownx.arithmatex:
       generic: true
+  - admonition
+  - pymdownx.details
 
 extra_javascript:
   - javascripts/mathjax.js

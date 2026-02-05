@@ -7,11 +7,11 @@ pyERGM provides a collection of metrics that can be used to calculate these stat
 Every metric in pyERGM is inherited from the `Metric` class, which defines the interface for calculating statistics on a graph. All metrics implement a `calculate` function, which receives a graph and returns the calculated statistics.
 
 ```python
-pyERGM.metrics.Metric.calculate(input: np.ndarray | nx.Graph)
+pyERGM.metrics.Metric.calculate(input: np.ndarray)
 ```
 **Parameters**:
 
-* **input** (*np.ndarray | nx.Graph*) - The input graph for which to calculate the statistics. The graph can be represented as a numpy adjacency matrix or a `networkx` graph object.
+* **input** (*np.ndarray*) - The input graph for which to calculate the statistics, represented as an adjacency matrix.
 
 **Returns**:
 
