@@ -1618,6 +1618,21 @@ class TestMetricsCollection(unittest.TestCase):
             collection = MetricsCollection(metrics, is_directed=False,
                                            n_nodes=3)  # Should fail because we have a directed metric in an undirected metrics collection
 
+    def test_duplicate_metric_names_raises_error(self):
+        # Two metrics of the same type with the same custom name should raise an error
+        metrics = [InDegree(name="duplicate"), InDegree(name="duplicate")]
+        with self.assertRaises(ValueError) as context:
+            MetricsCollection(metrics, is_directed=True, n_nodes=3)
+        self.assertIn("same name", str(context.exception))
+
+        # Different metric types with the same custom name is allowed (different class names)
+        metrics = [InDegree(name="my_metric"), OutDegree(name="my_metric")]
+        MetricsCollection(metrics, is_directed=True, n_nodes=3)  # Should not raise
+
+        # Metrics without custom names (None) are not checked for duplicates
+        metrics = [InDegree(), InDegree()]
+        MetricsCollection(metrics, is_directed=True, n_nodes=3)  # Should not raise
+
     def test_collinearity_fixer(self):
         n = 18
 

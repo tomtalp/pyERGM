@@ -478,19 +478,53 @@ class TestERGM(unittest.TestCase):
                       [0, 0, 0, 0, 1],
                       [0, 1, 0, 0, 0],
                       [0, 1, 0, 1, 0]])
-        metrics_1 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(1, n_nodes + 1), is_directed=True),
-                     NumberOfEdgesTypesDirected(['A', 'B', 'A', 'A', 'B'])]
+        metrics_1 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(1, n_nodes + 1), is_directed=True, name="linear"),
+                     NodeAttrSum(np.arange(1, n_nodes + 1)**2, is_directed=True, name="quadratic"),
+                     NumberOfEdgesTypesDirected(['A', 'B', 'A', 'A', 'B'], name="Attributes1"),
+                     NumberOfEdgesTypesDirected(['A', 'B', 'D', 'C', 'B'], name="Attributes2")]
         model_1 = ERGM(n_nodes=n_nodes, metrics_collection=metrics_1, is_directed=True)
-
+        model_1._metrics_collection.get_parameter_names()
         model_1.fit(W)
 
         model_1_params = model_1.get_model_parameters()
 
-        metrics_2 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(n_nodes + 1, 1, -1), is_directed=True),
-                     NumberOfEdgesTypesDirected(['B', 'B', 'B', 'A', 'A'])]
+        # Note: NumberOfEdgesTypesDirected must use the same attribute arrays to produce matching parameter names
+        metrics_2 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(n_nodes + 1, 1, -1), is_directed=True, name="linear"),
+                     NodeAttrSum(6 * np.arange(1, n_nodes + 1), is_directed=True, name="quadratic"),
+                     NumberOfEdgesTypesDirected(['B', 'B', 'B', 'A', 'A'], name="Attributes1"),
+                     NumberOfEdgesTypesDirected(['B', 'A', 'D', 'B', 'C'], name="Attributes2")]
+        
         model_2 = ERGM(n_nodes=n_nodes, metrics_collection=metrics_2, is_directed=True, initial_thetas=model_1_params)
 
         self.assertTrue(model_2.get_model_parameters() == model_1_params)
+
+    def test_initial_thetas_with_unnamed_duplicates_raises_error(self):
+        """Test that using initial_thetas with unnamed duplicate metrics raises an error."""
+        n_nodes = 5
+        W = np.array([[0, 0, 1, 1, 0],
+                      [1, 0, 0, 0, 1],
+                      [0, 0, 0, 0, 1],
+                      [0, 1, 0, 0, 0],
+                      [0, 1, 0, 1, 0]])
+
+        # Model with named metrics (should work)
+        metrics_named = [NumberOfEdgesDirected(),
+                         NodeAttrSum(np.arange(1, n_nodes + 1), is_directed=True, name="linear"),
+                         NodeAttrSum(np.arange(1, n_nodes + 1)**2, is_directed=True, name="quadratic")]
+        model_named = ERGM(n_nodes=n_nodes, metrics_collection=metrics_named, is_directed=True)
+        model_named.fit(W)
+        named_params = model_named.get_model_parameters()
+
+        # Model with unnamed duplicate metrics should raise error when using initial_thetas
+        metrics_unnamed = [NumberOfEdgesDirected(),
+                           NodeAttrSum(np.arange(1, n_nodes + 1), is_directed=True),
+                           NodeAttrSum(np.arange(1, n_nodes + 1)**2, is_directed=True)]
+
+        with self.assertRaises(ValueError) as context:
+            ERGM(n_nodes=n_nodes, metrics_collection=metrics_unnamed, is_directed=True, initial_thetas=named_params)
+
+        self.assertIn("Cannot use initial_thetas with unnamed duplicate metrics", str(context.exception))
+        self.assertIn("NodeAttrSum", str(context.exception))
 
     def test_calculate_prediction(self):
         n_nodes = 4

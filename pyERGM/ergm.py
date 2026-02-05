@@ -9,6 +9,7 @@ from scipy.stats import f
 from pyERGM.logging_config import logger
 from pyERGM.sampling import NaiveMetropolisHastings
 from pyERGM.mple_optimization import *
+from pyERGM.metrics import _find_unnamed_duplicate_metrics
 from pyERGM.utils import generate_erdos_renyi_matrix, ConvergenceTester
 from pyERGM.constants import *
 
@@ -110,6 +111,17 @@ class ERGM():
             if type(initial_thetas) != dict:
                 raise ValueError("Initial thetas must be a dictionary keyed by feature names, as returned by "
                                  "`ERGM.get_model_parameters`")
+
+            # Check for unnamed duplicate metrics - these can't be matched with initial_thetas
+            unnamed_duplicates = _find_unnamed_duplicate_metrics(self._metrics_collection.metrics)
+            if unnamed_duplicates:
+                class_names = sorted(set(cls for _, cls in unnamed_duplicates))
+                raise ValueError(
+                    f"Cannot use initial_thetas with unnamed duplicate metrics. "
+                    f"The following metric classes have duplicates without explicit names: {class_names}. "
+                    f"Please provide a unique 'name' parameter for each duplicate metric instance."
+                )
+
             self._thetas = np.zeros(self._metrics_collection.calc_num_of_features())
             current_model_params = self.get_model_parameters()
             if len(set(initial_thetas.keys()).difference(set(current_model_params.keys()))) > 0:

@@ -14,6 +14,29 @@ from pyERGM.utils import *
 from pyERGM.cluster_utils import *
 
 
+def _find_unnamed_duplicate_metrics(metrics):
+    """
+    Find metrics that are duplicated (same class) and don't have user-provided names.
+
+    Parameters
+    ----------
+    metrics : list
+        List of Metric objects.
+
+    Returns
+    -------
+    list
+        List of (metric, class_name) tuples for metrics needing disambiguation.
+    """
+    class_counts = Counter(type(m).__name__ for m in metrics)
+    unnamed_duplicates = []
+    for metric in metrics:
+        class_name = type(metric).__name__
+        if class_counts[class_name] > 1 and metric._name is None:
+            unnamed_duplicates.append((metric, class_name))
+    return unnamed_duplicates
+
+
 class Metric(ABC):
     """
     Abstract base class for all network metrics in the ERGM framework.
@@ -221,14 +244,16 @@ class Metric(ABC):
             A tuple of strings, each string is the name of a parameter that this metric produces.
         """
         total_n_features = self._get_total_feature_count()
+        metric_name = self._get_name_prefix() + str(self)
         if total_n_features == 1:
-            return (str(self),)
+
+            return (metric_name,)
         else:
             parameter_names = ()
             for i in range(total_n_features):
                 if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                     continue
-                parameter_names += (f"{str(self)}_{i + 1}",)
+                parameter_names += (f"{metric_name}_{i + 1}",)
             return parameter_names
 
     def _get_ignored_features(self):
@@ -263,8 +288,8 @@ class NumberOfEdges(Metric):
     def __str__(self):
         raise NotImplementedError
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, name: str | None = None):
+        super().__init__(name=name)
         self._is_dyadic_independent = True
         self.does_support_mask = True
 
@@ -349,8 +374,8 @@ class NumberOfEdgesUndirected(NumberOfEdges):
     def __str__(self):
         return "num_edges_undirected"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, name: str | None = None):
+        super().__init__(name=name)
         self._is_directed = False
 
     @staticmethod
@@ -368,8 +393,8 @@ class NumberOfEdgesDirected(NumberOfEdges):
     def __str__(self):
         return "num_edges_directed"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, name: str | None = None):
+        super().__init__(name=name)
         self._is_directed = True
 
     @staticmethod
@@ -393,8 +418,8 @@ class NumberOfTriangles(Metric):
     def __str__(self):
         return "num_triangles"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, name: str | None = None):
+        super().__init__(name=name)
         self._is_directed = False
         self._is_dyadic_independent = False
 
@@ -447,8 +472,9 @@ class BaseDegreeVector(Metric, abc.ABC):
             is_directed: bool,
             summation_axis: SummationAxis,
             indices_from_user: Sequence[int] | None = None,
+            name: str | None = None,
     ):
-        super().__init__()
+        super().__init__(name=name)
 
         self._indices_from_user = np.array(indices_from_user, dtype=int).copy() if indices_from_user is not None else None
         self._is_directed = is_directed
@@ -550,16 +576,19 @@ class InDegree(BaseDegreeVector):
     indices_from_user : array-like, optional
         Indices of nodes whose in-degrees should be excluded from the feature vector
         to avoid multicollinearity.
+    name : str, optional
+        Optional name for this metric instance to avoid conflicts with other metrics of the same type.
     """
 
     def __str__(self):
         return "indegree"
 
-    def __init__(self, indices_from_user=None):
+    def __init__(self, indices_from_user=None, name: str | None = None):
         super().__init__(
             is_directed=True,
             summation_axis=BaseDegreeVector.SummationAxis.ROWS,
             indices_from_user=indices_from_user,
+            name=name,
         )
 
     def _get_change_score_indices_from_summation_axis(
@@ -598,16 +627,19 @@ class OutDegree(BaseDegreeVector):
     indices_from_user : array-like, optional
         Indices of nodes whose out-degrees should be excluded from the feature vector
         to avoid multicollinearity.
+    name : str, optional
+        Optional name for this metric instance to avoid conflicts with other metrics of the same type.
     """
 
     def __str__(self):
         return "outdegree"
 
-    def __init__(self, indices_from_user=None):
+    def __init__(self, indices_from_user=None, name: str | None = None):
         super().__init__(
             is_directed=True,
             summation_axis=BaseDegreeVector.SummationAxis.COLUMNS,
             indices_from_user=indices_from_user,
+            name=name,
         )
 
     def _get_change_score_indices_from_summation_axis(
@@ -644,16 +676,19 @@ class UndirectedDegree(BaseDegreeVector):
     indices_from_user : array-like, optional
         Indices of nodes whose degrees should be excluded from the feature vector
         to avoid multicollinearity.
+    name : str, optional
+        Optional name for this metric instance to avoid conflicts with other metrics of the same type.
     """
 
     def __str__(self):
         return "undirected_degree"
 
-    def __init__(self, indices_from_user=None):
+    def __init__(self, indices_from_user=None, name: str | None = None):
         super().__init__(
             is_directed=False,
             summation_axis=BaseDegreeVector.SummationAxis.ROWS, # it doesn't matter over which axis to sum
             indices_from_user=indices_from_user,
+            name=name,
         )
 
     def _get_change_score_indices_from_summation_axis(
@@ -699,8 +734,8 @@ class Reciprocity(Metric):
     def __str__(self):
         return "reciprocity"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, name: str | None = None):
+        super().__init__(name=name)
         self._is_directed = True
         self._is_dyadic_independent = False
 
@@ -750,8 +785,8 @@ class TotalReciprocity(Metric):
     def __str__(self):
         return "total_reciprocity"
 
-    def __init__(self):
-        super().__init__()
+    def __init__(self, name: str | None = None):
+        super().__init__(name=name)
         self._is_directed = True
         self._is_dyadic_independent = False
 
@@ -814,8 +849,8 @@ class ExWeightNumEdges(Metric):
     """
 
     # TODO: Collection doesn't necessarily support __getitem__, find a typing hint of a sized Iterable that does.
-    def __init__(self, exogenous_attr: Collection):
-        super().__init__()
+    def __init__(self, exogenous_attr: Collection, name: str | None = None):
+        super().__init__(name=name)
         self.exogenous_attr = exogenous_attr
         self.edge_weights = None
         self._calc_edge_weights()
@@ -1229,7 +1264,7 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
         Whether the network is directed.
     """
 
-    def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool):
+    def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool, name: str | None = None):
         # todo: decorator that checks inputs and returns np.ndarray if the inputs were valid, and an error otherwise
         if isinstance(exogenous_attr, (pd.DataFrame, pd.Series, list, tuple)):
             exogenous_attr = np.array(exogenous_attr)
@@ -1240,7 +1275,7 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
         if len(exogenous_attr.shape) == 1:
             exogenous_attr = exogenous_attr.reshape(-1, 1)
 
-        super().__init__(exogenous_attr)
+        super().__init__(exogenous_attr, name=name)
         self._is_directed = is_directed
 
     def _calc_edge_weights(self):
@@ -1260,8 +1295,8 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
 
 
 class NodeAttrSum(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection, is_directed: bool):
-        super().__init__(exogenous_attr)
+    def __init__(self, exogenous_attr: Collection, is_directed: bool, name: str | None = None):
+        super().__init__(exogenous_attr, name=name)
         self._is_directed = is_directed
 
     def _calc_edge_weights(self):
@@ -1281,8 +1316,8 @@ class NodeAttrSum(ExWeightNumEdges):
 
 
 class NodeAttrSumOut(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection):
-        super().__init__(exogenous_attr)
+    def __init__(self, exogenous_attr: Collection, name: str | None = None):
+        super().__init__(exogenous_attr, name=name)
         self._is_directed = True
 
     def _calc_edge_weights(self):
@@ -1300,8 +1335,8 @@ class NodeAttrSumOut(ExWeightNumEdges):
 
 
 class NodeAttrSumIn(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection):
-        super().__init__(exogenous_attr)
+    def __init__(self, exogenous_attr: Collection, name: str | None = None):
+        super().__init__(exogenous_attr, name=name)
         self._is_directed = True
 
     def _calc_edge_weights(self):
@@ -1367,6 +1402,11 @@ class MetricsCollection:
         for m in self.metrics:
             m._n_nodes = n_nodes
             m.initialize_indices_to_ignore()
+
+        metric_names = [(type(x).__name__, x._name) for x in self.metrics if x._name is not None]
+
+        if len(set(metric_names)) < len(metric_names):
+            raise ValueError(f"Got at least 2 metrics with the same name - {metric_names}")
 
         self.is_directed = is_directed
         self.mask = None
@@ -1886,16 +1926,13 @@ class MetricsCollection:
         (e.g., param_name__x7k3a2). Metrics with user-provided names are not
         given random suffixes since the name already disambiguates them.
         """
-        # Count metrics by class type
-        class_counts = Counter(type(m).__name__ for m in self.metrics)
+        # Find metrics needing disambiguation (duplicates without user-provided names)
+        unnamed_duplicates = _find_unnamed_duplicate_metrics(self.metrics)
 
-        # Build mapping: for duplicate classes without user-provided names, assign unique IDs
-        class_instances = {}  # class_name -> list of metrics needing disambiguation
-        for metric in self.metrics:
-            class_name = type(metric).__name__
-            # Only add random suffix if: duplicate class AND no user-provided name
-            if class_counts[class_name] > 1 and metric._name is None:
-                class_instances.setdefault(class_name, []).append(metric)
+        # Group by class name for ID generation
+        class_instances = {}
+        for metric, class_name in unnamed_duplicates:
+            class_instances.setdefault(class_name, []).append(metric)
 
         # Pre-generate unique IDs for each instance needing disambiguation
         metric_ids = {}
