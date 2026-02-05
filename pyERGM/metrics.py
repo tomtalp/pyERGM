@@ -1259,6 +1259,64 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
         return "sum_distances_connected_neurons"
 
 
+class NodeAttrSum(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection, is_directed: bool):
+        super().__init__(exogenous_attr)
+        self._is_directed = is_directed
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                if i == j:
+                    continue
+                self.edge_weights[0, i, j] = self.exogenous_attr[i] + self.exogenous_attr[j]
+
+    def _get_num_weight_mats(self):
+        return 1
+
+    def __str__(self):
+        return "node_attribute_sum"
+
+
+class NodeAttrSumOut(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(exogenous_attr)
+        self._is_directed = True
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
+        for i in range(num_nodes):
+            self.edge_weights[0, i, :] = self.exogenous_attr[i] * np.ones(num_nodes)
+            self.edge_weights[0, i, i] = 0
+
+    def _get_num_weight_mats(self):
+        return 1
+
+    def __str__(self):
+        return "node_attribute_sum_out"
+
+
+class NodeAttrSumIn(ExWeightNumEdges):
+    def __init__(self, exogenous_attr: Collection):
+        super().__init__(exogenous_attr)
+        self._is_directed = True
+
+    def _calc_edge_weights(self):
+        num_nodes = len(self.exogenous_attr)
+        self.edge_weights = np.zeros((self._get_num_weight_mats(), num_nodes, num_nodes))
+        for j in range(num_nodes):
+            self.edge_weights[0, :, j] = self.exogenous_attr[j] * np.ones(num_nodes)
+            self.edge_weights[0, j, j] = 0
+
+    def _get_num_weight_mats(self):
+        return 1
+
+    def __str__(self):
+        return "node_attribute_in"
+
 class MetricsCollection:
     """
     A collection of metrics for ERGM models.

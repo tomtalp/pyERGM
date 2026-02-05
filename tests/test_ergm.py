@@ -468,7 +468,7 @@ class TestERGM(unittest.TestCase):
         thetas_ccc = ccc(model_thethas, expected_thetas)
         self.assertTrue(thetas_ccc > 0.99)
         self.assertTrue(convergence_result.success)
-
+        
     def test_assigning_model_initial_thetas(self):
         # TODO: seems like convergence of the model in this test depends on the seed...
         set_seed(8765)
@@ -478,7 +478,7 @@ class TestERGM(unittest.TestCase):
                       [0, 0, 0, 0, 1],
                       [0, 1, 0, 0, 0],
                       [0, 1, 0, 1, 0]])
-        metrics_1 = [NumberOfEdgesDirected(),
+        metrics_1 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(1, n_nodes + 1), is_directed=True),
                      NumberOfEdgesTypesDirected(['A', 'B', 'A', 'A', 'B'])]
         model_1 = ERGM(n_nodes=n_nodes, metrics_collection=metrics_1, is_directed=True)
 
@@ -486,7 +486,7 @@ class TestERGM(unittest.TestCase):
 
         model_1_params = model_1.get_model_parameters()
 
-        metrics_2 = [NumberOfEdgesDirected(),
+        metrics_2 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(n_nodes + 1, 1, -1), is_directed=True),
                      NumberOfEdgesTypesDirected(['B', 'B', 'B', 'A', 'A'])]
         model_2 = ERGM(n_nodes=n_nodes, metrics_collection=metrics_2, is_directed=True, initial_thetas=model_1_params)
 
