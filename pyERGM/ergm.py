@@ -829,7 +829,7 @@ class ERGM():
             logger.info("Using existing thetas")
             is_theta_init = True
         elif theta_init_method == ThetaInitMethod.UNIFORM:
-            self._thetas = self._get_random_thetas(sampling_method="uniform")
+            self._thetas = self._get_random_thetas(sampling_method=ThetaInitMethod.UNIFORM)
             is_theta_init = True
 
         if edge_weights is None:
