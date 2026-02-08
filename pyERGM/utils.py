@@ -821,7 +821,7 @@ def reshape_flattened_off_diagonal_elements_to_square(
                 f"Received incompatible flattened_array and mask. flat_mask.sum(): "
                 f"{flat_mask.sum()}, flattened_array.size: {flattened_array.size}, but should be equal."
             )
-        full_array = np.full_like(flat_mask, fill_value=np.nan)
+        full_array = np.full(flat_mask.size, fill_value=np.nan)
         full_array[flat_mask] = flattened_array
         num_nodes = num_edges_to_num_nodes(flat_mask.size, is_directed)
     else:

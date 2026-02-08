@@ -808,6 +808,12 @@ class TestERGM(unittest.TestCase):
         masked_model = ERGM(n_nodes=n, metrics_collection=metrics_to_mask, is_directed=True, mask=mask)
         result = masked_model.fit(data)
         self.assertTrue(result.success)
+        self.assertTrue(
+            np.all(
+                flatten_square_matrix_to_edge_list(np.isnan(masked_model._exact_average_mat), True) ==
+                flatten_square_matrix_to_edge_list(~mask, True)
+            )
+        )
 
         metrics_no_mask = [
             NumberOfEdgesDirected(),
@@ -844,6 +850,12 @@ class TestERGM(unittest.TestCase):
         masked_model = ERGM(n_nodes=n, metrics_collection=metrics_to_mask, is_directed=False, mask=mask)
         result = masked_model.fit(data)
         self.assertTrue(result.success)
+        self.assertTrue(
+            np.all(
+                flatten_square_matrix_to_edge_list(np.isnan(masked_model._exact_average_mat), False) ==
+                flatten_square_matrix_to_edge_list(~mask, False)
+            )
+        )
 
         metrics_no_mask = [
             NumberOfEdgesUndirected(),
