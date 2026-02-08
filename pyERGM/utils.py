@@ -946,7 +946,13 @@ class ConvergenceTester:
         return sub_samples_features
 
     @staticmethod
-    def hotelling(observed_features, mean_features, inverted_sample_cov_matrix, sample_size, confidence=0.99):
+    def hotelling(
+            observed_features,
+            mean_features,
+            inverted_sample_cov_matrix,
+            sample_size,
+            confidence=0.99
+    ) -> OptimizationResult:
         """
         Run the Hotelling's T-squared test for convergence.
 
@@ -1001,7 +1007,8 @@ class ConvergenceTester:
             num_subsamples=100,
             subsample_size=1000,
             confidence=0.95,
-            stds_away_thr=1):
+            stds_away_thr=1
+    ) -> OptimizationResult:
         """
         Test convergence using bootstrapped Mahalanobis distance from observed features.
 
@@ -1031,8 +1038,8 @@ class ConvergenceTester:
 
         Returns
         -------
-        dict
-            Dictionary with keys 'success', 'statistic', and 'threshold'.
+        OptimizationResult
+            With fields 'success', 'statistic', and 'threshold'.
         """
         mahalanobis_dists = np.zeros(num_subsamples)
 
@@ -1060,7 +1067,8 @@ class ConvergenceTester:
             num_subsamples=100,
             subsample_size=1000,
             confidence=0.95,
-            stds_away_thr=1):
+            stds_away_thr=1
+    ) -> OptimizationResult:
         """
         Repeatedly subsample from a collection of networks sampled from the model (`sampled_networks`), and calculate the Mahalanobis distance 
         between each subsample mean and the observed network. This is equivalent to generating multiple estimations of the model mean & covariance.
@@ -1089,8 +1097,8 @@ class ConvergenceTester:
         
         Returns
         -------
-        dict
-            Dictionary with keys 'success', 'statistic', and 'threshold'.
+        OptimizationResult
+            With fields 'success', 'statistic', and 'threshold'.
         """
         mahalanobis_dists = np.zeros(num_subsamples)
 
