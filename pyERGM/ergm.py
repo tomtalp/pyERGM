@@ -829,7 +829,7 @@ class ERGM():
             logger.info("Using existing thetas")
             is_theta_init = True
         elif theta_init_method == ThetaInitMethod.UNIFORM:
-            self._thetas = self._get_random_thetas(sampling_method="uniform")
+            self._thetas = self._get_random_thetas(sampling_method=ThetaInitMethod.UNIFORM)
             is_theta_init = True
 
         if edge_weights is None:
@@ -984,15 +984,15 @@ class ERGM():
                 logger.debug("Done with hotelling test")
                 if convergence_results.success:
                     logger.info(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE!")
-                    grads = grads[:i]
                     break
 
             elif convergence_criterion == ConvergenceCriterion.ZERO_GRAD_NORM:
-                if np.linalg.norm(sliding_window_grads) <= l2_grad_thresh:
+                cur_window_norm = np.linalg.norm(sliding_window_grads)
+                if cur_window_norm <= l2_grad_thresh:
                     logger.info(f"Reached threshold of {l2_grad_thresh} after {i} steps. DONE!")
-                    grads = grads[:i]
-
-                    # TODO - implement `convergence_results` for this kind of convergence
+                    convergence_results = OptimizationResult(
+                        success=True, statistic=cur_window_norm, threshold=l2_grad_thresh
+                    )
                     break
 
             elif convergence_criterion == ConvergenceCriterion.OBSERVED_BOOTSTRAP:
@@ -1010,7 +1010,6 @@ class ERGM():
                     logger.info(f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
                           f"test! The model is likely to be up to {bootstrap_convergence_num_stds_away_thr} stds from "
                           f"the data, according to the estimated data variability. DONE!")
-                    grads = grads[:i]
                     break
             elif convergence_criterion == ConvergenceCriterion.MODEL_BOOTSTRAP:
                 logger.debug("Starting model_bootstrap test")
@@ -1028,7 +1027,6 @@ class ERGM():
                         f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
                         f"test! The model is likely to be up to {bootstrap_convergence_num_stds_away_thr} stds from "
                         f"the data, according to the estimated data variability. DONE!")
-                    grads = grads[:i]
                     break
             else:
                 raise ValueError(f"Convergence criterion {convergence_criterion} not defined")
