@@ -951,37 +951,46 @@ class ConvergenceTester:
             mean_features,
             inverted_sample_cov_matrix,
             sample_size,
-            confidence=0.99
+            confidence=0.5
     ) -> OptimizationResult:
         """
         Run the Hotelling's T-squared test for convergence.
 
-        The T-Squarted statistic is calculated as - 
-            t^2 = n * dist^2
-        where dist is the Mahalanobis distance between the observed and the mean features, used the given
-        covariance matrix.
+        Tests H0: E[g(Y)] = g(y_obs), i.e., the expected features under the model equal the observed features.
+        Convergence is declared when we fail to reject H0 (the test statistic is below the critical value).
 
-        The T^2 statistic can be transformed into an F statistic - 
+        Following Krivitsky (2017), a high alpha (like 0.5) is recommended because:
+        - We want to *accept* the null hypothesis (convergence) rather than reject it
+        - The cost of Type I error (stopping too early) is small - just ~1/alpha extra iterations on average
+        - Using alpha=0.5 means we stop when there's no strong evidence against convergence
+
+        The T-Squared statistic is calculated as:
+            t^2 = n * dist^2
+        where dist is the Mahalanobis distance between the observed and the mean features.
+
+        The T^2 statistic is transformed into an F statistic:
             F = (n-p / p(n-1)) * t^2
         where p is the number of features and n is the sample size.
-        Finally the F statistic is compared to the critical value of the F distribution with p and n-p degrees of freedom.
+
+        Convergence is declared if F <= F_critical, where F_critical = F_{1-alpha}(p, n-p).
 
         Parameters
         ----------
         observed_features : np.ndarray
             The observed features of the network.
-        
+
         mean_features : np.ndarray
             The mean features of the networks sampled from the model.
-        
+
         inverted_sample_cov_matrix : np.ndarray
             The inverted covariance matrix of the features that were calculated from the model sample.
-        
-        sample_size : int  
+
+        sample_size : int
             The number of networks sampled from the model.
-        
+
         confidence : float
-            The confidence level for the test. *Defaults to 0.99*.
+            The significance level for the test. Higher values make it easier to declare convergence.
+            Following Krivitsky (2017), *defaults to 0.5*.
         """
         dist = mahalanobis(observed_features, mean_features, inverted_sample_cov_matrix)
         hotelling_t_statistic = sample_size * dist * dist

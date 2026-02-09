@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyERGM"
+version = "0.2.8"
+description = "Exponential Random Graph Models in Python"
+readme = "README.md"
+requires-python = ">=3.11"
+keywords = ["ERGM", "network", "graph", "statistics"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.14",
+    "matplotlib>=3.9",
+    "seaborn>=0.13",
+    "numba>=0.60",
+]
+
+[project.urls]
+Homepage = "https://github.com/tomtalp/pyERGM"
+Documentation = "https://tomtalp.github.io/pyERGM/"
+Repository = "https://github.com/tomtalp/pyERGM"
+
+[project.optional-dependencies]
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.27",
+    "griffe>=1.5",
+]
+
+[tool.setuptools.packages.find]
+include = ["pyERGM*"]
