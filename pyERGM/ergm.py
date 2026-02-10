@@ -22,7 +22,6 @@ class ERGM():
                  *,
                  initial_thetas: dict = None,
                  initial_normalization_factor=None,
-                 seed_MCMC_proba=0.25,
                  verbose=True,
                  fix_collinearity=True,
                  collinearity_fixer_sample_size=1000,
@@ -52,9 +51,6 @@ class ERGM():
 
         initial_normalization_factor : float 
             Optional. The initial value of the normalization factor. If not provided, it is randomly initialized.
-
-        seed_MCMC_proba : float
-            Optional. The probability of a connection in the seed network for MCMC sampling, in case no seed network is provided. *Defaults to 0.25*
 
         verbose : bool
             Optional. Whether to print progress information. *Defaults to True*
@@ -145,8 +141,6 @@ class ERGM():
             self._normalization_factor = initial_normalization_factor
         else:
             self._normalization_factor = np.random.normal(50, 10)
-
-        self._seed_MCMC_proba = seed_MCMC_proba
 
         self.optimization_start_time = None
 
