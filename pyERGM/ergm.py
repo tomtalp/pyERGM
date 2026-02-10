@@ -674,19 +674,34 @@ class ERGM():
             raise NotImplementedError("edge_weights are only supported for MPLE optimization.")
         return edge_weights
 
+    def _init_mcmc_hyperparams(
+            self,
+            mcmc_sample_size: int | None,
+            mcmc_burn_in: int | None,
+            mcmc_steps_per_sample: int | None,
+    ):
+        if mcmc_sample_size is None:
+            mcmc_sample_size = 10 * self._n_nodes
+        # This is because we assume the sample size is even when estimating the covariance matrix (in
+        # calc_capital_gammas).
+        elif mcmc_sample_size % 2 != 0:
+            mcmc_sample_size += 1
+
+        if mcmc_burn_in is None:
+            mcmc_burn_in = 100 * (self._n_nodes ** 2)
+
+        if mcmc_steps_per_sample is None:
+            mcmc_steps_per_sample = self._n_nodes ** 2
+        return mcmc_sample_size, mcmc_burn_in, mcmc_steps_per_sample
+
 
     def fit(self,
             observed_networks,
             *,
             lr: float = 0.1,
             opt_steps: int = 1000,
-            steps_for_decay: int = 100,
-            lr_decay_pct: float = 0.01,
             l2_grad_thresh: float = 0.001,
             sliding_grad_window_k: int = 10,
-            max_sliding_window_size: int = 100,
-            max_nets_for_sample: int = 1000,
-            sample_pct_growth: float = 0.02,
             optimization_method: OptimizationMethod = OptimizationMethod.NEWTON_RAPHSON,
             convergence_criterion: ConvergenceCriterion = ConvergenceCriterion.MODEL_BOOTSTRAP,
             cov_matrix_estimation_method: CovMatrixEstimationMethod = CovMatrixEstimationMethod.NAIVE,
@@ -696,7 +711,7 @@ class ERGM():
             mcmc_burn_in: int | None = None,
             mcmc_seed_network=None,
             mcmc_steps_per_sample: int | None = None,
-            mcmc_sample_size: int = 100,
+            mcmc_sample_size: int | None = None,
             edge_proposal_method: EdgeProposalMethod = EdgeProposalMethod.UNIFORM,
             edge_weights: np.ndarray | None = None,
             optimization_scheme: OptimizationScheme = OptimizationScheme.AUTO,
@@ -708,6 +723,7 @@ class ERGM():
             bootstrap_convergence_num_stds_away_thr: float = 1.0,
             num_model_sub_samples: int = 100,
             model_subsample_size: int = 1000,
+            mcmle_log_every: int = 50,
             ):
         """
         Fit an ERGM model to a given network with one of the two fitting methods - MPLE or MCMLE.
@@ -723,13 +739,6 @@ class ERGM():
         opt_steps : int
             Optional. The number of optimization steps to run. *Defaults to 1000*
 
-        steps_for_decay : int
-            Optional. The number of steps after which to decay the optimization params. 
-            *Defaults to 100* # TODO - redundant parameter?
-
-        lr_decay_pct : float
-            Optional. The decay factor for the learning rate. *Defaults to 0.01*
-
         l2_grad_thresh : float
             Optional. The threshold for the L2 norm of the gradient to stop the optimization. 
             Relevant only for convergence criterion "zero_grad_norm". *Defaults to 0.001*
@@ -738,18 +747,6 @@ class ERGM():
             Optional. The size of the sliding window for the gradient, for which we use to calculate the mean gradient norm. 
             This value is then tested against l2_grad_thresh to decide whether optimization halts.
             Relevant only for convergence criterion "zero_grad_norm". *Defaults to 10*
-
-        max_sliding_window_size : int
-            Optional. The maximum size of the sliding window for the gradient. 
-            Relevant only for convergence criterion "zero_grad_norm". *Defaults to 100*
-
-        max_nets_for_sample : int
-            Optional. The maximum number of networks to sample with MCMC. *Defaults to 1000*
-            #TODO - Do we still need this? Seems like increasing the sample size isn't necessary (we'll gonna pick large sample sizes anyway)
-            
-        sample_pct_growth : float
-            Optional. The percentage growth of the number of networks to sample, which we want to increase over time.
-            *Defaults to 0.02*. #TODO - Same as `max_nets_for_sample`. Do we still need this?
 
         optimization_method : OptimizationMethod or str
             The optimization method for MCMLE. Options: "newton_raphson", "gradient_descent".
@@ -776,17 +773,19 @@ class ERGM():
             *Defaults to ThetaInitMethod.MPLE*.
 
         mcmc_burn_in : int
-            The number of burn-in steps for the MCMC sampler. *Defaults to 1000*.
+            The number of burn-in steps for the MCMC sampler. *Defaults to 100*n^2*.
 
         mcmc_steps_per_sample : int
-            The number of steps to run the MCMC sampler for each sample. *Defaults to 10*.
+            The number of steps to run the MCMC sampler for each sample. *Defaults to n^2*.
 
         mcmc_seed_network : np.ndarray
             The seed network for the MCMC sampler. If not provided, the thetas that are currently set are used to
             calculate the MPLE prediction, from which the sample is drawn. *Defaults to None*.
 
         mcmc_sample_size : int
-            The number of networks to sample with the MCMC sampler. *Defaults to 100*.
+            The number of networks to sample with the MCMC sampler. *Defaults to 10*n*.
+            Note - if odd, 1 is added to make even (this is necessary for some covariance matrix estimation methods,
+            see `pyERGM.utils.calc_capital_gammas`).
 
         edge_proposal_method : EdgeProposalMethod or str
             The method for the MCMC proposal distribution. Options: "uniform", "features_influence__sum", "features_influence__softmax".
@@ -824,6 +823,9 @@ class ERGM():
         model_subsample_size : int
             Size of each model subsample for bootstrap convergence. *Defaults to 1000*.
 
+        mcmle_log_every: int
+            The gap (int optimization steps) between logs when optimizing with MCMLE. *Defaults to 50*.
+
         Returns 
         -------
         (grads, hotelling_statistics) : (np.ndarray, list)
@@ -837,17 +839,6 @@ class ERGM():
                 f"observed_networks must be a binary matrix containing only 0s and 1s. "
                 f"Found values: {unique_values}"
             )
-
-        # This is because we assume the sample size is even when estimating the covariance matrix (in
-        # calc_capital_gammas).
-        if mcmc_sample_size % 2 != 0:
-            mcmc_sample_size += 1
-
-        if mcmc_burn_in is None:
-            mcmc_burn_in = 100 * (self._n_nodes ** 2)
-
-        if mcmc_steps_per_sample is None:
-            mcmc_steps_per_sample = self._n_nodes ** 2
 
         if optimization_scheme == OptimizationScheme.AUTO:
             optimization_scheme = self._metrics_collection.choose_optimization_scheme()
@@ -873,9 +864,9 @@ class ERGM():
             logger.info("Done training model using MPLE_RECIPROCITY")
             return OptimizationResult(success=success)
 
-        # As in the constructor, the sample size must be even.
-        if max_nets_for_sample % 2 != 0:
-            max_nets_for_sample += 1
+        mcmc_sample_size, mcmc_burn_in, mcmc_steps_per_sample = self._init_mcmc_hyperparams(
+            mcmc_sample_size, mcmc_burn_in, mcmc_steps_per_sample
+        )
 
         if convergence_criterion == ConvergenceCriterion.OBSERVED_BOOTSTRAP:
             if observed_networks.ndim == 3 and observed_networks.shape[-1] > 1:
@@ -943,27 +934,10 @@ class ERGM():
             idx_for_sliding_grad = np.max([0, i - sliding_grad_window_k + 1])
             sliding_window_grads = grads[idx_for_sliding_grad:i + 1].mean()
 
-            if (i + 1) % steps_for_decay == 0:
+            if (i + 1) % mcmle_log_every == 0:
                 delta_t = time.time() - self.optimization_start_time
-                logger.info(
-                    f"Step {i + 1} - lr: {lr:.7f}, time from start: {delta_t:.2f}, window_grad: {sliding_window_grads:.2f}")
-
-                lr *= (1 - lr_decay_pct)
-
+                logger.info(f"Step {i + 1} - lr: {lr:.7f}, time from start: {delta_t:.2f}")
                 logger.debug(f"Current thetas: {self._thetas}")
-
-                if mcmc_sample_size < max_nets_for_sample:
-                    mcmc_sample_size *= (1 + sample_pct_growth)
-                    mcmc_sample_size = np.min([int(mcmc_sample_size), max_nets_for_sample])
-                    # As in the constructor, the sample size must be even.
-                    if mcmc_sample_size % 2 != 0:
-                        mcmc_sample_size += 1
-                    logger.debug(f"Sample size increased at step {i + 1} to {mcmc_sample_size}")
-
-                if sliding_grad_window_k < max_sliding_window_size:
-                    sliding_grad_window_k *= (1 + sample_pct_growth)
-                    sliding_grad_window_k = np.min(
-                        [np.ceil(sliding_grad_window_k).astype(int), max_sliding_window_size])
 
             logger.debug("Starting to test for convergence")
             convergence_tester = ConvergenceTester()
