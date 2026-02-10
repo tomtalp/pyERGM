@@ -9,6 +9,7 @@ from scipy.spatial.distance import pdist, squareform
 from enum import Enum
 from collections import Counter
 
+from pyERGM.constants import OptimizationScheme
 from pyERGM.logging_config import logger
 from pyERGM.utils import *
 from pyERGM.cluster_utils import *
@@ -1893,29 +1894,29 @@ class MetricsCollection:
             ys += convert_connectivity_to_dyad_states(observed_networks[..., i])
         return ys / num_nets
 
-    def choose_optimization_scheme(self):
+    def choose_optimization_scheme(self) -> OptimizationScheme:
         """
         Automatically select the appropriate optimization scheme for the model.
 
         Returns
         -------
-        str
-            One of 'MPLE', 'MPLE_RECIPROCITY', or 'MCMLE' depending on the metrics.
+        OptimizationScheme
+            One of MPLE, MPLE_RECIPROCITY, or MCMLE depending on the metrics.
 
         Notes
         -----
-        - 'MPLE': Maximum Pseudo-Likelihood Estimation, for dyadic independent metrics
-        - 'MPLE_RECIPROCITY': Extended MPLE for models with only reciprocity dependence
-        - 'MCMLE': Monte Carlo Maximum Likelihood Estimation, for complex dependencies
+        - MPLE: Maximum Pseudo-Likelihood Estimation, for dyadic independent metrics
+        - MPLE_RECIPROCITY: Extended MPLE for models with only reciprocity dependence
+        - MCMLE: Monte Carlo Maximum Likelihood Estimation, for complex dependencies
         """
         if not self._has_dyadic_dependent_metrics:
-            return 'MPLE'
+            return OptimizationScheme.MPLE
         # The only edge dependence comes from reciprocal edges
         if not any(
                 [not x._is_dyadic_independent for x in self.metrics if
                  str(x) not in ['total_reciprocity', 'reciprocity']]):
-            return 'MPLE_RECIPROCITY'
-        return 'MCMLE'
+            return OptimizationScheme.MPLE_RECIPROCITY
+        return OptimizationScheme.MCMLE
 
     def get_parameter_names(self):
         """

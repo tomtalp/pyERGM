@@ -295,10 +295,21 @@ class ERGM():
             raise ValueError(f"Unrecognized sampling method {sampling_method}")
 
     @staticmethod
-    def do_estimate_covariance_matrix(optimization_method, convergence_criterion):
-        if optimization_method == OptimizationMethod.NEWTON_RAPHSON or convergence_criterion == ConvergenceCriterion.HOTELLING:
-            return True
-        return False
+    def do_estimate_covariance_matrix(
+            optimization_method: OptimizationMethod,
+            convergence_criterion: ConvergenceCriterion,
+    ) -> bool:
+        return (
+                optimization_method == OptimizationMethod.NEWTON_RAPHSON or
+                convergence_criterion == ConvergenceCriterion.HOTELLING
+        )
+
+    @staticmethod
+    def do_mple(optimization_scheme: OptimizationScheme, theta_init_method: ThetaInitMethod) -> bool:
+        return (
+                optimization_scheme == OptimizationScheme.MPLE or
+                (theta_init_method == ThetaInitMethod.MPLE and optimization_scheme == OptimizationScheme.MCMLE)
+        )
 
     def _mple_fit(self, observed_networks,
                   optimization_method: MPLEOptimizationMethod = MPLEOptimizationMethod.L_BFGS_B,
@@ -843,11 +854,13 @@ class ERGM():
 
         edge_weights = self._validate_reshape_edge_weights(edge_weights, optimization_scheme)
 
-        if optimization_scheme == OptimizationScheme.MPLE or (theta_init_method == ThetaInitMethod.MPLE and optimization_scheme == OptimizationScheme.MCMLE):
-            self._thetas, success = self._mple_fit(observed_networks,
-                                                   optimization_method=mple_optimization_method,
-                                                   edge_weights=edge_weights,
-                                                   num_edges_per_job=num_edges_per_job)
+        if ERGM.do_mple(optimization_scheme, theta_init_method):
+            self._thetas, success = self._mple_fit(
+                observed_networks,
+                optimization_method=mple_optimization_method,
+                edge_weights=edge_weights,
+                num_edges_per_job=num_edges_per_job,
+            )
             if optimization_scheme == OptimizationScheme.MPLE:
                 logger.info("Done training model using MPLE")
                 return OptimizationResult(success=success)
@@ -859,12 +872,6 @@ class ERGM():
                                                                optimization_method=mple_optimization_method)
             logger.info("Done training model using MPLE_RECIPROCITY")
             return OptimizationResult(success=success)
-        elif optimization_scheme != OptimizationScheme.MCMLE:
-            raise ValueError(f"Optimization scheme not supported: {optimization_scheme}. "
-                             f"Options are: AUTO, MPLE, MPLE_RECIPROCITY, MCMLE")
-
-        if optimization_method not in [OptimizationMethod.NEWTON_RAPHSON, OptimizationMethod.GRADIENT_DESCENT]:
-            raise ValueError(f"Optimization method {optimization_method} not supported.")
 
         # As in the constructor, the sample size must be even.
         if max_nets_for_sample % 2 != 0:
