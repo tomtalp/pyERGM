@@ -752,7 +752,7 @@ class TestERGM(unittest.TestCase):
         tested_model.fit(
             sample,
             optimization_scheme=OptimizationScheme.MCMLE,
-            theta_init_method=ThetaInitMethod.UNIFORM,
+            theta_init_method=ThetaInitMethod.USE_EXISTING,
             lr=0.1,
             mcmc_sample_size=n_nodes ** 3,
             mcmc_steps_per_sample=n_nodes ** 2,

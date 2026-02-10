@@ -139,7 +139,7 @@ class ERGM():
                 current_model_params[feat_name] = initial_thetas[feat_name]
             self._thetas = np.array(list(current_model_params.values()))
         else:
-            self._thetas = self._get_random_thetas(sampling_method="uniform")
+            self._thetas = np.random.uniform(-1, 1, self._metrics_collection.num_of_features)
 
         if initial_normalization_factor is not None:
             self._normalization_factor = initial_normalization_factor
@@ -229,12 +229,6 @@ class ERGM():
             Statistics array of shape (num_features, sample_size).
         """
         return self._metrics_collection.calculate_sample_statistics(networks_sample)
-
-    def _get_random_thetas(self, sampling_method=ThetaInitMethod.UNIFORM):
-        if sampling_method == ThetaInitMethod.UNIFORM:
-            return np.random.uniform(-1, 1, self._metrics_collection.num_of_features)
-        else:
-            raise ValueError(f"Sampling method {sampling_method} not supported. See docs for supported samplers.")
 
     def generate_networks_for_sample(self,
                                      sample_size,
@@ -823,15 +817,6 @@ class ERGM():
         if mcmc_steps_per_sample is None:
             mcmc_steps_per_sample = self._n_nodes ** 2
 
-        # TODO: this is ugly
-        is_theta_init = False
-        if theta_init_method == ThetaInitMethod.USE_EXISTING:
-            logger.info("Using existing thetas")
-            is_theta_init = True
-        elif theta_init_method == ThetaInitMethod.UNIFORM:
-            self._thetas = self._get_random_thetas(sampling_method=ThetaInitMethod.UNIFORM)
-            is_theta_init = True
-
         if edge_weights is None:
             self._edge_weights = None
         else:
@@ -862,7 +847,6 @@ class ERGM():
             if optimization_scheme == OptimizationScheme.MPLE:
                 logger.info("Done training model using MPLE")
                 return OptimizationResult(success=success)
-            is_theta_init = True
         elif optimization_scheme == OptimizationScheme.MPLE_RECIPROCITY:
             if not self._is_directed:
                 raise ValueError("There is not meaning for reciprocity in undirected graphs, "
@@ -874,9 +858,6 @@ class ERGM():
         elif optimization_scheme != OptimizationScheme.MCMLE:
             raise ValueError(f"Optimization scheme not supported: {optimization_scheme}. "
                              f"Options are: AUTO, MPLE, MPLE_RECIPROCITY, MCMLE")
-
-        if not is_theta_init:
-            raise ValueError(f"Theta initialization method {theta_init_method} not supported")
 
         if optimization_method not in [OptimizationMethod.NEWTON_RAPHSON, OptimizationMethod.GRADIENT_DESCENT]:
             raise ValueError(f"Optimization method {optimization_method} not supported.")

@@ -50,7 +50,6 @@ class CovMatrixEstimationMethod(StrEnum):
 
 class ThetaInitMethod(StrEnum):
     """Method for initializing theta parameters."""
-    UNIFORM = "uniform"
     MPLE = "mple"
     USE_EXISTING = "use_existing"
 
