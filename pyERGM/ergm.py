@@ -643,6 +643,27 @@ class ERGM():
                 "synapses dependent"
             )
 
+    def _validate_reshape_edge_weights(
+            self,
+            edge_weights: np.ndarray | None,
+            optimization_scheme: OptimizationScheme,
+    ) -> np.ndarray | None:
+        if edge_weights is not None:
+            directionality_edge_count_factor = 1 if self._is_directed else 2
+            flat_size = (self._n_nodes ** 2 - self._n_nodes) // directionality_edge_count_factor
+            if edge_weights.shape == (self._n_nodes, self._n_nodes):
+                edge_weights = flatten_square_matrix_to_edge_list(edge_weights, self._is_directed)
+            elif edge_weights.shape != (flat_size,):
+                raise ValueError(
+                    f"edge_weights must have shape ({self._n_nodes}, {self._n_nodes}) or ({flat_size},), "
+                    f"got {edge_weights.shape}")
+            if np.any(edge_weights < 0):
+                raise ValueError("edge_weights must be non-negative")
+        if edge_weights is not None and optimization_scheme != OptimizationScheme.MPLE:
+            raise NotImplementedError("edge_weights are only supported for MPLE optimization.")
+        return edge_weights
+
+
     def fit(self,
             observed_networks,
             *,
@@ -817,32 +838,15 @@ class ERGM():
         if mcmc_steps_per_sample is None:
             mcmc_steps_per_sample = self._n_nodes ** 2
 
-        if edge_weights is None:
-            self._edge_weights = None
-        else:
-            n = self._n_nodes
-            flat_size = (n * n - n) if self._is_directed else (n * n - n) // 2
-            if edge_weights.shape == (n, n):
-                self._edge_weights = flatten_square_matrix_to_edge_list(edge_weights, self._is_directed)
-            elif edge_weights.shape == (flat_size,):
-                self._edge_weights = edge_weights.copy()
-            else:
-                raise ValueError(
-                    f"edge_weights must have shape ({n}, {n}) or ({flat_size},), "
-                    f"got {edge_weights.shape}")
-            if np.any(self._edge_weights < 0):
-                raise ValueError("edge_weights must be non-negative")
-
         if optimization_scheme == OptimizationScheme.AUTO:
             optimization_scheme = self._metrics_collection.choose_optimization_scheme()
 
-        if self._edge_weights is not None and optimization_scheme != OptimizationScheme.MPLE:
-            raise NotImplementedError("edge_weights are only supported for MPLE optimization.")
+        edge_weights = self._validate_reshape_edge_weights(edge_weights, optimization_scheme)
 
         if optimization_scheme == OptimizationScheme.MPLE or (theta_init_method == ThetaInitMethod.MPLE and optimization_scheme == OptimizationScheme.MCMLE):
             self._thetas, success = self._mple_fit(observed_networks,
                                                    optimization_method=mple_optimization_method,
-                                                   edge_weights=self._edge_weights,
+                                                   edge_weights=edge_weights,
                                                    num_edges_per_job=num_edges_per_job)
             if optimization_scheme == OptimizationScheme.MPLE:
                 logger.info("Done training model using MPLE")
