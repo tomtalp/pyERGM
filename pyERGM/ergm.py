@@ -1,35 +1,29 @@
-import datetime
-import sys
-import time
 import numpy as np
 
-from pyERGM.logging_config import logger
 from pyERGM.sampling import NaiveMetropolisHastings
 from pyERGM.mple_optimization import *
-from pyERGM.metrics import _find_unnamed_duplicate_metrics
 from pyERGM.utils import generate_erdos_renyi_matrix
 from pyERGM.convergence import ConvergenceTester
 from pyERGM.constants import *
 
 
 class ERGM():
-    def __init__(self,
-                 n_nodes,
-                 metrics_collection: Collection[Metric],
-                 is_directed: bool,
-                 *,
-                 initial_thetas: dict = None,
-                 initial_normalization_factor=None,
-                 verbose=True,
-                 fix_collinearity=True,
-                 collinearity_fixer_sample_size=1000,
-                 is_distributed_optimization=False,
-                 optimization_options={},
-                 mask: npt.NDArray[bool] | None = None,
-                 num_samples_per_job_collinearity_fixer: int = 5,
-                 ratio_threshold_collinearity_fixer: float = 5e-6,
-                 nonzero_threshold_collinearity_fixer: float = 0.1,
-                 ):
+    def __init__(
+            self,
+            n_nodes,
+            metrics_collection: Sequence[Metric],
+            is_directed: bool,
+            *,
+            initial_thetas: dict | None = None,
+            verbose=True,
+            fix_collinearity=True,
+            collinearity_fixer_sample_size=1000,
+            is_distributed_optimization=False,
+            mask: npt.NDArray[bool] | None = None,
+            num_samples_per_job_collinearity_fixer: int = 5,
+            ratio_threshold_collinearity_fixer: float = 5e-6,
+            nonzero_threshold_collinearity_fixer: float = 0.1,
+    ):
         """
         An ERGM model object. 
         
@@ -38,7 +32,7 @@ class ERGM():
         n_nodes : int 
             Number of nodes in the network.
 
-        metrics_collection : Collection[Metric] 
+        metrics_collection : Sequence[Metric]
             A list of Metric objects for calculating statistics of a network.
 
         is_directed : bool 
@@ -46,9 +40,6 @@ class ERGM():
 
         initial_thetas : npdarray 
             Optional. The initial values of the coefficients of the ERGM. If not provided, they are randomly initialized.
-
-        initial_normalization_factor : float 
-            Optional. The initial value of the normalization factor. If not provided, it is randomly initialized.
 
         verbose : bool
             Optional. Whether to print progress information. *Defaults to True*
@@ -62,9 +53,6 @@ class ERGM():
         is_distributed_optimization : bool
             Optional. Whether to use distributed computing for optimization (requires LSF cluster). *Defaults to False*
 
-        optimization_options : dict
-            Optional. Additional options for the optimizer. *Defaults to {}*
-
         mask : npt.NDArray[bool] | None
             Optional. Designating which entries should be taken into account for optimization and metric calculations.
             The shape can be either (n, n) or (n**2 - n, 1). The latter is the flattened version with no main diagonal
@@ -73,77 +61,29 @@ class ERGM():
         self._n_nodes = n_nodes
         self._is_directed = is_directed
         self._is_distributed_optimization = is_distributed_optimization
-        if mask is None:
-            self._mask = None
-        else:
-            if mask.shape == (n_nodes, n_nodes):
-                self._mask = flatten_square_matrix_to_edge_list(mask, self._is_directed)
-            elif ((mask.shape == (n_nodes ** 2 - n_nodes, 1) and self._is_directed) or
-                  (mask.shape == (n_nodes ** 2 - n_nodes // 2, 1) and not self._is_directed)
-            ):
-                self._mask = mask.copy()
-            else:
-                raise ValueError(
-                    f"Invalid mask shape. Expected: ({n_nodes}, {n_nodes}) or [({n_nodes ** 2 - n_nodes}, 1) for "
-                    f"directed models or ({n_nodes ** 2 - n_nodes // 2}, 1) for undirected models]. "
-                    f"Received: {mask.shape}, the model is {'' if self._is_directed else 'un'}directed."
-                )
+        self._mask = self._init_mask(mask)
 
-        self._metrics_collection = MetricsCollection(metrics_collection, self._is_directed, self._n_nodes,
-                                                     fix_collinearity=fix_collinearity and (initial_thetas is None),
-                                                     collinearity_fixer_sample_size=collinearity_fixer_sample_size,
-                                                     is_collinearity_distributed=self._is_distributed_optimization,
-                                                     num_samples_per_job_collinearity_fixer=num_samples_per_job_collinearity_fixer,
-                                                     ratio_threshold_collinearity_fixer=ratio_threshold_collinearity_fixer,
-                                                     nonzero_threshold_collinearity_fixer=nonzero_threshold_collinearity_fixer,
-                                                     mask=self._mask,
-                                                     )
-        if OptimizationScheme.MPLE != self._metrics_collection.choose_optimization_scheme() and self._mask is not None:
-            raise NotImplementedError("Masking is currently supported only for edge independent models.")
+        self._metrics_collection = MetricsCollection(
+            metrics_collection,
+            self._is_directed,
+            self._n_nodes,
+            fix_collinearity=fix_collinearity and (initial_thetas is None),
+            collinearity_fixer_sample_size=collinearity_fixer_sample_size,
+            is_collinearity_distributed=self._is_distributed_optimization,
+            num_samples_per_job_collinearity_fixer=num_samples_per_job_collinearity_fixer,
+            ratio_threshold_collinearity_fixer=ratio_threshold_collinearity_fixer,
+            nonzero_threshold_collinearity_fixer=nonzero_threshold_collinearity_fixer,
+            mask=self._mask,
+        )
 
         if initial_thetas is not None:
-            if type(initial_thetas) != dict:
-                raise ValueError("Initial thetas must be a dictionary keyed by feature names, as returned by "
-                                 "`ERGM.get_model_parameters`")
-
-            # Check for unnamed duplicate metrics - these can't be matched with initial_thetas
-            unnamed_duplicates = _find_unnamed_duplicate_metrics(self._metrics_collection.metrics)
-            if unnamed_duplicates:
-                class_names = sorted(set(cls for _, cls in unnamed_duplicates))
-                raise ValueError(
-                    f"Cannot use initial_thetas with unnamed duplicate metrics. "
-                    f"The following metric classes have duplicates without explicit names: {class_names}. "
-                    f"Please provide a unique 'name' parameter for each duplicate metric instance."
-                )
-
-            self._thetas = np.zeros(self._metrics_collection.calc_num_of_features())
-            current_model_params = self.get_model_parameters()
-            if len(set(initial_thetas.keys()).difference(set(current_model_params.keys()))) > 0:
-                raise ValueError("Got initial thetas that do not match the collection of Metrics!")
-
-            total_num_features = len(current_model_params.keys())
-            # Iterating the reversed list of keys for not interfering with indexing: always remove the last feature to
-            # be removed, thus not changing the indices of features needed to be removed with smaller indices.
-            for rev_feat_idx, feat_name in enumerate(list(current_model_params.keys())[::-1]):
-                if feat_name not in initial_thetas.keys():
-                    self._metrics_collection.remove_feature_by_idx(total_num_features - rev_feat_idx - 1)
-
-            current_model_params = self.get_model_parameters()
-            for feat_name in current_model_params.keys():
-                current_model_params[feat_name] = initial_thetas[feat_name]
-            self._thetas = np.array(list(current_model_params.values()))
+            self.set_parameters_from_dict(initial_thetas)
         else:
             self._thetas = np.random.uniform(-1, 1, self._metrics_collection.num_of_features)
 
-        if initial_normalization_factor is not None:
-            self._normalization_factor = initial_normalization_factor
-        else:
-            self._normalization_factor = np.random.normal(50, 10)
-
-        self.optimization_start_time = None
+        self._optimization_start_time = None
 
         self.verbose = verbose
-        self.optimization_options = optimization_options
 
         self._exact_average_mat = None
 
@@ -153,44 +93,60 @@ class ERGM():
 
         self._last_mcmc_chain_features = None
 
+    def _init_mask(self, mask: npt.NDArray[bool] | None) -> npt.NDArray[bool]:
+        if mask is None:
+            _mask = None
+        else:
+            if mask.shape == (self._n_nodes, self._n_nodes):
+                _mask = flatten_square_matrix_to_edge_list(mask, self._is_directed)
+            elif ((mask.shape == (self._n_nodes ** 2 - self._n_nodes, 1) and self._is_directed) or
+                  (mask.shape == (self._n_nodes ** 2 - self._n_nodes // 2, 1) and not self._is_directed)
+            ):
+                _mask = mask.copy()
+            else:
+                raise ValueError(
+                    f"Invalid mask shape. Expected: ({self._n_nodes}, {self._n_nodes}) or "
+                    f"[({self._n_nodes ** 2 - self._n_nodes}, 1) for "
+                    f"directed models or ({self._n_nodes ** 2 - self._n_nodes // 2}, 1) for undirected models]. "
+                    f"Received: {mask.shape}, the model is {'' if self._is_directed else 'un'}directed."
+                )
+        return _mask
+
+    def set_parameters_from_dict(self, params_dict: dict[str, float]):
+        # Check for unnamed duplicate metrics - these can't be matched with a provided dict of parameters
+        unnamed_duplicates = self._metrics_collection.find_unnamed_duplicate_metrics()
+        if unnamed_duplicates:
+            class_names = sorted(set(cls for _, cls in unnamed_duplicates))
+            raise ValueError(
+                f"Cannot set parameters from a dictionary when the model contains unnamed duplicate metrics. "
+                f"The following metric classes have duplicates without explicit names: {class_names}. "
+                f"Please provide a unique 'name' parameter for each duplicate metric instance."
+            )
+
+        self._thetas = np.zeros(self._metrics_collection.calc_num_of_features())
+        current_model_params = self.get_model_parameters()
+        if len(set(params_dict.keys()).difference(set(current_model_params.keys()))) > 0:
+            raise ValueError("Got a dict of parameters that does not match the collection of Metrics!")
+
+        total_num_features = len(current_model_params.keys())
+        # Iterating the reversed list of keys for not interfering with indexing: always remove the last feature to
+        # be removed, thus not changing the indices of features needed to be removed with smaller indices.
+        for rev_feat_idx, feat_name in enumerate(list(current_model_params.keys())[::-1]):
+            if feat_name not in params_dict.keys():
+                self._metrics_collection.remove_feature_by_idx(total_num_features - rev_feat_idx - 1)
+
+        current_model_params = self.get_model_parameters()
+        for feat_name in current_model_params.keys():
+            current_model_params[feat_name] = params_dict[feat_name]
+        self._thetas = np.array(list(current_model_params.values()))
+
     def print_model_parameters(self):
         """
         Prints the parameters of the ERGM model.
         """
         logger.info(f"Number of nodes: {self._n_nodes}")
         logger.info(f"Thetas: {self._thetas}")
-        logger.info(f"Normalization factor approx: {self._normalization_factor}")
         logger.info(f"Is directed: {self._is_directed}")
-
-    def calculate_weight(self, W: np.ndarray):
-        """
-        Calculate the unnormalized probability weight for a given network.
-
-        The weight is computed as exp(theta^T * g(W)), where theta are the model
-        parameters and g(W) are the sufficient statistics of the network.
-
-        Parameters
-        ----------
-        W : np.ndarray
-            Network adjacency matrix of shape (n, n).
-
-        Returns
-        -------
-        float
-            The unnormalized weight of the network under the current model parameters.
-
-        Raises
-        ------
-        ValueError
-            If the dimensions of W don't match the expected network size.
-        """
-        if W.ndim != 2 or W.shape != (self._n_nodes, self._n_nodes):
-            raise ValueError(f"The dimensions of the given adjacency matrix, {W.shape}, don't comply with the number of"
-                             f" nodes in the network: {self._n_nodes}")
-        features = self._metrics_collection.calculate_statistics(W)
-        weight = np.exp(np.dot(self._thetas, features))
-
-        return weight
 
     def calculate_statistics(self, W: np.ndarray) -> np.ndarray:
         """
@@ -224,15 +180,16 @@ class ERGM():
         """
         return self._metrics_collection.calculate_sample_statistics(networks_sample)
 
-    def generate_networks_for_sample(self,
-                                     sample_size,
-                                     seed_network=None,
-                                     replace=True,
-                                     burn_in=10000,
-                                     mcmc_steps_per_sample=1000,
-                                     sampling_method=None,
-                                     edge_proposal_method=EdgeProposalMethod.UNIFORM,
-                                     ):
+    def generate_networks_for_sample(
+            self,
+            sample_size,
+            seed_network=None,
+            replace=True,
+            burn_in=10000,
+            mcmc_steps_per_sample=1000,
+            sampling_method=None,
+            edge_proposal_method=EdgeProposalMethod.UNIFORM,
+    ):
         """
         Generate a sample of networks from the current ERGM model.
 
@@ -894,7 +851,7 @@ class ERGM():
         logger.info("MCMLE optimization started")
         convergence_results = OptimizationResult(success=False)
 
-        self.optimization_start_time = time.time()
+        self._optimization_start_time = time.time()
         inv_estimated_cov_matrix = None
 
         if mcmc_seed_network is None:
@@ -936,7 +893,7 @@ class ERGM():
                 self._thetas = self._thetas - lr * grad
 
             if (i + 1) % mcmle_log_every == 0:
-                delta_t = time.time() - self.optimization_start_time
+                delta_t = time.time() - self._optimization_start_time
                 logger.info(f"Step {i + 1}, time from start: {delta_t:.2f}")
                 logger.debug(f"Current thetas: {self._thetas}")
 
@@ -1005,29 +962,6 @@ class ERGM():
             "mean": features_mean,
             "std": features_std
         }
-
-    def calculate_probability(self, W: np.ndarray):
-        """
-        Calculate the probability of a graph under the ERGM model.
-
-        Parameters
-        ----------
-        W : np.ndarray
-            A connectivity matrix.
-
-        Returns
-        -------
-        prob : float
-            The probability of the graph under the ERGM model.
-        """
-
-        if self._normalization_factor is None or self._thetas is None:
-            raise ValueError("Normalization factor and thetas not set, fit the model before calculating probability.")
-
-        weight = self.calculate_weight(W)
-        prob = weight / self._normalization_factor
-
-        return prob
 
     def get_model_parameters(self):
         """

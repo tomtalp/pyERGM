@@ -1,41 +1,15 @@
 import abc
-import enum
 from abc import ABC, abstractmethod
-from typing import Collection, Callable, Sequence, Any
+from typing import Sequence, Any
 from copy import deepcopy
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
 from enum import Enum
-from collections import Counter
 
-from pyERGM.constants import OptimizationScheme, DataBootstrapSplittingMethod
-from pyERGM.logging_config import logger
+from pyERGM.constants import OptimizationScheme
 from pyERGM.utils import *
 from pyERGM.cluster_utils import *
-
-
-def _find_unnamed_duplicate_metrics(metrics):
-    """
-    Find metrics that are duplicated (same class) and don't have user-provided names.
-
-    Parameters
-    ----------
-    metrics : list
-        List of Metric objects.
-
-    Returns
-    -------
-    list
-        List of (metric, class_name) tuples for metrics needing disambiguation.
-    """
-    class_counts = Counter(type(m).__name__ for m in metrics)
-    unnamed_duplicates = []
-    for metric in metrics:
-        class_name = type(metric).__name__
-        if class_counts[class_name] > 1 and metric._name is None:
-            unnamed_duplicates.append((metric, class_name))
-    return unnamed_duplicates
 
 
 class Metric(ABC):
@@ -47,6 +21,7 @@ class Metric(ABC):
     All concrete metric implementations must inherit from this class.
 
     """
+
     def __init__(self, name: str | None = None):
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
@@ -289,6 +264,7 @@ class NumberOfEdges(Metric):
     This metric counts the total number of edges present in a network.
     Use NumberOfEdgesDirected or NumberOfEdgesUndirected for concrete implementations.
     """
+
     def __str__(self):
         raise NotImplementedError
 
@@ -375,6 +351,7 @@ class NumberOfEdgesUndirected(NumberOfEdges):
     In an undirected network, each edge is counted once (even though it appears
     twice in the adjacency matrix due to symmetry).
     """
+
     def __str__(self):
         return "num_edges_undirected"
 
@@ -394,6 +371,7 @@ class NumberOfEdgesDirected(NumberOfEdges):
     In a directed network, each directed edge (i -> j) is counted separately
     from its reverse (j -> i).
     """
+
     def __str__(self):
         return "num_edges_directed"
 
@@ -419,6 +397,7 @@ class NumberOfTriangles(Metric):
     Currently only implemented for undirected networks. The count is computed
     using matrix multiplication: tr(W^3) / 6, where W is the adjacency matrix.
     """
+
     def __str__(self):
         return "num_triangles"
 
@@ -480,7 +459,8 @@ class BaseDegreeVector(Metric, abc.ABC):
     ):
         super().__init__(name=name)
 
-        self._indices_from_user = np.array(indices_from_user, dtype=int).copy() if indices_from_user is not None else None
+        self._indices_from_user = np.array(indices_from_user,
+                                           dtype=int).copy() if indices_from_user is not None else None
         self._is_directed = is_directed
         self._is_dyadic_independent = True
         self.does_support_mask = True
@@ -661,11 +641,12 @@ class OutDegree(BaseDegreeVector):
             observed_network: np.ndarray,
     ) -> None:
         num_neurons = num_edges_to_num_nodes(edge_indices_mask.size, is_directed=True)
-        out_deg_xs = np.repeat(np.eye(num_neurons), num_neurons-1, axis=0)
+        out_deg_xs = np.repeat(np.eye(num_neurons), num_neurons - 1, axis=0)
         out_deg_xs = self._handle_indices_to_ignore(out_deg_xs, axis=1)
         # See comment in InDegree.calculate_mple_regressors on loop performance.
         for masked_idx, non_masked_idx in enumerate(np.where(edge_indices_mask)[0]):
             Xs_out[masked_idx, feature_col_indices] = out_deg_xs[non_masked_idx]
+
 
 class UndirectedDegree(BaseDegreeVector):
     """
@@ -690,7 +671,7 @@ class UndirectedDegree(BaseDegreeVector):
     def __init__(self, indices_from_user=None, name: str | None = None):
         super().__init__(
             is_directed=False,
-            summation_axis=BaseDegreeVector.SummationAxis.ROWS, # it doesn't matter over which axis to sum
+            summation_axis=BaseDegreeVector.SummationAxis.ROWS,  # it doesn't matter over which axis to sum
             indices_from_user=indices_from_user,
             name=name,
         )
@@ -848,12 +829,11 @@ class ExWeightNumEdges(Metric):
 
     Parameters
     ----------
-    exogenous_attr : Collection
+    exogenous_attr : Sequence[Any]
         Exogenous attributes for each node in the network.
     """
 
-    # TODO: Collection doesn't necessarily support __getitem__, find a typing hint of a sized Iterable that does.
-    def __init__(self, exogenous_attr: Collection, name: str | None = None):
+    def __init__(self, exogenous_attr: Sequence[Any], name: str | None = None):
         super().__init__(name=name)
         self.exogenous_attr = exogenous_attr
         self.edge_weights = None
@@ -927,7 +907,7 @@ class ExWeightNumEdges(Metric):
         else:
             up_triangle_indices = np.triu_indices(num_nodes, k=1)
             ex_weight_num_edges_xs = self.edge_weights[:, up_triangle_indices[0],
-                                             up_triangle_indices[1]].transpose()
+                                     up_triangle_indices[1]].transpose()
         # See comment in InDegree.calculate_mple_regressors on loop performance.
         for masked_idx, non_masked_idx in enumerate(np.where(edge_indices_mask)[0]):
             Xs_out[masked_idx, feature_col_indices] = ex_weight_num_edges_xs[non_masked_idx]
@@ -1189,8 +1169,8 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
 
     Parameters
     ----------
-    exogenous_attr : Collection
-        A collection of attributes assigned to each node in a graph with n nodes.
+    exogenous_attr : Sequence[Any]
+        A sequence of attributes assigned to each node in a graph with n nodes.
 
     indices_from_user : list, optional
         List of indices to ignore in the metric calculation.
@@ -1262,7 +1242,8 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
         Whether the network is directed.
     """
 
-    def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool, name: str | None = None):
+    def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool,
+                 name: str | None = None):
         # todo: decorator that checks inputs and returns np.ndarray if the inputs were valid, and an error otherwise
         if isinstance(exogenous_attr, (pd.DataFrame, pd.Series, list, tuple)):
             exogenous_attr = np.array(exogenous_attr)
@@ -1293,7 +1274,7 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
 
 
 class NodeAttrSum(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection, is_directed: bool, name: str | None = None):
+    def __init__(self, exogenous_attr: Sequence[Any], is_directed: bool, name: str | None = None):
         super().__init__(exogenous_attr, name=name)
         self._is_directed = is_directed
 
@@ -1314,7 +1295,7 @@ class NodeAttrSum(ExWeightNumEdges):
 
 
 class NodeAttrSumOut(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection, name: str | None = None):
+    def __init__(self, exogenous_attr: Sequence[Any], name: str | None = None):
         super().__init__(exogenous_attr, name=name)
         self._is_directed = True
 
@@ -1333,7 +1314,7 @@ class NodeAttrSumOut(ExWeightNumEdges):
 
 
 class NodeAttrSumIn(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection, name: str | None = None):
+    def __init__(self, exogenous_attr: Sequence[Any], name: str | None = None):
         super().__init__(exogenous_attr, name=name)
         self._is_directed = True
 
@@ -1350,6 +1331,7 @@ class NodeAttrSumIn(ExWeightNumEdges):
     def __str__(self):
         return "node_attribute_in"
 
+
 class MetricsCollection:
     """
     A collection of metrics for ERGM models.
@@ -1360,8 +1342,8 @@ class MetricsCollection:
 
     Parameters
     ----------
-    metrics : Collection[Metric]
-        Collection of Metric instances to include in the model.
+    metrics : Sequence[Metric]
+        Sequence of Metric instances to include in the model.
     is_directed : bool
         Whether the network is directed.
     n_nodes : int
@@ -1381,7 +1363,7 @@ class MetricsCollection:
     """
 
     def __init__(self,
-                 metrics: Collection[Metric],
+                 metrics: Sequence[Metric],
                  is_directed: bool,
                  n_nodes: int,
                  fix_collinearity=True,
@@ -1406,12 +1388,18 @@ class MetricsCollection:
         if len(set(metric_names)) < len(metric_names):
             raise ValueError(f"Got at least 2 metrics with the same name - {metric_names}")
 
+        self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
+
         self.is_directed = is_directed
         self.mask = None
         if mask is not None:
             if mask.ndim != 1:
                 raise ValueError(f"MetricsCollection expects flattened masks (1D). Got {mask.ndim}D")
-            self.mask = mask.copy()
+            self.mask = mask
+
+        if OptimizationScheme.MPLE != self.choose_optimization_scheme() and self.mask is not None:
+            raise NotImplementedError("Masking is currently supported only for edge independent models.")
+
         for x in self.metrics:
             if (x._is_directed is not None) and (x._is_directed != self.is_directed):
                 model_is_directed_str = "a directed" if self.is_directed else "an undirected"
@@ -1423,14 +1411,12 @@ class MetricsCollection:
                                  f"masks!")
         self.n_nodes = n_nodes
 
-        self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
         if is_collinearity_distributed and self._has_dyadic_dependent_metrics:
             raise ValueError(
                 "Distributed optimization is only supported for dyadic-independent models. "
                 "This model contains dyadic-dependent metrics: "
                 f"{[str(m) for m in self.metrics if not m._is_dyadic_independent]}"
             )
-
 
         # Returns the number of features that are being calculated. Since a single metric might return more than one
         # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
@@ -1450,7 +1436,6 @@ class MetricsCollection:
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
-        
 
     def _delete_metric(self, metric: Metric):
         self.metrics = tuple([m for m in self.metrics if m != metric])
@@ -1751,7 +1736,8 @@ class MetricsCollection:
                             continue
                         indices = (i, j)
                         change_scores[edge_idx,
-                        feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(current_network, indices)
+                        feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(current_network,
+                                                                                                     indices)
                         edge_idx += 1
 
             feature_idx += n_features_from_metric
@@ -1915,6 +1901,23 @@ class MetricsCollection:
             return OptimizationScheme.MPLE_RECIPROCITY
         return OptimizationScheme.MCMLE
 
+    def find_unnamed_duplicate_metrics(self) -> Sequence[tuple[Metric, str]]:
+        """
+        Find metrics that are duplicated (same class) and don't have user-provided names.
+
+        Returns
+        -------
+        Sequence[tuple[Metric, str]]
+            List of (metric, class_name) tuples for metrics needing disambiguation.
+        """
+        class_counts = Counter(type(m).__name__ for m in self.metrics)
+        unnamed_duplicates = []
+        for metric in self.metrics:
+            class_name = type(metric).__name__
+            if class_counts[class_name] > 1 and metric._name is None:
+                unnamed_duplicates.append((metric, class_name))
+        return unnamed_duplicates
+
     def get_parameter_names(self):
         """
         Returns the names of the parameters of the metrics in the collection.
@@ -1925,7 +1928,7 @@ class MetricsCollection:
         given random suffixes since the name already disambiguates them.
         """
         # Find metrics needing disambiguation (duplicates without user-provided names)
-        unnamed_duplicates = _find_unnamed_duplicate_metrics(self.metrics)
+        unnamed_duplicates = self.find_unnamed_duplicate_metrics()
 
         # Group by class name for ID generation
         class_instances = {}
