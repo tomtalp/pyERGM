@@ -151,6 +151,8 @@ class ERGM():
 
         self.mh_sampler = NaiveMetropolisHastings(self._thetas, self._metrics_collection)
 
+        self._last_mcmc_chain_features = None
+
     def print_model_parameters(self):
         """
         Prints the parameters of the ERGM model.
@@ -480,10 +482,10 @@ class ERGM():
                 dyad_dists = self.get_mple_reciprocity_prediction()
                 sample = sample_from_dyads_distribution(dyad_dists, 1)
                 return sample[:, :, 0]
-            
-            case OptimizationScheme.MPLE: 
+
+            case OptimizationScheme.MPLE:
                 reference_network = None
-            
+
             case OptimizationScheme.MCMLE:
                 # For MCMLE: use ER(0.5) as a reference network. This is meant to allow edge-dependent statistics 
                 # to change as a result of a single edge flip, so that we won't get a degenerate matrix for 
@@ -491,12 +493,10 @@ class ERGM():
                 # no edge flip will change the reciprocity statistic, and the corresponding column in the regressors 
                 # matrix would be all-0s.
                 reference_network = generate_erdos_renyi_matrix(self._n_nodes, 0.5, self._is_directed)
-            
 
         prob_matrix = self.get_mple_prediction(observed_networks=reference_network)
         sample = sample_from_independent_probabilities_matrix(prob_matrix, 1, self._is_directed)
         return sample[:, :, 0]
-
 
     def get_mple_reciprocity_prediction(self):
         """
@@ -685,7 +685,6 @@ class ERGM():
         if mcmc_steps_per_sample is None:
             mcmc_steps_per_sample = self._n_nodes ** 2
         return mcmc_sample_size, mcmc_burn_in, mcmc_steps_per_sample
-
 
     def fit(self,
             observed_networks,
@@ -893,24 +892,25 @@ class ERGM():
 
         logger.info(f"Initial thetas: {self._thetas}")
         logger.info("MCMLE optimization started")
+        convergence_results = OptimizationResult(success=False)
 
         self.optimization_start_time = time.time()
         inv_estimated_cov_matrix = None
 
-        if mcmc_seed_network is None and self._exact_average_mat is not None:
+        if mcmc_seed_network is None:
             probabilities_matrix = self.get_mple_prediction(observed_networks)
             mcmc_seed_network = sample_from_independent_probabilities_matrix(probabilities_matrix, 1, self._is_directed)
-            mcmc_seed_network = mcmc_seed_network[:, :, 0]
-        burn_in = mcmc_burn_in
+            mcmc_seed_network = mcmc_seed_network[..., 0]
         for i in range(opt_steps):
-            if i > 0:
-                burn_in = 0
-            networks_for_sample = self.generate_networks_for_sample(sample_size=mcmc_sample_size,
-                                                                    seed_network=mcmc_seed_network, burn_in=burn_in,
-                                                                    mcmc_steps_per_sample=mcmc_steps_per_sample,
-                                                                    sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
-                                                                    edge_proposal_method=edge_proposal_method)
-            mcmc_seed_network = networks_for_sample[:, :, -1]
+            networks_for_sample = self.generate_networks_for_sample(
+                sample_size=mcmc_sample_size,
+                seed_network=mcmc_seed_network,
+                burn_in=mcmc_burn_in if i == 0 else 0,
+                mcmc_steps_per_sample=mcmc_steps_per_sample,
+                sampling_method=SamplingMethod.METROPOLIS_HASTINGS,
+                edge_proposal_method=edge_proposal_method,
+            )
+            mcmc_seed_network = networks_for_sample[..., -1]
 
             features_of_net_samples = self._metrics_collection.calculate_sample_statistics(networks_for_sample)
             mean_features = np.mean(features_of_net_samples, axis=1)
@@ -920,10 +920,12 @@ class ERGM():
                 # This is for allowing numba to compile and pickle the large function
                 sys.setrecursionlimit(2000)
                 logger.debug("Started estimating covariance matrix")
-                estimated_cov_matrix = covariance_matrix_estimation(features_of_net_samples,
-                                                                    mean_features,
-                                                                    method=cov_matrix_estimation_method,
-                                                                    num_batches=cov_matrix_num_batches)
+                estimated_cov_matrix = covariance_matrix_estimation(
+                    features_of_net_samples,
+                    mean_features,
+                    method=cov_matrix_estimation_method,
+                    num_batches=cov_matrix_num_batches,
+                )
                 logger.debug("Done estimating covariance matrix")
                 inv_estimated_cov_matrix = np.linalg.pinv(estimated_cov_matrix)
                 logger.debug("Done inverting covariance matrix")
@@ -935,7 +937,7 @@ class ERGM():
 
             if (i + 1) % mcmle_log_every == 0:
                 delta_t = time.time() - self.optimization_start_time
-                logger.info(f"Step {i + 1} - lr: {lr:.7f}, time from start: {delta_t:.2f}")
+                logger.info(f"Step {i + 1}, time from start: {delta_t:.2f}")
                 logger.debug(f"Current thetas: {self._thetas}")
 
             logger.debug("Starting to test for convergence")
@@ -948,10 +950,9 @@ class ERGM():
                 sample_size=mcmc_sample_size,
             )
             convergence_results = convergence_tester.test()
+            self._last_mcmc_chain_features = features_of_net_samples
             if convergence_results.success:
                 break
-
-        self._last_mcmc_chain_features = features_of_net_samples
 
         return convergence_results
 
