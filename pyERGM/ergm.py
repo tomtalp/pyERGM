@@ -1,16 +1,14 @@
 import datetime
 import sys
 import time
-
 import numpy as np
-from scipy.stats import f
-
 
 from pyERGM.logging_config import logger
 from pyERGM.sampling import NaiveMetropolisHastings
 from pyERGM.mple_optimization import *
 from pyERGM.metrics import _find_unnamed_duplicate_metrics
-from pyERGM.utils import generate_erdos_renyi_matrix, ConvergenceTester
+from pyERGM.utils import generate_erdos_renyi_matrix
+from pyERGM.convergence import ConvergenceTester
 from pyERGM.constants import *
 
 
@@ -291,11 +289,11 @@ class ERGM():
     @staticmethod
     def do_estimate_covariance_matrix(
             optimization_method: OptimizationMethod,
-            convergence_criterion: ConvergenceCriterion,
+            convergence_tester: ConvergenceTester,
     ) -> bool:
         return (
                 optimization_method == OptimizationMethod.NEWTON_RAPHSON or
-                convergence_criterion == ConvergenceCriterion.HOTELLING
+                convergence_tester.requires_covariance_estimation
         )
 
     @staticmethod
@@ -700,7 +698,7 @@ class ERGM():
             convergence_criterion: ConvergenceCriterion = ConvergenceCriterion.MODEL_BOOTSTRAP,
             cov_matrix_estimation_method: CovMatrixEstimationMethod = CovMatrixEstimationMethod.NAIVE,
             cov_matrix_num_batches: int = 25,
-            hotelling_confidence: float = 0.99,
+            hotelling_confidence: float = 0.5,
             theta_init_method: ThetaInitMethod = ThetaInitMethod.MPLE,
             mcmc_burn_in: int | None = None,
             mcmc_seed_network=None,
@@ -712,11 +710,13 @@ class ERGM():
             mple_optimization_method: MPLEOptimizationMethod = MPLEOptimizationMethod.L_BFGS_B,
             num_edges_per_job: int = 100000,
             num_subsamples_data: int = 1000,
-            data_splitting_method: str = "uniform",
+            data_splitting_method: DataBootstrapSplittingMethod = DataBootstrapSplittingMethod.UNIFORM,
+            observed_cov_mat_est_method: CovMatrixEstimationMethod = CovMatrixEstimationMethod.NAIVE,
             bootstrap_convergence_confidence: float = 0.95,
             bootstrap_convergence_num_stds_away_thr: float = 1.0,
             num_model_sub_samples: int = 100,
             model_subsample_size: int = 1000,
+            model_boot_cov_mat_est_method: CovMatrixEstimationMethod = CovMatrixEstimationMethod.NAIVE,
             mcmle_log_every: int = 50,
             ):
         """
@@ -802,8 +802,11 @@ class ERGM():
         num_subsamples_data : int
             Number of subsamples for observed bootstrap. *Defaults to 1000*.
 
-        data_splitting_method : str
-            Method for data splitting in bootstrap. *Defaults to "uniform"*.
+        data_splitting_method : DataBootstrapSplittingMethod
+            Method for data splitting in bootstrap. *Defaults to "DataBootstrapSplittingMethod.UNIFORM"*.
+
+        observed_cov_mat_est_method: ObservedCovMatEstMethod
+            Method for estimating the observed covariance matrix used in ConvergenceCriterion.OBSERVED_BOOTSTRAP.
 
         bootstrap_convergence_confidence : float
             Confidence level for bootstrap convergence tests. *Defaults to 0.95*.
@@ -816,6 +819,9 @@ class ERGM():
 
         model_subsample_size : int
             Size of each model subsample for bootstrap convergence. *Defaults to 1000*.
+
+        model_boot_cov_mat_est_method: CovMatEstMethod
+            Method for estimating the covariance matrix used in ConvergenceCriterion.MODEL_BOOTSTRAP.
 
         mcmle_log_every: int
             The gap (int optimization steps) between logs when optimizing with MCMLE. *Defaults to 50*.
@@ -862,28 +868,34 @@ class ERGM():
             mcmc_sample_size, mcmc_burn_in, mcmc_steps_per_sample
         )
 
-        if convergence_criterion == ConvergenceCriterion.OBSERVED_BOOTSTRAP:
-            if observed_networks.ndim == 3 and observed_networks.shape[-1] > 1:
-                raise ValueError("observed_bootstrap doesn't support multiple networks!")
-            for metric in self._metrics_collection.metrics:
-                if not hasattr(metric, "calculate_bootstrapped_features"):
-                    raise ValueError(
-                        f"metric {metric.name} does not have a calculate_bootstrapped_features method, the "
-                        f"model doesn't support observed_bootstrap as a convergence criterion.")
-            bootstrapped_features = self._metrics_collection.bootstrap_observed_features(observed_networks,
-                                                                                         num_subsamples=num_subsamples_data,
-                                                                                         splitting_method=data_splitting_method)
-            observed_covariance = covariance_matrix_estimation(bootstrapped_features,
-                                                               bootstrapped_features.mean(axis=1), method=CovMatrixEstimationMethod.NAIVE)
-            inv_observed_covariance = np.linalg.inv(observed_covariance)
+        observed_features = self._metrics_collection.calculate_sample_statistics(
+            expand_net_dims(observed_networks)).mean(axis=-1)
+
+        convergence_tester = ConvergenceTester.create(
+            convergence_criterion,
+            observed_features=observed_features,
+            l2_grad_thresh=l2_grad_thresh,
+            sliding_grad_window_k=sliding_grad_window_k,
+            opt_steps=opt_steps,
+            num_of_features=self._metrics_collection.num_of_features,
+            hotelling_confidence=hotelling_confidence,
+            observed_networks=observed_networks,
+            metrics_collection=self._metrics_collection,
+            data_splitting_method=data_splitting_method,
+            num_subsamples_data=num_subsamples_data,
+            num_model_sub_samples=num_model_sub_samples,
+            model_subsample_size=model_subsample_size,
+            bootstrap_convergence_confidence=bootstrap_convergence_confidence,
+            bootstrap_convergence_num_stds_away_thr=bootstrap_convergence_num_stds_away_thr,
+            observed_cov_mat_est_method=observed_cov_mat_est_method,
+            model_boot_cov_mat_est_method=model_boot_cov_mat_est_method,
+        )
 
         logger.info(f"Initial thetas: {self._thetas}")
         logger.info("MCMLE optimization started")
 
         self.optimization_start_time = time.time()
-        num_of_features = self._metrics_collection.num_of_features
-
-        grads = np.zeros((opt_steps, num_of_features))
+        inv_estimated_cov_matrix = None
 
         if mcmc_seed_network is None and self._exact_average_mat is not None:
             probabilities_matrix = self.get_mple_prediction(observed_networks)
@@ -902,11 +914,9 @@ class ERGM():
 
             features_of_net_samples = self._metrics_collection.calculate_sample_statistics(networks_for_sample)
             mean_features = np.mean(features_of_net_samples, axis=1)
-            observed_features = self._metrics_collection.calculate_sample_statistics(
-                expand_net_dims(observed_networks)).mean(axis=-1)
 
             grad = calc_nll_gradient(observed_features, mean_features)
-            if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_criterion):
+            if ERGM.do_estimate_covariance_matrix(optimization_method, convergence_tester):
                 # This is for allowing numba to compile and pickle the large function
                 sys.setrecursionlimit(2000)
                 logger.debug("Started estimating covariance matrix")
@@ -923,73 +933,23 @@ class ERGM():
             elif optimization_method == OptimizationMethod.GRADIENT_DESCENT:
                 self._thetas = self._thetas - lr * grad
 
-            grads[i] = grad
-
-            idx_for_sliding_grad = np.max([0, i - sliding_grad_window_k + 1])
-            sliding_window_grads = grads[idx_for_sliding_grad:i + 1].mean()
-
             if (i + 1) % mcmle_log_every == 0:
                 delta_t = time.time() - self.optimization_start_time
                 logger.info(f"Step {i + 1} - lr: {lr:.7f}, time from start: {delta_t:.2f}")
                 logger.debug(f"Current thetas: {self._thetas}")
 
             logger.debug("Starting to test for convergence")
-            convergence_tester = ConvergenceTester()
-
-            if convergence_criterion == ConvergenceCriterion.HOTELLING:
-                logger.debug("Starting hotelling test")
-                convergence_results = convergence_tester.hotelling(observed_features, mean_features,
-                                                                   inv_estimated_cov_matrix, mcmc_sample_size,
-                                                                   hotelling_confidence)
-                logger.debug("Done with hotelling test")
-                if convergence_results.success:
-                    logger.info(f"Reached a confidence of {hotelling_confidence} with the hotelling convergence test! DONE!")
-                    break
-
-            elif convergence_criterion == ConvergenceCriterion.ZERO_GRAD_NORM:
-                cur_window_norm = np.linalg.norm(sliding_window_grads)
-                if cur_window_norm <= l2_grad_thresh:
-                    logger.info(f"Reached threshold of {l2_grad_thresh} after {i} steps. DONE!")
-                    convergence_results = OptimizationResult(
-                        success=True, statistic=cur_window_norm, threshold=l2_grad_thresh
-                    )
-                    break
-
-            elif convergence_criterion == ConvergenceCriterion.OBSERVED_BOOTSTRAP:
-                convergence_results = convergence_tester.bootstrapped_mahalanobis_from_observed(
-                    observed_features,
-                    features_of_net_samples,
-                    inv_observed_covariance,
-                    num_subsamples=num_model_sub_samples,
-                    subsample_size=model_subsample_size,
-                    confidence=bootstrap_convergence_confidence,
-                    stds_away_thr=bootstrap_convergence_num_stds_away_thr,
-                )
-
-                if convergence_results.success:
-                    logger.info(f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
-                          f"test! The model is likely to be up to {bootstrap_convergence_num_stds_away_thr} stds from "
-                          f"the data, according to the estimated data variability. DONE!")
-                    break
-            elif convergence_criterion == ConvergenceCriterion.MODEL_BOOTSTRAP:
-                logger.debug("Starting model_bootstrap test")
-                convergence_results = convergence_tester.bootstrapped_mahalanobis_from_model(
-                    observed_features,
-                    features_of_net_samples,
-                    num_subsamples=num_model_sub_samples,
-                    subsample_size=model_subsample_size,
-                    confidence=bootstrap_convergence_confidence,
-                    stds_away_thr=bootstrap_convergence_num_stds_away_thr,
-                )
-                logger.debug("Done with model_bootstrap test")
-                if convergence_results.success:
-                    logger.info(
-                        f"Reached a confidence of {bootstrap_convergence_confidence} with the bootstrap convergence "
-                        f"test! The model is likely to be up to {bootstrap_convergence_num_stds_away_thr} stds from "
-                        f"the data, according to the estimated data variability. DONE!")
-                    break
-            else:
-                raise ValueError(f"Convergence criterion {convergence_criterion} not defined")
+            convergence_tester.update(
+                mean_features=mean_features,
+                grad=grad,
+                step=i,
+                features_of_net_samples=features_of_net_samples,
+                inv_estimated_cov_matrix=inv_estimated_cov_matrix,
+                sample_size=mcmc_sample_size,
+            )
+            convergence_results = convergence_tester.test()
+            if convergence_results.success:
+                break
 
         self._last_mcmc_chain_features = features_of_net_samples
 

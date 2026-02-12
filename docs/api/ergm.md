@@ -37,11 +37,13 @@ A class for exact ERGM calculations on small networks (for testing purposes).
 
 ## ConvergenceTester
 
-Utilities for testing MCMC convergence.
+Convergence testers for MCMLE optimization. Each criterion is implemented as a
+stateful subclass behind a common abstract API with a factory method.
 
-::: pyERGM.ergm.ConvergenceTester
+::: pyERGM.convergence.ConvergenceTester
     options:
       members:
-        - hotelling
-        - bootstrapped_mahalanobis_from_observed
-        - bootstrapped_mahalanobis_from_model
+        - create
+        - update
+        - test
+        - requires_covariance_estimation

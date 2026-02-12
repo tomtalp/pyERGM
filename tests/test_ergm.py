@@ -363,7 +363,6 @@ class TestERGM(unittest.TestCase):
             ergm = ERGM(n,
                         [NumberOfEdgesDirected() if is_directed else NumberOfEdgesUndirected()],
                         is_directed=is_directed,
-                        seed_MCMC_proba=0.25
                         )
 
             ergm.fit(W, lr=0.01, opt_steps=300, sliding_grad_window_k=10, mcmc_sample_size=200, mcmc_steps_per_sample=10)

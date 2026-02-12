@@ -8,10 +8,8 @@ from numpy import typing as npt
 from numba import njit
 from scipy.spatial.distance import mahalanobis
 import random
-from scipy.stats import f
-import pickle
 
-from pyERGM.constants import OptimizationResult
+from pyERGM.constants import DataBootstrapSplittingMethod
 
 # Dyad states indexing convention
 EMPTY_IDX = 0
@@ -605,15 +603,15 @@ def sample_from_independent_probabilities_matrix(
     return sample
 
 
-# TODO: njit?
-def split_network_for_bootstrapping(net_size: int, first_part_size: int, splitting_method: str = 'uniform') -> tuple[
-    np.ndarray[int], np.ndarray[int]]:
-    if splitting_method == 'uniform':
+def split_network_for_bootstrapping(
+        net_size: int,
+        first_part_size: int,
+        splitting_method: DataBootstrapSplittingMethod = DataBootstrapSplittingMethod.UNIFORM
+) -> tuple[npt.NDArray[int], npt.NDArray[int]]:
+    if splitting_method == DataBootstrapSplittingMethod.UNIFORM:
         indices = np.arange(net_size)
         np.random.shuffle(indices)
         first_part_indices = indices[:first_part_size].reshape((first_part_size, 1))
-    else:
-        raise ValueError(f"splitting method {splitting_method} not supported")
 
     second_part_indices = np.setdiff1d(np.arange(net_size).astype(int), first_part_indices).reshape(
         (net_size - first_part_size, 1))
@@ -904,235 +902,3 @@ def calc_entropy_dyads_dists(
         raise ValueError(f"reduction must be 'sum', 'mean', or 'none', got: {reduction}")
 
 
-class ConvergenceTester:
-    """
-    Utilities for testing ERGM optimization convergence.
-
-    This class provides various statistical tests to determine whether an ERGM
-    optimization has converged, i.e., whether the model's distribution matches
-    the observed data.
-    """
-    def __init__(self):
-        pass
-
-    @staticmethod
-    def _get_subsample_features(sampled_networks_features, num_subsamples, subsample_size):
-        """
-        Receives a sample of networks, and subsample for `num_subsamples` times, each time with `subsample_size` networks.
-        For each subsample, calculates the sample statistics and reshapes the result to a tensor of shape (num_of_features, num_subsamples, subsample_size).
-
-        Parameters
-        ----------
-        sampled_networks_features : np.ndarray
-            Features of a sample of networks that will be used for subsampling
-        
-        num_subsamples : int
-            The number of subsamples to draw from the sample.
-        
-        subsample_size : int
-            The size of each subsample.
-    
-        Returns
-        -------
-        sub_samples_features : np.ndarray
-            A tensor of shape (num_of_features, num_subsamples, subsample_size) containing the features of all subsamples.
-        """
-        sample_size = sampled_networks_features.shape[1]
-
-        sub_sample_indices = np.random.choice(np.arange(sample_size), size=num_subsamples * subsample_size)
-        sub_samples_features = sampled_networks_features[:, sub_sample_indices]
-        sub_samples_features = sub_samples_features.reshape(-1, num_subsamples, subsample_size)
-
-        return sub_samples_features
-
-    @staticmethod
-    def hotelling(
-            observed_features,
-            mean_features,
-            inverted_sample_cov_matrix,
-            sample_size,
-            confidence=0.5
-    ) -> OptimizationResult:
-        """
-        Run the Hotelling's T-squared test for convergence.
-
-        Tests H0: E[g(Y)] = g(y_obs), i.e., the expected features under the model equal the observed features.
-        Convergence is declared when we fail to reject H0 (the test statistic is below the critical value).
-
-        Following Krivitsky (2017), a high alpha (like 0.5) is recommended because:
-        - We want to *accept* the null hypothesis (convergence) rather than reject it
-        - The cost of Type I error (stopping too early) is small - just ~1/alpha extra iterations on average
-        - Using alpha=0.5 means we stop when there's no strong evidence against convergence
-
-        The T-Squared statistic is calculated as:
-            t^2 = n * dist^2
-        where dist is the Mahalanobis distance between the observed and the mean features.
-
-        The T^2 statistic is transformed into an F statistic:
-            F = (n-p / p(n-1)) * t^2
-        where p is the number of features and n is the sample size.
-
-        Convergence is declared if F <= F_critical, where F_critical = F_{1-alpha}(p, n-p).
-
-        Parameters
-        ----------
-        observed_features : np.ndarray
-            The observed features of the network.
-
-        mean_features : np.ndarray
-            The mean features of the networks sampled from the model.
-
-        inverted_sample_cov_matrix : np.ndarray
-            The inverted covariance matrix of the features that were calculated from the model sample.
-
-        sample_size : int
-            The number of networks sampled from the model.
-
-        confidence : float
-            The significance level for the test. Higher values make it easier to declare convergence.
-            Following Krivitsky (2017), *defaults to 0.5*.
-        """
-        dist = mahalanobis(observed_features, mean_features, inverted_sample_cov_matrix)
-        hotelling_t_statistic = sample_size * dist * dist
-
-        num_of_features = observed_features.shape[0]
-
-        hotelling_as_f_statistic = ((sample_size - num_of_features) / (
-                num_of_features * (sample_size - 1))) * hotelling_t_statistic
-
-        hotelling_critical_value = f.ppf(1 - confidence, num_of_features, sample_size - num_of_features)
-
-        return OptimizationResult(
-            success=hotelling_as_f_statistic <= hotelling_critical_value,
-            statistic=hotelling_as_f_statistic,
-            threshold=hotelling_critical_value
-        )
-
-    @staticmethod
-    def bootstrapped_mahalanobis_from_observed(
-            observed_features,
-            sampled_networks_features,
-            inverted_observed_cov_matrix,
-            num_subsamples=100,
-            subsample_size=1000,
-            confidence=0.95,
-            stds_away_thr=1
-    ) -> OptimizationResult:
-        """
-        Test convergence using bootstrapped Mahalanobis distance from observed features.
-
-        Repeatedly subsamples from model-generated networks and calculates Mahalanobis
-        distance to the observed features using the observed covariance matrix. The observed
-        covariance matrix is estimated by subsampling the data (taking subnetworks), calculating
-        features for each subsample, and computing their covariance. This captures the "noise" or
-        variability within the observed data itself. Tests whether the model distribution is
-        within acceptable distance of the data.
-
-        Parameters
-        ----------
-        observed_features : np.ndarray
-            Observed network features.
-        sampled_networks_features : np.ndarray
-            Features from model-sampled networks.
-        inverted_observed_cov_matrix : np.ndarray
-            Inverse of the observed feature covariance matrix.
-        num_subsamples : int, optional
-            Number of bootstrap subsamples. Default is 100.
-        subsample_size : int, optional
-            Size of each subsample. Default is 1000.
-        confidence : float, optional
-            Confidence level for the test. Default is 0.95.
-        stds_away_thr : float, optional
-            Threshold in standard deviations. Default is 1.
-
-        Returns
-        -------
-        OptimizationResult
-            With fields 'success', 'statistic', and 'threshold'.
-        """
-        mahalanobis_dists = np.zeros(num_subsamples)
-
-        sub_samples_features = ConvergenceTester._get_subsample_features(sampled_networks_features, num_subsamples,
-                                                                         subsample_size)
-        mean_per_subsample = sub_samples_features.mean(axis=2)
-
-        for cur_subsam_idx in range(num_subsamples):
-            cur_subsample_mean = mean_per_subsample[:, cur_subsam_idx]
-            mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, cur_subsample_mean,
-                                                            inverted_observed_cov_matrix)
-
-        empirical_threshold = np.quantile(mahalanobis_dists, confidence)
-
-        return OptimizationResult(
-            success=empirical_threshold < stds_away_thr,
-            statistic=empirical_threshold,
-            threshold=stds_away_thr
-        )
-
-    @staticmethod
-    def bootstrapped_mahalanobis_from_model(
-            observed_features,
-            sampled_networks_features,
-            num_subsamples=100,
-            subsample_size=1000,
-            confidence=0.95,
-            stds_away_thr=1
-    ) -> OptimizationResult:
-        """
-        Repeatedly subsample from a collection of networks sampled from the model (`sampled_networks`), and calculate the Mahalanobis distance 
-        between each subsample mean and the observed network. This is equivalent to generating multiple estimations of the model mean & covariance.
-        We calculate the cutoff threshold for the Mahalanobis distance, according to the provided `confidence` level, and then verify whether
-        the empirical threshold is below `stds_away_thr` (which is standard deviations away from the observed data).
-
-        Parameters
-        ----------
-        observed_features : np.ndarray
-            The observed features of the network.
-        
-        sampled_networks_features : np.ndarray
-            Features of networks sampled from the model.
-        
-        num_subsamples : int
-            The number of subsamples to draw. *Defaults to 100*.
-
-        subsample_size : int
-            The size of each subsample. *Defaults to 1000*.
-        
-        confidence : float
-            The confidence level for the test. *Defaults to 0.95*.
-
-        stds_away_thr : float
-            The desired threshold for the Mahalanobis distance, in units of std *Defaults to 1*.
-        
-        Returns
-        -------
-        OptimizationResult
-            With fields 'success', 'statistic', and 'threshold'.
-        """
-        mahalanobis_dists = np.zeros(num_subsamples)
-
-        sub_samples_features = ConvergenceTester._get_subsample_features(sampled_networks_features, num_subsamples,
-                                                                         subsample_size)
-
-        for cur_subsam_idx in range(num_subsamples):
-            # print(
-            #     f"{datetime.datetime.now()} [model_bootstrap] \t\t Working on subsample {cur_subsam_idx}/{num_subsamples}")
-            sub_sample = sub_samples_features[:, cur_subsam_idx, :]
-            sub_sample_mean = sub_sample.mean(axis=1)
-            model_covariance_matrix = covariance_matrix_estimation(sub_sample, sub_sample_mean, method="naive")
-
-            if np.all(model_covariance_matrix == 0):
-                mahalanobis_dists[cur_subsam_idx] = np.inf
-                continue
-
-            inv_model_cov_matrix = np.linalg.pinv(model_covariance_matrix)
-
-            mahalanobis_dists[cur_subsam_idx] = mahalanobis(observed_features, sub_sample_mean, inv_model_cov_matrix)
-
-        empirical_threshold = np.quantile(mahalanobis_dists, confidence)
-
-        return OptimizationResult(
-            success=empirical_threshold < stds_away_thr,
-            statistic=empirical_threshold,
-            threshold=stds_away_thr
-        )

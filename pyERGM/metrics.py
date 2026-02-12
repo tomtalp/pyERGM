@@ -9,7 +9,7 @@ from scipy.spatial.distance import pdist, squareform
 from enum import Enum
 from collections import Counter
 
-from pyERGM.constants import OptimizationScheme
+from pyERGM.constants import OptimizationScheme, DataBootstrapSplittingMethod
 from pyERGM.logging_config import logger
 from pyERGM.utils import *
 from pyERGM.cluster_utils import *
@@ -118,6 +118,10 @@ class Metric(ABC):
         Returns the name prefix for parameter names (label if set, else empty).
         """
         return f"{self._name}_" if self._name is not None else ""
+
+    @property
+    def metric_name(self):
+        return self._get_name_prefix() + str(self)
 
     def update_indices_to_ignore(self, indices_to_ignore):
         """
@@ -245,16 +249,15 @@ class Metric(ABC):
             A tuple of strings, each string is the name of a parameter that this metric produces.
         """
         total_n_features = self._get_total_feature_count()
-        metric_name = self._get_name_prefix() + str(self)
         if total_n_features == 1:
 
-            return (metric_name,)
+            return (self.metric_name,)
         else:
             parameter_names = ()
             for i in range(total_n_features):
                 if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                     continue
-                parameter_names += (f"{metric_name}_{i + 1}",)
+                parameter_names += (f"{self.metric_name}_{i + 1}",)
             return parameter_names
 
     def _get_ignored_features(self):
@@ -1153,14 +1156,12 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
     def _get_metric_names(self):
         parameter_names = tuple()
 
-        metric_name = self._get_name_prefix() + str(self)
-
         sorted_canonical_type_pairs = self._get_sorted_canonical_type_pairs()
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                 continue
             type_pair = str(sorted_canonical_type_pairs[i][0]) + "__" + str(sorted_canonical_type_pairs[i][1])
-            parameter_names += (f"{metric_name}_{type_pair}",)
+            parameter_names += (f"{self.metric_name}_{type_pair}",)
 
         return parameter_names
 
@@ -1168,13 +1169,12 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
         if self._indices_to_ignore is None or not np.any(self._indices_to_ignore):
             return tuple()
 
-        metric_name = self._get_name_prefix() + str(self)
         ignored_features = ()
         sorted_canonical_type_pairs = self._get_sorted_canonical_type_pairs()
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                 type_pair = str(sorted_canonical_type_pairs[i][0]) + "__" + str(sorted_canonical_type_pairs[i][1])
-                ignored_features += (f"{metric_name}_{type_pair}",)
+                ignored_features += (f"{self.metric_name}_{type_pair}",)
 
         return ignored_features
 
@@ -1225,13 +1225,11 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
     def _get_metric_names(self):
         parameter_names = tuple()
 
-        metric_name = self._get_name_prefix() + str(self)
-
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                 continue
             type_pair = str(self.sorted_type_pairs[i][0]) + "__" + str(self.sorted_type_pairs[i][1])
-            parameter_names += (f"{metric_name}_{type_pair}",)
+            parameter_names += (f"{self.metric_name}_{type_pair}",)
 
         return parameter_names
 
@@ -1239,12 +1237,11 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
         if self._indices_to_ignore is None or not np.any(self._indices_to_ignore):
             return tuple()
 
-        metric_name = self._get_name_prefix() + str(self)
         ignored_features = ()
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                 type_pair = str(self.sorted_type_pairs[i][0]) + "__" + str(self.sorted_type_pairs[i][1])
-                ignored_features += (f"{metric_name}_{type_pair}",)
+                ignored_features += (f"{self.metric_name}_{type_pair}",)
 
         return ignored_features
 
@@ -1973,8 +1970,12 @@ class MetricsCollection:
 
         return parameter_names
 
-    def bootstrap_observed_features(self, observed_network: np.ndarray, num_subsamples: int = 1000,
-                                    splitting_method: str = 'uniform'):
+    def bootstrap_observed_features(
+            self,
+            observed_network: np.ndarray,
+            num_subsamples: int = 1000,
+            splitting_method: DataBootstrapSplittingMethod = DataBootstrapSplittingMethod.UNIFORM
+    ):
         if observed_network.ndim == 3:
             observed_network = observed_network[..., 0]
         observed_connectivity_matrix = observed_network[:self.n_nodes, :self.n_nodes]
@@ -1994,9 +1995,9 @@ class MetricsCollection:
             #  values of all metrics.
             #  NOTE! If there are multiple type metrics, we will probably need to sample according to sub-types defined
             #  as the Cartesian product of all types.
-            first_half_indices, second_half_indices = split_network_for_bootstrapping(observed_net_size,
-                                                                                      first_half_size,
-                                                                                      splitting_method=splitting_method)
+            first_half_indices, second_half_indices = split_network_for_bootstrapping(
+                observed_net_size, first_half_size, splitting_method=splitting_method
+            )
             first_halves[:, :, i] = observed_connectivity_matrix[first_half_indices, first_half_indices.T]
             second_halves[:, :, i] = observed_connectivity_matrix[second_half_indices, second_half_indices.T]
             first_halves_indices[:, i] = first_half_indices[:, 0]
@@ -2016,8 +2017,8 @@ class MetricsCollection:
             second_halves_to_use = second_halves
 
             cur_metric_bootstrapped_features = metric.calculate_bootstrapped_features(
-                first_halves_to_use, second_halves_to_use,
-                first_halves_indices, second_halves_indices)
+                first_halves_to_use, second_halves_to_use, first_halves_indices, second_halves_indices
+            )
 
             bootstrapped_features[feature_idx:feature_idx + n_features_from_metric] = cur_metric_bootstrapped_features
             feature_idx += n_features_from_metric

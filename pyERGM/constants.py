@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Optional
 
+
 @dataclass
 class OptimizationResult:
     """Result of an ERGM optimization (fitting) procedure."""
@@ -72,3 +73,8 @@ class Reduction(StrEnum):
     SUM = "sum"
     MEAN = "mean"
     NONE = "none"
+
+
+class DataBootstrapSplittingMethod(StrEnum):
+    """Splitting method for bootstrapping neurons"""
+    UNIFORM = "uniform"
