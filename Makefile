@@ -9,6 +9,11 @@ pypi_deploy:
 	python setup.py sdist bdist_wheel
 	twine upload dist/*
 
+toml_deploy:
+	rm -rf dist/
+	python -m build
+	twine upload dist/*
+
 benchmarking_to_cluster:
 	cp ClusterScripts/benchmarking.sh /Volumes/tomta/pyERGM/ClusterScripts/
 	cp cluster_benchmarks.py /Volumes/tomta/pyERGM/
