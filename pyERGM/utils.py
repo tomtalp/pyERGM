@@ -192,6 +192,86 @@ def construct_int_from_adj_mat(adj_mat: np.ndarray, is_directed: bool) -> int:
     return round((adj_mat_no_diag * 2 ** np.arange(adj_mat_no_diag.size - 1, -1, -1).astype(np.ulonglong)).sum())
 
 
+def network_to_hashable(network: np.ndarray, is_directed: bool) -> tuple:
+    """
+    Convert a network to a hashable representation that handles NaN values.
+
+    Uses only non-NaN off-diagonal elements to create a tuple representation.
+    This avoids integer overflow issues and properly handles masked networks.
+
+    Parameters
+    ----------
+    network : np.ndarray
+        Adjacency matrix of shape (n, n)
+    is_directed : bool
+        Whether the network is directed
+
+    Returns
+    -------
+    tuple
+        Hashable tuple of boolean values representing non-NaN off-diagonal edges.
+        For undirected networks, only uses upper triangle. Uses booleans for memory efficiency.
+    """
+    # Extract off-diagonal elements
+    flattened = flatten_square_matrix_to_edge_list(network, is_directed)
+
+    # Filter out NaN values and convert to tuple of booleans
+    # NaN values are excluded from the hash, so two networks with different
+    # NaN patterns but same non-NaN edges will hash identically
+    non_nan_mask = ~np.isnan(flattened)
+    non_nan_edges = flattened[non_nan_mask]
+
+    # Convert to tuple of booleans for hashability and memory efficiency
+    return tuple(non_nan_edges.astype(bool))
+
+
+def find_unique_networks(
+    networks: np.ndarray,
+    is_directed: bool,
+    seen_hashes: set | None = None
+) -> tuple[np.ndarray, set]:
+    """
+    Filter networks to keep only unique ones.
+
+    Parameters
+    ----------
+    networks : np.ndarray
+        Array of shape (n, n, num_samples)
+    is_directed : bool
+        Whether networks are directed
+    seen_hashes : set, optional
+        Set of network hashes already seen. If provided, only
+        networks not in this set are returned.
+
+    Returns
+    -------
+    unique_networks : np.ndarray
+        Array of shape (n, n, num_unique) containing only unique networks
+    network_hashes : set
+        Set of hashes for all unique networks (including seen_hashes)
+    """
+    if seen_hashes is None:
+        seen_hashes = set()
+    else:
+        seen_hashes = seen_hashes.copy()  # Don't modify input
+
+    num_samples = networks.shape[2]
+    unique_indices = []
+
+    for i in range(num_samples):
+        net_hash = network_to_hashable(networks[:, :, i], is_directed)
+        if net_hash not in seen_hashes:
+            seen_hashes.add(net_hash)
+            unique_indices.append(i)
+
+    if len(unique_indices) == 0:
+        # Return empty array with correct shape
+        return np.zeros((networks.shape[0], networks.shape[1], 0)), seen_hashes
+
+    unique_networks = networks[:, :, unique_indices]
+    return unique_networks, seen_hashes
+
+
 def get_greatest_convex_minorant(xs: np.ndarray, ys: np.ndarray):
     if xs.size != ys.size:
         raise ValueError("Arrays must have the same size!")
@@ -575,16 +655,31 @@ def generate_binomial_tensor(net_size, num_samples, p=0.5):
     return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)
 
 
-def sample_from_independent_probabilities_matrix(
-        probability_matrix: npt.NDArray[np.floating],
-        sample_size: int,
-        is_directed: bool
-) -> npt.NDArray[np.floating]:
+def _sample_edges_with_replacement(
+    probability_matrix: np.ndarray,
+    sample_size: int,
+    is_directed: bool
+) -> np.ndarray:
     """
-    Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j).
-    Note - if the probability matrix contains np.nan values (that designate masked entries), the output sample will have
-    np.nans in corresponding coordinates.
-    (i.e., if np.isnan(probability_matrix[i, j]) then np.all(np.isnan(returned_sample[i, j, ...))).
+    Sample networks using independent edge probabilities.
+
+    This is the core logic for sampling with replacement from edge probabilities.
+    Extracted as a separate function for reuse in adaptive batch sampling.
+
+    Parameters
+    ----------
+    probability_matrix : np.ndarray
+        Matrix where entry (i,j) is the probability of edge i→j.
+        NaN values indicate masked (ignored) edges.
+    sample_size : int
+        Number of networks to sample.
+    is_directed : bool
+        Whether the network is directed.
+
+    Returns
+    -------
+    np.ndarray
+        Sampled networks of shape (n, n, sample_size).
     """
     n_nodes = probability_matrix.shape[0]
     sample = np.full((n_nodes, n_nodes, sample_size), np.nan)
@@ -601,6 +696,229 @@ def sample_from_independent_probabilities_matrix(
                 sample[i, j, :] = np.random.binomial(1, probability_matrix[i, j], size=sample_size)
 
     return sample
+
+
+def _sample_dyads_with_replacement(
+    dyads_distributions: np.ndarray,
+    sample_size: int
+) -> np.ndarray:
+    """
+    Sample networks using dyadic state distributions.
+
+    This is the core logic for sampling with replacement from dyadic state distributions.
+    Extracted as a separate function for reuse in adaptive batch sampling.
+
+    Parameters
+    ----------
+    dyads_distributions : np.ndarray
+        Probability distributions over dyadic states, shape (n_choose_2, 4).
+    sample_size : int
+        Number of networks to sample.
+
+    Returns
+    -------
+    np.ndarray
+        Sampled networks of shape (n, n, sample_size).
+    """
+    num_dyads = dyads_distributions.shape[0]
+    n_nodes = num_dyads_to_num_nodes(num_dyads)
+    dyads_states_indices_sample = np.zeros((num_dyads, sample_size))
+
+    for i in range(num_dyads):
+        dyads_states_indices_sample[i] = np.random.choice(
+            np.arange(4), p=dyads_distributions[i], size=sample_size
+        )
+
+    net_sample = np.zeros((n_nodes, n_nodes, sample_size))
+    for k in range(sample_size):
+        net_sample[:, :, k] = convert_dyads_state_indices_to_connectivity(dyads_states_indices_sample[:, k])
+    return net_sample
+
+
+def _sample_unique_networks_adaptive(
+    probability_matrix_or_dyad_dist: np.ndarray,
+    sample_size: int,
+    is_directed: bool,
+    is_dyadic: bool,
+    initial_batch_multiplier: float = 2.0,
+    max_batch_multiplier: float = 10.0,
+    min_batch_size: int | None = None,
+    max_attempts: int = 50,
+    high_dup_threshold: float = 0.95,
+    batch_increase_factor: float = 1.5,
+    batch_decrease_factor: float = 0.8,
+    medium_dup_threshold: float = 0.5,
+    low_dup_threshold: float = 0.1
+) -> np.ndarray:
+    """
+    Sample unique networks using adaptive batch sizing.
+
+    Parameters
+    ----------
+    probability_matrix_or_dyad_dist : np.ndarray
+        Either edge probability matrix or dyadic state distributions
+    sample_size : int
+        Number of unique networks desired
+    is_directed : bool
+        Whether network is directed
+    is_dyadic : bool
+        If True, use sample_from_dyads_distribution logic
+        If False, use independent edge sampling logic
+    initial_batch_multiplier : float, optional
+        Initial multiplier for batch size (default: 2.0, sample 2x needed)
+    max_batch_multiplier : float, optional
+        Maximum batch multiplier to avoid memory issues (default: 10.0)
+    min_batch_size : int, optional
+        Minimum batch size. Default: max(10, sample_size)
+    max_attempts : int, optional
+        Maximum number of batches to try (default: 50)
+    high_dup_threshold : float, optional
+        Stop if duplication rate exceeds this (default: 0.95)
+    batch_increase_factor : float, optional
+        Factor to increase batch_multiplier when duplicates are high (default: 1.5)
+    batch_decrease_factor : float, optional
+        Factor to decrease batch_multiplier when duplicates are low (default: 0.8)
+    medium_dup_threshold : float, optional
+        Threshold above which to increase batch size (default: 0.5)
+    low_dup_threshold : float, optional
+        Threshold below which to decrease batch size (default: 0.1)
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (n, n, sample_size) with unique networks
+
+    Raises
+    ------
+    RuntimeError
+        If unable to generate enough unique samples
+    """
+    n_nodes = (
+        probability_matrix_or_dyad_dist.shape[0]
+        if not is_dyadic
+        else num_dyads_to_num_nodes(probability_matrix_or_dyad_dist.shape[0])
+    )
+
+    if min_batch_size is None:
+        min_batch_size = max(10, sample_size)
+
+    # Initialize collection
+    unique_networks = np.zeros((n_nodes, n_nodes, 0))
+    seen_hashes = set()
+
+    batch_multiplier = initial_batch_multiplier
+    attempts = 0
+
+    while unique_networks.shape[2] < sample_size and attempts < max_attempts:
+        attempts += 1
+        remaining = sample_size - unique_networks.shape[2]
+
+        # Calculate batch size
+        batch_size = max(min_batch_size, int(remaining * batch_multiplier))
+
+        # Sample a batch (using existing logic)
+        if is_dyadic:
+            batch = _sample_dyads_with_replacement(probability_matrix_or_dyad_dist, batch_size)
+        else:
+            batch = _sample_edges_with_replacement(
+                probability_matrix_or_dyad_dist, batch_size, is_directed
+            )
+
+        # Find unique networks in this batch
+        unique_in_batch, seen_hashes = find_unique_networks(batch, is_directed, seen_hashes)
+
+        # Calculate duplication rate for this batch
+        num_unique_in_batch = unique_in_batch.shape[2]
+        duplication_rate = 1.0 - (num_unique_in_batch / batch_size)
+
+        # Append unique networks
+        if num_unique_in_batch > 0:
+            # Only keep what we need
+            to_keep = min(num_unique_in_batch, remaining)
+            unique_networks = np.concatenate(
+                [unique_networks, unique_in_batch[:, :, :to_keep]], axis=2
+            )
+
+        # Adaptive adjustment of batch size
+        if duplication_rate > high_dup_threshold:
+            # Very high duplication - model has low entropy
+            raise RuntimeError(
+                f"Unable to generate {sample_size} unique networks: "
+                f"duplication rate is {duplication_rate:.1%} after {attempts} attempts. "
+                f"The model entropy may be too low (e.g., probabilities near 0 or 1). "
+                f"Consider using replace=True or adjusting model parameters."
+            )
+        elif duplication_rate > medium_dup_threshold:
+            # Moderate-high duplication - increase batch size
+            batch_multiplier = min(
+                max_batch_multiplier, batch_multiplier * batch_increase_factor
+            )
+        elif duplication_rate < low_dup_threshold:
+            # Low duplication - can decrease batch size to save memory
+            batch_multiplier = max(1.0, batch_multiplier * batch_decrease_factor)
+
+    if unique_networks.shape[2] < sample_size:
+        raise RuntimeError(
+            f"Unable to generate {sample_size} unique networks after {max_attempts} attempts. "
+            f"Only obtained {unique_networks.shape[2]} unique networks. "
+            f"This may indicate the model has very low entropy."
+        )
+
+    return unique_networks
+
+
+def sample_from_independent_probabilities_matrix(
+        probability_matrix: npt.NDArray[np.floating],
+        sample_size: int,
+        is_directed: bool,
+        replace: bool = True
+) -> npt.NDArray[np.floating]:
+    """
+    Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j).
+
+    Parameters
+    ----------
+    probability_matrix : np.ndarray
+        Matrix where entry (i,j) is the probability of edge i→j.
+        NaN values indicate masked (ignored) edges.
+    sample_size : int
+        Number of networks to sample.
+    is_directed : bool
+        Whether the network is directed.
+    replace : bool, optional
+        If True (default), sample with replacement (networks may repeat).
+        If False, sample without replacement (all networks unique).
+        Uses adaptive batch sampling with uniqueness checking.
+
+    Returns
+    -------
+    np.ndarray
+        Sampled networks of shape (n, n, sample_size).
+
+    Raises
+    ------
+    RuntimeError
+        If replace=False and unable to generate enough unique networks
+        (typically due to low model entropy).
+
+    Notes
+    -----
+    When replace=False, uses adaptive batch sampling:
+    - Samples in batches, keeps only unique networks
+    - Adjusts batch size based on observed duplication rate
+    - Stops if duplication rate becomes too high (>95%)
+
+    If the probability matrix contains np.nan values (that designate masked entries),
+    the output sample will have np.nans in corresponding coordinates.
+    (i.e., if np.isnan(probability_matrix[i, j]) then np.all(np.isnan(returned_sample[i, j, ...))).
+    """
+    if replace:
+        return _sample_edges_with_replacement(probability_matrix, sample_size, is_directed)
+
+    # Sampling without replacement
+    return _sample_unique_networks_adaptive(
+        probability_matrix, sample_size, is_directed, is_dyadic=False
+    )
 
 
 def split_network_for_bootstrapping(
@@ -737,7 +1055,7 @@ def convert_dyads_state_indices_to_connectivity(dyads_states_indices):
     return network
 
 
-def sample_from_dyads_distribution(dyads_distributions, sample_size):
+def sample_from_dyads_distribution(dyads_distributions, sample_size, replace: bool = True):
     """
     Sample networks from dyadic state probability distributions.
 
@@ -749,22 +1067,28 @@ def sample_from_dyads_distribution(dyads_distributions, sample_size):
         Probability distributions over dyadic states, shape (n_choose_2, 4).
     sample_size : int
         Number of networks to sample.
+    replace : bool, optional
+        If True (default), sample with replacement (networks may repeat).
+        If False, sample without replacement (all networks unique).
+        Uses adaptive batch sampling with uniqueness checking.
 
     Returns
     -------
     np.ndarray
         Sampled networks of shape (n, n, sample_size).
-    """
-    num_dyads = dyads_distributions.shape[0]
-    n_nodes = num_dyads_to_num_nodes(num_dyads)
-    dyads_states_indices_sample = np.zeros((num_dyads, sample_size))
-    for i in range(num_dyads):
-        dyads_states_indices_sample[i] = np.random.choice(np.arange(4), p=dyads_distributions[i], size=sample_size)
 
-    net_sample = np.zeros((n_nodes, n_nodes, sample_size))
-    for k in range(sample_size):
-        net_sample[:, :, k] = convert_dyads_state_indices_to_connectivity(dyads_states_indices_sample[:, k])
-    return net_sample
+    Raises
+    ------
+    RuntimeError
+        If replace=False and unable to generate enough unique networks
+        (typically due to low model entropy).
+    """
+    if replace:
+        return _sample_dyads_with_replacement(dyads_distributions, sample_size)
+
+    return _sample_unique_networks_adaptive(
+        dyads_distributions, sample_size, is_directed=True, is_dyadic=True
+    )
 
 
 def get_exact_marginals_from_dyads_distribution(dyads_distributions):

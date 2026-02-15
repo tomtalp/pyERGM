@@ -476,3 +476,137 @@ class TestCovarianceMatrixEstimation(unittest.TestCase):
         self.assertTrue(np.abs(
             expected_covariance_multivariate_initial_seq_estimation - multivariate_initial_seq_estimation).max() <
                         10 ** -14)
+
+
+class SamplingWithoutReplacementTester(unittest.TestCase):
+    """Tests for sampling without replacement functionality."""
+
+    def test_sample_without_replacement_produces_unique_networks(self):
+        """Verify that replace=False produces only unique networks."""
+        set_seed(12345)
+        n_nodes = 5
+        sample_size = 20
+        prob_matrix = np.full((n_nodes, n_nodes), 0.5)
+        np.fill_diagonal(prob_matrix, 0)
+
+        sample = sample_from_independent_probabilities_matrix(
+            prob_matrix, sample_size, is_directed=True, replace=False
+        )
+
+        # Convert each network to hashable representation
+        hashes = set()
+        for i in range(sample_size):
+            net_hash = network_to_hashable(sample[:, :, i], is_directed=True)
+            hashes.add(net_hash)
+
+        self.assertEqual(len(hashes), sample_size, "Some networks are duplicates!")
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))
+
+    def test_sample_dyads_without_replacement_produces_unique_networks(self):
+        """Test uniqueness for dyadic (reciprocity) models."""
+        set_seed(12346)
+        num_dyads = 6  # 4 nodes
+        sample_size = 15
+
+        # Uniform distribution over dyadic states
+        dyads_distributions = np.full((num_dyads, 4), 0.25)
+
+        sample = sample_from_dyads_distribution(
+            dyads_distributions, sample_size=sample_size, replace=False
+        )
+
+        # Verify uniqueness
+        hashes = set()
+        for i in range(sample_size):
+            net_hash = network_to_hashable(sample[:, :, i], is_directed=True)
+            hashes.add(net_hash)
+
+        self.assertEqual(len(hashes), sample_size, "Some networks are duplicates!")
+        n_nodes = num_dyads_to_num_nodes(num_dyads)
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))
+
+    def test_sample_without_replacement_fails_gracefully_for_low_entropy(self):
+        """Verify that low-entropy models raise informative errors."""
+        set_seed(12347)
+        n_nodes = 4
+        sample_size = 50
+
+        # Very low entropy: almost all edges present
+        prob_matrix = np.full((n_nodes, n_nodes), 0.99)
+        np.fill_diagonal(prob_matrix, 0)
+
+        with self.assertRaises(RuntimeError) as context:
+            sample_from_independent_probabilities_matrix(
+                prob_matrix, sample_size, is_directed=True, replace=False
+            )
+        self.assertIn("duplication rate", str(context.exception))
+
+    def test_sample_without_replacement_with_masks(self):
+        """Test that masked edges are handled correctly."""
+        set_seed(12349)
+        n_nodes = 4
+        prob_matrix = np.full((n_nodes, n_nodes), 0.5)
+        np.fill_diagonal(prob_matrix, 0)
+        prob_matrix[0, 1] = np.nan  # Masked edge
+        prob_matrix[1, 0] = np.nan  # Masked edge
+
+        sample = sample_from_independent_probabilities_matrix(
+            prob_matrix, sample_size=10, is_directed=True, replace=False
+        )
+
+        # Verify masked edges are NaN in output
+        self.assertTrue(np.all(np.isnan(sample[0, 1, :])))
+        self.assertTrue(np.all(np.isnan(sample[1, 0, :])))
+
+        # Verify networks are unique (hash function handles NaN automatically)
+        hashes = set()
+        for i in range(10):
+            net_hash = network_to_hashable(sample[:, :, i], is_directed=True)
+            self.assertTrue(all(not np.isnan(x) for x in net_hash))
+            hashes.add(net_hash)
+
+        self.assertEqual(len(hashes), 10, "Some networks are duplicates!")
+
+    def test_sample_with_replacement_produces_expected_shape(self):
+        """Verify that replace=True still works correctly (backward compatibility)."""
+        set_seed(12350)
+        n_nodes = 5
+        sample_size = 20
+        prob_matrix = np.full((n_nodes, n_nodes), 0.5)
+        np.fill_diagonal(prob_matrix, 0)
+
+        sample = sample_from_independent_probabilities_matrix(
+            prob_matrix, sample_size, is_directed=True, replace=True
+        )
+
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))
+
+    def test_network_to_hashable_consistency(self):
+        """Verify that identical networks produce identical hashes."""
+        set_seed(12351)
+        n_nodes = 4
+        network = np.random.binomial(1, 0.5, (n_nodes, n_nodes))
+        np.fill_diagonal(network, 0)
+
+        hash1 = network_to_hashable(network.copy(), is_directed=True)
+        hash2 = network_to_hashable(network.copy(), is_directed=True)
+
+        self.assertEqual(hash1, hash2)
+
+    def test_network_to_hashable_different_networks(self):
+        """Verify that different networks produce different hashes."""
+        set_seed(12352)
+        n_nodes = 4
+        network1 = np.random.binomial(1, 0.3, (n_nodes, n_nodes))
+        network2 = np.random.binomial(1, 0.3, (n_nodes, n_nodes))
+        np.fill_diagonal(network1, 0)
+        np.fill_diagonal(network2, 0)
+
+        # Make sure they're actually different
+        if np.allclose(network1, network2):
+            network2[0, 1] = 1 - network2[0, 1]
+
+        hash1 = network_to_hashable(network1, is_directed=True)
+        hash2 = network_to_hashable(network2, is_directed=True)
+
+        self.assertNotEqual(hash1, hash2)

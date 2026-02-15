@@ -1088,7 +1088,7 @@ class TestSamplingMethodAutoDetection(unittest.TestCase):
 
         with patch.object(model, '_generate_exact_sample', wraps=model._generate_exact_sample) as mock_exact:
             model.generate_networks_for_sample(sample_size=10)
-            mock_exact.assert_called_once_with(10)
+            mock_exact.assert_called_once_with(10, replace=True)
 
     def test_auto_detect_exact_for_mple_reciprocity_model(self):
         """MPLE_RECIPROCITY models should call _generate_exact_sample"""
@@ -1097,7 +1097,7 @@ class TestSamplingMethodAutoDetection(unittest.TestCase):
 
         with patch.object(model, '_generate_exact_sample', wraps=model._generate_exact_sample) as mock_exact:
             model.generate_networks_for_sample(sample_size=10)
-            mock_exact.assert_called_once_with(10)
+            mock_exact.assert_called_once_with(10, replace=True)
 
     def test_auto_detect_mcmc_for_mcmle_model(self):
         """MCMLE models should call mh_sampler.sample"""
@@ -1128,8 +1128,8 @@ class TestSamplingMethodAutoDetection(unittest.TestCase):
         model = ERGM(n_nodes, [NumberOfEdgesDirected()], is_directed=True)
 
         with patch.object(model, '_generate_exact_sample', wraps=model._generate_exact_sample) as mock_exact:
-            model.generate_networks_for_sample(sample_size=10, sampling_method=SamplingMethod.EXACT)
-            mock_exact.assert_called_once_with(10)
+            model.generate_networks_for_sample(sample_size=10, sampling_method=SamplingMethod.EXACT, replace=False)
+            mock_exact.assert_called_once_with(10, replace=False)
 
 
 class TestMPLEBasedSeedGeneration(unittest.TestCase):
@@ -1207,3 +1207,85 @@ class TestCalculateStatisticsAPI(unittest.TestCase):
         stats_internal = model._metrics_collection.calculate_sample_statistics(sample)
 
         np.testing.assert_array_equal(stats_api, stats_internal)
+
+
+class TestSamplingWithoutReplacement(unittest.TestCase):
+    """Tests for sampling without replacement in exact sampling."""
+
+    def test_ergm_generate_networks_without_replacement(self):
+        """Test through the ERGM interface with MPLE model."""
+        set_seed(54321)
+        n_nodes = 5
+        sample_size = 15
+
+        ergm = ERGM(
+            n_nodes=n_nodes,
+            metrics_collection=[NumberOfEdgesDirected()],
+            is_directed=True
+        )
+        ergm._thetas = np.array([0.0])  # Set coefficient
+
+        sample = ergm.generate_networks_for_sample(
+            sample_size=sample_size,
+            sampling_method=SamplingMethod.EXACT,
+            replace=False
+        )
+
+        # Verify uniqueness using hash function
+        hashes = set()
+        for i in range(sample_size):
+            net_hash = network_to_hashable(sample[:, :, i], is_directed=True)
+            hashes.add(net_hash)
+
+        self.assertEqual(len(hashes), sample_size, "Some networks are duplicates!")
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))
+
+    def test_ergm_generate_networks_reciprocity_without_replacement(self):
+        """Test through the ERGM interface with MPLE_RECIPROCITY model."""
+        set_seed(54322)
+        n_nodes = 4
+        sample_size = 10
+
+        # Use a model with reciprocity metric
+        ergm = ERGM(
+            n_nodes=n_nodes,
+            metrics_collection=[NumberOfEdgesDirected(), TotalReciprocity()],
+            is_directed=True
+        )
+        ergm._thetas = np.array([0.0, 0.0])  # Set coefficients
+
+        sample = ergm.generate_networks_for_sample(
+            sample_size=sample_size,
+            sampling_method=SamplingMethod.EXACT,
+            replace=False
+        )
+
+        # Verify uniqueness using hash function
+        hashes = set()
+        for i in range(sample_size):
+            net_hash = network_to_hashable(sample[:, :, i], is_directed=True)
+            hashes.add(net_hash)
+
+        self.assertEqual(len(hashes), sample_size, "Some networks are duplicates!")
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))
+
+    def test_ergm_with_replacement_backward_compatible(self):
+        """Test that replace=True still works correctly with ERGM."""
+        set_seed(54323)
+        n_nodes = 5
+        sample_size = 20
+
+        ergm = ERGM(
+            n_nodes=n_nodes,
+            metrics_collection=[NumberOfEdgesDirected()],
+            is_directed=True
+        )
+        ergm._thetas = np.array([0.0])
+
+        sample = ergm.generate_networks_for_sample(
+            sample_size=sample_size,
+            sampling_method=SamplingMethod.EXACT,
+            replace=True
+        )
+
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))

@@ -187,7 +187,7 @@ class ERGM():
             replace=True,
             burn_in=10000,
             mcmc_steps_per_sample=1000,
-            sampling_method=None,
+            sampling_method: SamplingMethod | None =None,
             edge_proposal_method=EdgeProposalMethod.UNIFORM,
     ):
         """
@@ -241,7 +241,7 @@ class ERGM():
                                           steps_per_sample=mcmc_steps_per_sample,
                                           edge_proposal_method=edge_proposal_method)
         elif sampling_method == SamplingMethod.EXACT:
-            return self._generate_exact_sample(sample_size)
+            return self._generate_exact_sample(sample_size, replace=replace)
         else:
             raise ValueError(f"Unrecognized sampling method {sampling_method}")
 
@@ -321,11 +321,6 @@ class ERGM():
         self._exact_dyadic_distributions = prediction
         return trained_thetas, success
 
-    # TODO: decide how a getter for self._exact_average_mat fits in now - if the model is dyadic
-    #  independent, the observed_network doesn't matter - predictions will be always the same, and this is the exact
-    #  average matrix of the model, so should be computed once and stored. If the model is dyadic dependent, this is an
-    #  approximation, and the degree to which changes in the observed_network will change the prediction depend on the
-    #  metrics and the specific networks, it can not be pre-determined.
     def get_mple_prediction(self, observed_networks: np.ndarray | None = None, num_edges_per_job: int = 100000):
         """
         Get the MPLE-based edge probability predictions.
@@ -402,9 +397,36 @@ class ERGM():
             return True
         return False
 
-    def _generate_exact_sample(self, sample_size: int = 1):
-        # TODO: support getting a flag of `replace` which will enable sampling with no replacements (generating samples
-        #  of different networks).
+    def _generate_exact_sample(self, sample_size: int = 1, replace: bool = True):
+        """
+        Generate exact samples from MPLE-based models.
+
+        Parameters
+        ----------
+        sample_size : int
+            Number of networks to sample.
+        replace : bool, optional
+            If True (default), sample with replacement (networks may repeat).
+            If False, sample without replacement (all networks unique).
+            Uses adaptive batch sampling with uniqueness checking.
+
+        Returns
+        -------
+        np.ndarray
+            Sampled networks of shape (n, n, sample_size).
+
+        Raises
+        ------
+        RuntimeError
+            If replace=False and unable to generate enough unique networks
+            (typically due to low model entropy).
+
+        Notes
+        -----
+        When replace=False is used with large sample sizes or low-entropy models
+        (e.g., very high or very low edge probabilities), the method may struggle
+        to find enough unique networks and raise a RuntimeError.
+        """
         auto_optimization_scheme = self._metrics_collection.choose_optimization_scheme()
 
         if auto_optimization_scheme == OptimizationScheme.MPLE:
@@ -412,9 +434,12 @@ class ERGM():
                 self.get_mple_prediction(),
                 sample_size,
                 self._is_directed,
+                replace=replace
             )
         elif auto_optimization_scheme == OptimizationScheme.MPLE_RECIPROCITY:
-            return sample_from_dyads_distribution(self.get_mple_reciprocity_prediction(), sample_size)
+            return sample_from_dyads_distribution(
+                self.get_mple_reciprocity_prediction(), sample_size, replace=replace
+            )
         else:
             raise ValueError(
                 "Cannot sample exactly from a model that has dependence that not comes from reciprocity"
