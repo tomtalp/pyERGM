@@ -23,18 +23,6 @@ The main class for fitting Exponential Random Graph Models.
         - get_mple_reciprocity_prediction
         - print_model_parameters
 
-## BruteForceERGM
-
-A class for exact ERGM calculations on small networks (for testing purposes).
-
-::: pyERGM.ergm.BruteForceERGM
-    options:
-      members:
-        - __init__
-        - fit
-        - generate_networks_for_sample
-        - calc_expected_features
-
 ## ConvergenceTester
 
 Utilities for testing MCMC convergence.

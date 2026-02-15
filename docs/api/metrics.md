@@ -103,7 +103,3 @@ A collection of metrics that handles the calculation of network statistics.
 ### SumDistancesConnectedNeurons
 
 ::: pyERGM.metrics.SumDistancesConnectedNeurons
-
-### NumberOfNodesPerType
-
-::: pyERGM.metrics.NumberOfNodesPerType
