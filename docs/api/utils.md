@@ -8,8 +8,6 @@ Utility functions used throughout pyERGM.
 
 ## Network Conversion
 
-::: pyERGM.utils.connectivity_matrix_to_G
-
 ::: pyERGM.utils.construct_adj_mat_from_int
 
 ::: pyERGM.utils.construct_int_from_adj_mat
