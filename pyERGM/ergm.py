@@ -613,9 +613,7 @@ class ERGM():
         """
         model_type = self._metrics_collection.choose_optimization_scheme()
         if model_type == OptimizationScheme.MPLE:
-            # TODO: once calculating mple regressors doesn't require an input matrix, get rid of this.
-            dummy_zeros_net = np.zeros((self._n_nodes, self._n_nodes))
-            exact_av_mat = self.get_mple_prediction(dummy_zeros_net)
+            exact_av_mat = self.get_mple_prediction()
             return calc_entropy_independent_probability_matrix(
                 prob_mat=exact_av_mat, is_directed=self._is_directed, reduction=reduction, eps=eps
             )
