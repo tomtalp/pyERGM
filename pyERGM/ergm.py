@@ -508,8 +508,12 @@ class ERGM():
                 "dyadic independent."
             )
 
-    def calc_model_log_likelihood(self, observed_network: np.ndarray, reduction: str = 'sum',
-                                  log_base: float = np.exp(1)):
+    def calc_model_log_likelihood(
+            self,
+            observed_network: np.ndarray,
+            reduction: Reduction = Reduction.SUM,
+            log_base: float = np.exp(1),
+    ):
         """
         Calculate the log-likelihood of observed network(s) under the fitted model.
 
@@ -521,9 +525,9 @@ class ERGM():
         ----------
         observed_network : np.ndarray
             The observed network adjacency matrix of shape (n, n).
-        reduction : str, optional
-            How to aggregate likelihoods: 'sum' (default), 'mean', or 'none'.
-            If 'none', returns individual edge/dyad likelihoods.
+        reduction : Reduction, optional
+            How to aggregate likelihoods. Default is Reduction.SUM.
+            If Reduction.NONE, returns individual edge/dyad likelihoods.
         log_base : float, optional
             Base for logarithm. Default is e (natural log).
 
@@ -560,17 +564,12 @@ class ERGM():
                 preds,
                 flatten_square_matrix_to_edge_list(observed_network, self._is_directed)[mask].reshape(-1, 1),
                 reduction=reduction,
-                log_base=log_base)
+                log_base=log_base,
+            )
 
             # In case the user asks for individual likelihoods, return them in a format of a matrix.
-            # TODO: what should be the values on the main diagonal of the likelihoods matrix? 0's make sense only when
-            #  summing up, but the user could have set `reduction='sum'` in the first place... Maybe nans? Or return a
-            #  flattened array with out reshaping it into a matrix?
-            if reduction == 'none':
-                log_like_mat = np.zeros((self._n_nodes, self._n_nodes))
-                set_off_diagonal_elements_from_array(log_like_mat, log_like)
-                return log_like_mat
-
+            if reduction == Reduction.NONE:
+                return self._rearrange_prediction_to_av_mat(log_like)
             return log_like
 
         elif model_type == OptimizationScheme.MPLE_RECIPROCITY:
@@ -581,7 +580,8 @@ class ERGM():
                 convert_connectivity_to_dyad_states(observed_network),
                 self._exact_dyadic_distributions,
                 reduction=reduction,
-                log_base=log_base)
+                log_base=log_base,
+            )
         else:
             raise NotImplementedError("Currently supporting likelihood calculations for models that are synaptic "
                                       "independent or with reciprocal synapses dependent")
