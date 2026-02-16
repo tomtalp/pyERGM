@@ -231,8 +231,9 @@ def resend_failed_jobs(out_path: Path, job_indices: list, array_name: str) -> li
         cur_job_indices_str = cur_job_indices_str[:-1]
         single_batch_bash_path = os.path.join(out_path, "scripts", "single_batch.sh")
         resend_job_command = f'bsub -J {array_name}[{cur_job_indices_str}]'
-        jobs_sending_res = subprocess.run(resend_job_command.split(), stdin=open(single_batch_bash_path, 'r'),
-                                          stdout=subprocess.PIPE)
+        with open(single_batch_bash_path, 'r') as f:
+            jobs_sending_res = subprocess.run(resend_job_command.split(), stdin=f,
+                                              stdout=subprocess.PIPE)
         job_array_ids += parse_sent_job_array_ids(jobs_sending_res.stdout)
 
     return job_array_ids
