@@ -1718,48 +1718,6 @@ class MetricsCollection:
 
         return features_of_net_samples
 
-    def calculate_change_scores_all_edges(self, current_network: np.ndarray):
-        """
-        Calculates the vector of change scores for every edge in the network.
-
-        Parameters
-        ----------
-        current_network : np.ndarray
-            The network matrix of size (n, n).
-
-        Returns
-        -------
-        change_scores : np.ndarray
-            A matrix of size (n**2-n, num_of_features), where each row corresponds to the change scores of the i,j-th edges.
-        """
-        n_nodes = current_network.shape[0]
-        num_edges = n_nodes * n_nodes - n_nodes
-        change_scores = np.zeros((num_edges, self.num_of_features))
-
-        feature_idx = 0
-        for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
-
-            if hasattr(metric, "calculate_change_score_full_network"):
-                change_scores[:,
-                feature_idx:feature_idx + n_features_from_metric] = metric.calculate_change_score_full_network(
-                    current_network)
-            else:
-                edge_idx = 0
-                for i in range(n_nodes):
-                    for j in range(n_nodes):
-                        if i == j:
-                            continue
-                        indices = (i, j)
-                        change_scores[edge_idx,
-                        feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(current_network,
-                                                                                                     indices)
-                        edge_idx += 1
-
-            feature_idx += n_features_from_metric
-
-        return change_scores
-
     def _get_global_mask(self) -> npt.NDArray[bool]:
         """Return the global mask for edge indices, or a mask of all True if no mask is set."""
         full_net_size = self.n_nodes * self.n_nodes - self.n_nodes

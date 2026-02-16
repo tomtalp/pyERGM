@@ -1861,47 +1861,6 @@ class TestMetricsCollection(unittest.TestCase):
 
         self.assertTrue(np.all(result == expected_result))
 
-    def test_calculate_change_scores_all_edges(self):
-        types = ['A', 'B', 'A', 'B']
-        metrics = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
-
-        W1 = np.array([
-            [0, 1, 0, 0],
-            [1, 0, 0, 1],
-            [1, 1, 0, 0],
-            [0, 0, 1, 0]
-        ])
-        n_nodes = W1.shape[0]
-
-        expected_full_change_score = np.array([
-            [-1, 0, -1, 0, 0],
-            [1, 1, 0, 0, 0],
-            [1, 0, 1, 0, 0],
-            [-1, 0, 0, -1, 0],
-            [1, 0, 0, 1, 0],
-            [-1, 0, 0, 0, -1],
-            [-1, -1, 0, 0, 0],
-            [-1, 0, -1, 0, 0],
-            [1, 0, 1, 0, 0],
-            [1, 0, 0, 1, 0],
-            [1, 0, 0, 0, 1],
-            [-1, 0, 0, -1, 0]
-        ])
-
-        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
-
-        # The collinearity fixer is supposed to remove one attribute from the NumberOfEdgesTypesDirected metric
-        # self.assertEqual(len(collection.metrics[1]._indices_to_ignore), 1)
-        self.assertEqual(np.sum(collection.metrics[1]._indices_to_ignore), 1)
-
-        idx_to_ignore = np.where(collection.metrics[1]._indices_to_ignore)[0][0]
-
-        res = collection.calculate_change_scores_all_edges(W1)
-
-        # Deleting the 1+idx_to_ignore because the first entry is the NumberOfEdgesDirected metric
-        expected_full_change_score = np.delete(expected_full_change_score, 1 + idx_to_ignore, axis=1)
-        self.assertTrue(np.all(expected_full_change_score == res))
-
     def test_prepare_mple_data(self):
         types = ['A', 'B', 'A', 'B']
         metrics = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
