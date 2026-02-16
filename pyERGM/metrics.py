@@ -1491,6 +1491,25 @@ class MetricsCollection:
             else:
                 cum_sum_num_feats += next_met_num_feats
 
+    def _metric_feature_iter(self):
+        """Iterate over metrics with feature index tracking.
+
+        Yields:
+            (metric, start_idx, n_features) for each metric in the collection
+
+        This helper eliminates duplication in the common pattern:
+            feature_idx = 0
+            for metric in self.metrics:
+                n_features = metric._get_effective_feature_count()
+                ...process metric...
+                feature_idx += n_features
+        """
+        feature_idx = 0
+        for metric in self.metrics:
+            n_features = metric._get_effective_feature_count()
+            yield metric, feature_idx, n_features
+            feature_idx += n_features
+
     def calc_statistics_for_binomial_tensor_local(self, tensor_size, p=0.5):
         sample = generate_binomial_tensor(self.n_nodes, tensor_size, p=p)
 
@@ -1645,11 +1664,8 @@ class MetricsCollection:
         """
         statistics = np.zeros(self.num_of_features)
 
-        feature_idx = 0
-        for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
-            statistics[feature_idx:feature_idx + n_features_from_metric] = metric.calculate(W)
-            feature_idx += n_features_from_metric
+        for metric, start_idx, n_features in self._metric_feature_iter():
+            statistics[start_idx:start_idx + n_features] = metric.calculate(W)
 
         return statistics
 
@@ -1663,13 +1679,10 @@ class MetricsCollection:
         """
         change_scores = np.zeros(self.num_of_features)
 
-        feature_idx = 0
-        for i, metric in enumerate(self.metrics):
-            n_features_from_metric = self.features_per_metric[i]
-            change_scores[feature_idx:feature_idx + n_features_from_metric] = (
+        for metric, start_idx, n_features in self._metric_feature_iter():
+            change_scores[start_idx:start_idx + n_features] = (
                 metric.calc_change_score(current_network, edge_flip_info['edge'])
             )
-            feature_idx += n_features_from_metric
 
         return change_scores
 
@@ -1695,17 +1708,13 @@ class MetricsCollection:
         num_of_samples = networks_sample.shape[2]
         features_of_net_samples = np.zeros((self.num_of_features, num_of_samples))
 
-        feature_idx = 0
-        for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
-
+        for metric, start_idx, n_features in self._metric_feature_iter():
             calc_for_sample_kwargs = {'networks_sample': networks_sample}
             if self.mask is not None:
                 calc_for_sample_kwargs |= {'mask': self.mask}
             features = metric.calculate_for_sample(**calc_for_sample_kwargs)
 
-            features_of_net_samples[feature_idx:feature_idx + n_features_from_metric] = features
-            feature_idx += n_features_from_metric
+            features_of_net_samples[start_idx:start_idx + n_features] = features
 
         return features_of_net_samples
 
@@ -2006,23 +2015,11 @@ class MetricsCollection:
             second_halves_indices[:, i] = second_half_indices[:, 0]
 
         bootstrapped_features = np.zeros((self.num_of_features, num_subsamples))
-        # TODO: the next code section is copied from `calculate_for_sample`. The difference is that here we use
-        #  `first_halves` and `second_halves` instead of `networks_sample` and a different callable for each metric.
-        #  Maybe is can be handled in a single method that gets a callable for metrics and **kwargs or something like
-        #  that.
 
-        feature_idx = 0
-        for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
-
-            first_halves_to_use = first_halves
-            second_halves_to_use = second_halves
-
+        for metric, start_idx, n_features in self._metric_feature_iter():
             cur_metric_bootstrapped_features = metric.calculate_bootstrapped_features(
-                first_halves_to_use, second_halves_to_use, first_halves_indices, second_halves_indices
+                first_halves, second_halves, first_halves_indices, second_halves_indices
             )
-
-            bootstrapped_features[feature_idx:feature_idx + n_features_from_metric] = cur_metric_bootstrapped_features
-            feature_idx += n_features_from_metric
+            bootstrapped_features[start_idx:start_idx + n_features] = cur_metric_bootstrapped_features
 
         return bootstrapped_features
