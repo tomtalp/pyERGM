@@ -187,7 +187,7 @@ class ERGM():
             replace=True,
             burn_in=10000,
             mcmc_steps_per_sample=1000,
-            sampling_method: SamplingMethod | None =None,
+            sampling_method: SamplingMethod | None = None,
             edge_proposal_method=EdgeProposalMethod.UNIFORM,
     ):
         """
@@ -666,7 +666,8 @@ class ERGM():
             mcmc_steps_per_sample = self._n_nodes ** 2
         return mcmc_sample_size, mcmc_burn_in, mcmc_steps_per_sample
 
-    def fit(self,
+    def fit(
+            self,
             observed_networks,
             *,
             lr: float = 0.1,
@@ -697,7 +698,7 @@ class ERGM():
             model_subsample_size: int = 1000,
             model_boot_cov_mat_est_method: CovMatrixEstimationMethod = CovMatrixEstimationMethod.NAIVE,
             mcmle_log_every: int = 50,
-            ):
+    ) -> OptimizationResult:
         """
         Fit an ERGM model to a given network with one of the two fitting methods - MPLE or MCMLE.
 
@@ -807,8 +808,7 @@ class ERGM():
 
         Returns 
         -------
-        (grads, hotelling_statistics) : (np.ndarray, list)
-        # TODO - what do we want to return?
+        OptimizationResult
         """
 
         # Validate that the input matrix is binary
@@ -956,9 +956,10 @@ class ERGM():
                 f"Calculating MCMC diagnostics for the last chain, with {self._last_mcmc_chain_features.shape[1]} networks")
             features = self._last_mcmc_chain_features.copy()
         else:
-            # TODO: decide what to do in this case. Maybe give the user an option to generate a new chain.
             raise ValueError(
-                "No sampled networks provided and no last chain found. Either rerun with a `sampled_networks` parameter, or run the `fit` function first.")
+                "No sampled networks provided and no last chain found. Either rerun with a `sampled_networks` "
+                "parameter, or run the `fit` function first."
+            )
 
         features_mean = np.mean(features, axis=1)
         features_std = np.std(features, axis=1)
