@@ -116,8 +116,8 @@ When an ERGM is initialized, it receives a list of metrics. For example -
     
 ```python
 
-from pyERGM.metrics import NumberOfEdgesUndirected, NumberOfTriangles
-metrics = [NumberOfEdgesUndirected(), NumberOfTriangles()]
+from pyERGM.metrics import NumberOfEdgesUndirected, NumberOfTrianglesUndirected
+metrics = [NumberOfEdgesUndirected(), NumberOfTrianglesUndirected()]
 model = ERGM(num_nodes, metrics, is_directed=False)
 ```
 

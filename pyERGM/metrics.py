@@ -384,8 +384,57 @@ class NumberOfEdgesDirected(NumberOfEdges):
         return 1
 
 
-# TODO: change the name of this one to undirected and implement also a directed version?
 class NumberOfTriangles(Metric):
+    """
+    Abstract base class for counting triangles/3-cycles in a network.
+
+    A triangle (undirected) or 3-cycle (directed) is a set of three nodes
+    where they form a closed path. This is a measure of network clustering
+    and transitivity.
+
+    Use NumberOfTrianglesUndirected or NumberOfTrianglesDirected for concrete
+    implementations.
+
+    Notes
+    -----
+    The count is computed using matrix multiplication: tr(W^3) / divisor, where
+    W is the adjacency matrix. The divisor is 6 for undirected (each triangle
+    counted 6 times) or 3 for directed (each 3-cycle counted 3 times).
+    """
+
+    def __str__(self):
+        raise NotImplementedError
+
+    def __init__(self, name: str | None = None):
+        super().__init__(name=name)
+        self._is_dyadic_independent = False
+
+    @staticmethod
+    def _get_triangle_divisor() -> int:
+        """Return the divisor for normalizing triangle count."""
+        raise NotImplementedError
+
+    def calculate(self, W: np.ndarray):
+        return self.calculate_for_sample(expand_net_dims(W))[0]
+
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        # When edge (i,j) is toggled, affected triangles/3-cycles are those containing
+        # this edge. For each affected structure, we count 2-length paths from j to i
+        # (since the cycle must close: i→j→k→i). This equals the number of nodes k
+        # where both W[j,k] and W[k,i] exist, which is the (j,i)-th entry of W^2.
+        # If the edge is turned on, the change is positive; otherwise negative.
+
+        i, j = indices
+        sign = -1 if current_network[i, j] else 1
+        return sign * np.dot(current_network[j], current_network[:, i])
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return np.einsum(
+            'ijk,jlk,lik->k', networks_sample, networks_sample, networks_sample
+        ) // (3 * self._get_triangle_divisor())
+
+
+class NumberOfTrianglesUndirected(NumberOfTriangles):
     """
     Metric for counting triangles in an undirected network.
 
@@ -394,8 +443,8 @@ class NumberOfTriangles(Metric):
 
     Notes
     -----
-    Currently only implemented for undirected networks. The count is computed
-    using matrix multiplication: tr(W^3) / 6, where W is the adjacency matrix.
+    The count is computed using matrix multiplication: tr(W^3) / 6, where W
+    is the adjacency matrix.
     """
 
     def __str__(self):
@@ -404,24 +453,37 @@ class NumberOfTriangles(Metric):
     def __init__(self, name: str | None = None):
         super().__init__(name=name)
         self._is_directed = False
-        self._is_dyadic_independent = False
 
-    def calculate(self, W: np.ndarray):
-        if not np.all(W.T == W):
-            raise ValueError("NumOfTriangles not implemented for directed graphs")
-        return self.calculate_for_sample(expand_net_dims(W))[0]
+    @staticmethod
+    def _get_triangle_divisor() -> int:
+        return 2
 
-    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
-        # The triangles that are affected by the edge toggling are those that involve it, namely, if the (i,j)-th edge
-        # is toggled, the change in absolute value equals to the number of nodes k for which the edges (i,k) and (j,k)
-        # exist. This is equivalent to the number of 2-length paths from i to j, which is the (i,j)-th entry of W^2.
-        # If the edge is turned on, the change is positive, and otherwise negative.
 
-        sign = -1 if current_network[indices[0], indices[1]] else 1
-        return sign * np.dot(current_network[indices[0]], current_network[:, indices[1]])
+class NumberOfTrianglesDirected(NumberOfTriangles):
+    """
+    Metric for counting directed 3-cycles in a directed network.
 
-    def calculate_for_sample(self, networks_sample: np.ndarray):
-        return np.einsum('ijk,jlk,lik->k', networks_sample, networks_sample, networks_sample) // (3 * 2)
+    A directed 3-cycle is a set of three nodes i, j, k where edges form
+    a closed directed path: i→j→k→i. This is a measure of network
+    clustering in directed networks.
+
+    Notes
+    -----
+    The count is computed using matrix multiplication: tr(W^3) / 3, where W
+    is the adjacency matrix. Each directed 3-cycle is counted exactly 3 times
+    in the trace (once for each possible starting node in the cycle).
+    """
+
+    def __str__(self):
+        return "num_triangles_directed"
+
+    def __init__(self, name: str | None = None):
+        super().__init__(name=name)
+        self._is_directed = True
+
+    @staticmethod
+    def _get_triangle_divisor() -> int:
+        return 1
 
 
 class BaseDegreeVector(Metric, abc.ABC):

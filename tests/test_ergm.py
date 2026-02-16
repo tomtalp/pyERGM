@@ -190,10 +190,9 @@ def ccc(y_true: np.ndarray, y_pred: np.ndarray) -> float:
 
 class TestERGM(unittest.TestCase):
     def setUp(self):
-        self.metrics = [NumberOfEdgesUndirected(), NumberOfTriangles()]
+        self.metrics = [NumberOfEdgesUndirected(), NumberOfTrianglesUndirected()]
         self.n_nodes = 3
 
-        self.K = 100
         self.thetas = {str(m): 1 for m in self.metrics}
 
     def test_distributed_dyadic_dependent_raises(self):
@@ -1102,7 +1101,7 @@ class TestSamplingMethodAutoDetection(unittest.TestCase):
     def test_auto_detect_mcmc_for_mcmle_model(self):
         """MCMLE models should call mh_sampler.sample"""
         n_nodes = 5
-        model = ERGM(n_nodes, [NumberOfEdgesUndirected(), NumberOfTriangles()], is_directed=False)
+        model = ERGM(n_nodes, [NumberOfEdgesUndirected(), NumberOfTrianglesUndirected()], is_directed=False)
 
         with patch.object(model.mh_sampler, 'sample', wraps=model.mh_sampler.sample) as mock_mh:
             model.generate_networks_for_sample(sample_size=5, burn_in=100, mcmc_steps_per_sample=10)

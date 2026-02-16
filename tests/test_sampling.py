@@ -101,7 +101,7 @@ class Test_MetropolisHastings(unittest.TestCase):
         """
         Test the change score calculation for a undirected graph, based on two variables - num_edges & num_triangles
         """
-        stats_calculator = MetricsCollection([NumberOfEdgesUndirected(), NumberOfTriangles()], is_directed=False,
+        stats_calculator = MetricsCollection([NumberOfEdgesUndirected(), NumberOfTrianglesUndirected()], is_directed=False,
                                              n_nodes=3)
 
         theta_edges = 2

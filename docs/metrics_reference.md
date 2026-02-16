@@ -8,7 +8,8 @@ This page provides a quick reference for all available metrics in pyERGM.
 |--------|----------|------------|-------------|
 | `NumberOfEdgesDirected` | ✓ | | Total count of edges in a directed network |
 | `NumberOfEdgesUndirected` | | ✓ | Total count of edges in an undirected network |
-| `NumberOfTriangles` | | ✓ | Count of triangles in the network |
+| `NumberOfTrianglesDirected` | ✓ | | Count of directed 3-cycles in a directed network |
+| `NumberOfTrianglesUndirected` | | ✓ | Count of triangles in an undirected network |
 
 ## Degree Metrics
 
