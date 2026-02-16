@@ -1242,7 +1242,6 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
 
     def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool,
                  name: str | None = None):
-        # todo: decorator that checks inputs and returns np.ndarray if the inputs were valid, and an error otherwise
         if isinstance(exogenous_attr, (pd.DataFrame, pd.Series, list, tuple)):
             exogenous_attr = np.array(exogenous_attr)
         elif not isinstance(exogenous_attr, np.ndarray):
@@ -1662,26 +1661,20 @@ class MetricsCollection:
         statistics : np.ndarray
             An array of statistics
         """
-        statistics = np.zeros(self.num_of_features)
+        return self.calculate_sample_statistics(W)[:, 0]
 
-        for metric, start_idx, n_features in self._metric_feature_iter():
-            statistics[start_idx:start_idx + n_features] = metric.calculate(W)
-
-        return statistics
-
-    def calc_change_scores(self, current_network: np.ndarray, edge_flip_info: dict) -> np.ndarray:
+    def calc_change_scores(self, current_network: np.ndarray, indices: tuple[int, int]) -> np.ndarray:
         """
         Calculates the vector of change scores, namely g(net_2) - g(net_1)
 
         NOTE - this function assumes that the size current_network and self.n_nodes are the same, and doesn't validate
-        it, due to runtime considerations. Currently, the only use of this function is within ERGM and
-        NaiveMetropolisHastings, so this is fine.
+        it, due to runtime considerations.
         """
         change_scores = np.zeros(self.num_of_features)
 
         for metric, start_idx, n_features in self._metric_feature_iter():
             change_scores[start_idx:start_idx + n_features] = (
-                metric.calc_change_score(current_network, edge_flip_info['edge'])
+                metric.calc_change_score(current_network, indices)
             )
 
         return change_scores
@@ -1701,7 +1694,8 @@ class MetricsCollection:
         -------
         an array of the statistics vector per sample (num_features X sample_size)
         """
-        if networks_sample.shape[0] != self.n_nodes:
+        networks_sample = expand_net_dims(networks_sample)
+        if networks_sample.shape[0] != self.n_nodes or networks_sample.shape[1] != self.n_nodes:
             raise ValueError(
                 f"Got a sample of networks of size {networks_sample.shape[0]}, but Metrics expect size {self.n_nodes}")
 
@@ -1833,12 +1827,12 @@ class MetricsCollection:
         zeros_net = np.zeros((self.n_nodes, self.n_nodes))
         for i in range(self.n_nodes - 1):
             for j in range(i + 1, self.n_nodes):
-                change_score_i_j = self.calc_change_scores(zeros_net, {'edge': (i, j)})
+                change_score_i_j = self.calc_change_scores(zeros_net, (i, j))
                 net_with_i_j = zeros_net.copy()
                 net_with_i_j[i, j] = 1
                 Xs[idx, UPPER_IDX] = change_score_i_j
-                Xs[idx, LOWER_IDX] = self.calc_change_scores(zeros_net, {'edge': (j, i)})
-                Xs[idx, RECIPROCAL_IDX] = self.calc_change_scores(net_with_i_j, {'edge': (j, i)}) + change_score_i_j
+                Xs[idx, LOWER_IDX] = self.calc_change_scores(zeros_net, (j, i))
+                Xs[idx, RECIPROCAL_IDX] = self.calc_change_scores(net_with_i_j, (j, i)) + change_score_i_j
 
                 idx += 1
         return Xs
@@ -1955,8 +1949,7 @@ class MetricsCollection:
     ):
         if observed_network.ndim == 3:
             observed_network = observed_network[..., 0]
-        observed_connectivity_matrix = observed_network[:self.n_nodes, :self.n_nodes]
-        observed_net_size = observed_connectivity_matrix.shape[0]
+        observed_net_size = observed_network.shape[0]
         second_half_size = observed_net_size // 2
         first_half_size = observed_net_size - second_half_size
         first_halves = np.zeros((first_half_size, first_half_size, num_subsamples))
@@ -1967,8 +1960,8 @@ class MetricsCollection:
             first_half_indices, second_half_indices = split_network_for_bootstrapping(
                 observed_net_size, first_half_size, splitting_method=splitting_method
             )
-            first_halves[:, :, i] = observed_connectivity_matrix[first_half_indices, first_half_indices.T]
-            second_halves[:, :, i] = observed_connectivity_matrix[second_half_indices, second_half_indices.T]
+            first_halves[:, :, i] = observed_network[first_half_indices, first_half_indices.T]
+            second_halves[:, :, i] = observed_network[second_half_indices, second_half_indices.T]
             first_halves_indices[:, i] = first_half_indices[:, 0]
             second_halves_indices[:, i] = second_half_indices[:, 0]
 

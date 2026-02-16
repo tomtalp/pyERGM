@@ -61,11 +61,11 @@ class NaiveMetropolisHastings(Sampler):
         """
         self.thetas = deepcopy(thetas)
 
-    def _calculate_weighted_change_score(self, current_network, edge_flip_info: dict):
+    def _calculate_weighted_change_score(self, current_network, indices: tuple[int, int]):
         """
         Calculate g(proposed_network)-g(current_network) and then inner product with thetas.
         """
-        change_score = self.metrics_collection.calc_change_scores(current_network, edge_flip_info)
+        change_score = self.metrics_collection.calc_change_scores(current_network, indices)
         return np.dot(self.thetas, change_score)
 
     def _flip_network_edge(self, current_network, i, j):
@@ -198,16 +198,13 @@ class NaiveMetropolisHastings(Sampler):
         while networks_count != num_of_nets:
             # Edge flip:
             random_edge_entry = edges_to_flip[:, mcmc_iter_count % edges_to_flip.shape[1]]
-            edge_flip_info = {
-                'edge': random_edge_entry,
-            }
 
-            change_score = self._calculate_weighted_change_score(current_network, edge_flip_info)
+            change_score = self._calculate_weighted_change_score(current_network, random_edge_entry)
 
             rand_num = random_nums_for_change_acceptance[mcmc_iter_count % edges_to_flip.shape[1]]
             perform_change = change_score >= 1 or rand_num <= min(1, np.exp(change_score))
             if perform_change:
-                self._flip_network_edge(current_network, edge_flip_info['edge'][0], edge_flip_info['edge'][1])
+                self._flip_network_edge(current_network,random_edge_entry[0],random_edge_entry[1])
 
             if mcmc_iter_count >= burn_in and (mcmc_iter_count - burn_in) % steps_per_sample == 0:
                 sampled_networks[:, :, networks_count] = current_network

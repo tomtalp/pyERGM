@@ -93,7 +93,7 @@ class Test_MetropolisHastings(unittest.TestCase):
             [1, 1, 0]
         ])
 
-        change_score = sampler._calculate_weighted_change_score(current_W, {'edge': (0, 1)})
+        change_score = sampler._calculate_weighted_change_score(current_W, (0, 1))
         expected_change_score = 1 * theta_edges
         self.assertEqual(change_score, expected_change_score)
 
@@ -116,7 +116,7 @@ class Test_MetropolisHastings(unittest.TestCase):
             [1, 1, 0]
         ])
 
-        change_score = sampler._calculate_weighted_change_score(current_W, {'edge': (0, 1)})
+        change_score = sampler._calculate_weighted_change_score(current_W, (0, 1))
 
         changed_edges = 1
         changed_triangles = 1
@@ -147,8 +147,8 @@ class Test_MetropolisHastings(unittest.TestCase):
             [0, 1, 0]
         ])
 
-        total_change_score = (sampler._calculate_weighted_change_score(current_W, {'edge': (0, 1)}) +
-                              sampler._calculate_weighted_change_score(current_W_2, {'edge': (2, 0)}))
+        total_change_score = (sampler._calculate_weighted_change_score(current_W, (0, 1)) +
+                              sampler._calculate_weighted_change_score(current_W_2, (2, 0)))
 
         changed_edges = 2
         expected_change_score = changed_edges * theta_edges
