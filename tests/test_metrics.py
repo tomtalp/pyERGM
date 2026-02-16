@@ -1585,20 +1585,24 @@ class TestMetricsCollection(unittest.TestCase):
         n = 18
         receiver = InDegree()
 
-        collection = MetricsCollection([receiver], is_directed=True, n_nodes=n, do_copy_metrics=False)
+        with patch.object(MetricsCollection, '_copy_metrics', return_value=(receiver,)):
+            collection = MetricsCollection([receiver], is_directed=True, n_nodes=n)
         self.assertEqual(receiver._get_effective_feature_count(), n)
 
         receiver = InDegree(indices_from_user=[0])
-        collection = MetricsCollection([receiver], is_directed=True, n_nodes=n, do_copy_metrics=False)
+        with patch.object(MetricsCollection, '_copy_metrics', return_value=(receiver,)):
+            collection = MetricsCollection([receiver], is_directed=True, n_nodes=n)
         self.assertEqual(receiver._get_effective_feature_count(), n - 1)
 
         sender = OutDegree()
 
-        collection = MetricsCollection([sender], is_directed=True, n_nodes=n, do_copy_metrics=False)
+        with patch.object(MetricsCollection, '_copy_metrics', return_value=(sender,)):
+            collection = MetricsCollection([sender], is_directed=True, n_nodes=n)
         self.assertEqual(sender._get_effective_feature_count(), n)
 
         sender = OutDegree(indices_from_user=[0])
-        collection = MetricsCollection([sender], is_directed=True, n_nodes=n, do_copy_metrics=False)
+        with patch.object(MetricsCollection, '_copy_metrics', return_value=(sender,)):
+            collection = MetricsCollection([sender], is_directed=True, n_nodes=n)
         self.assertEqual(sender._get_effective_feature_count(), n - 1)
 
     def test_metrics_setup(self):
@@ -1761,8 +1765,9 @@ class TestMetricsCollection(unittest.TestCase):
         for name, scenario_data in test_scenarios.items():
             net_size = scenario_data.get("n", n)
 
-            collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True,
-                                           n_nodes=net_size, do_copy_metrics=False)
+            with patch.object(MetricsCollection, '_copy_metrics', return_value=tuple(scenario_data["metrics"])):
+                collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True,
+                                               n_nodes=net_size)
 
             # Check the general number of features matches the expectation
             self.assertEqual(collection.num_of_features, scenario_data["expected_num_of_features"])

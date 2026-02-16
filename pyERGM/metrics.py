@@ -1030,8 +1030,6 @@ class NumberOfEdgesTypes(Metric):
             stats[effective_idx] += stat
         return stats / self._get_num_edges_in_mat_factor()
 
-    # TODO: when we finally make calculate_for_sample the mandatory abstract method in Metric and remove calculate
-    #  entirely or return the first matrix returned by calculate_for_sample, change this accordingly as well.
     def calculate(self, network: np.ndarray, mask: npt.NDArray[bool] | None = None):
         return self.calculate_for_sample(expand_net_dims(network), mask=mask)[..., -1]
 
@@ -1354,30 +1352,42 @@ class MetricsCollection:
         Number of random networks to sample for collinearity detection. Default is 1000.
     is_collinearity_distributed : bool, optional
         If True, distribute collinearity fixing computation. Default is False.
-    do_copy_metrics : bool, optional
-        If True, create deep copies of input metrics. Default is True.
     mask : np.ndarray, optional
         Boolean mask indicating which edges to consider (1D flattened). Default is None.
     **kwargs
         Additional keyword arguments for collinearity fixer configuration.
     """
 
-    def __init__(self,
-                 metrics: Sequence[Metric],
-                 is_directed: bool,
-                 n_nodes: int,
-                 fix_collinearity=True,
-                 collinearity_fixer_sample_size=1000,
-                 is_collinearity_distributed=False,
-                 # TODO: For tests only, find a better solution
-                 do_copy_metrics=True,
-                 mask: npt.NDArray[bool] | None = None,
-                 **kwargs):
+    @staticmethod
+    def _copy_metrics(metrics: Sequence[Metric]) -> tuple:
+        """
+        Initialize metrics by creating deep copies to avoid modifying the originals.
+
+        Parameters
+        ----------
+        metrics : Sequence[Metric]
+            The metrics to initialize.
+
+        Returns
+        -------
+        tuple
+            A tuple of copied metrics.
+        """
+        return tuple([deepcopy(metric) for metric in metrics])
+
+    def __init__(
+            self,
+            metrics: Sequence[Metric],
+            is_directed: bool,
+            n_nodes: int,
+            fix_collinearity=True,
+            collinearity_fixer_sample_size=1000,
+            is_collinearity_distributed=False,
+            mask: npt.NDArray[bool] | None = None,
+            **kwargs
+    ):
         logger.debug("Initializing MetricsCollection")
-        if not do_copy_metrics:
-            self.metrics = tuple([metric for metric in metrics])
-        else:
-            self.metrics = tuple([deepcopy(metric) for metric in metrics])
+        self.metrics = MetricsCollection._copy_metrics(metrics)
 
         for m in self.metrics:
             m._n_nodes = n_nodes
@@ -1495,10 +1505,8 @@ class MetricsCollection:
         return self.calculate_sample_statistics(sample)
 
     def calc_statistics_for_binomial_tensor_distributed(self, tensor_size, p=0.5, num_samples_per_job=1):
-        # TODO: currently, if tensor_size % num_samples_per_job != 0 the sample size will be larger than tensor_size
-        #  specified by the user (it is (tensor_size // num_samples_per_job + 1) * num_samples_per_job). We can pass
-        #  tensor_size as an additional argument to children jobs, and validate in
-        #  sample_statistics_distributed_calcs.py that we don't calculate for too many networks.
+        # Note - if tensor_size % num_samples_per_job != 0 the sample size will be larger than tensor_size specified by
+        # the user (it is (tensor_size // num_samples_per_job + 1) * num_samples_per_job)
         out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
         data_path = (out_dir_path / "data").resolve()
         os.makedirs(data_path, exist_ok=True)
@@ -1555,7 +1563,6 @@ class MetricsCollection:
         Find collinearity between metrics in the collection.
 
         Currently this is a naive version that only handles the very simple cases.
-        TODO: revisit the threshold and sample size
         """
         is_linearly_dependent = True
 
@@ -1990,14 +1997,6 @@ class MetricsCollection:
         first_halves_indices = np.zeros((first_half_size, num_subsamples), dtype=int)
         second_halves_indices = np.zeros((second_half_size, num_subsamples), dtype=int)
         for i in range(num_subsamples):
-            # TODO: currently we simply split randomly into 2 halves, we want to support other methods for sampling half
-            #  of the neurons, and specifically sampling half of the neurons of each if there is a metric with types
-            #  involved.
-            #  NOTE! This will probably imposes to have another field in `Metric` indicating what is the preferred way
-            #  for bootstrapping sampling, and `MetricsCollection` will have to decide somehow what to do based on the
-            #  values of all metrics.
-            #  NOTE! If there are multiple type metrics, we will probably need to sample according to sub-types defined
-            #  as the Cartesian product of all types.
             first_half_indices, second_half_indices = split_network_for_bootstrapping(
                 observed_net_size, first_half_size, splitting_method=splitting_method
             )
