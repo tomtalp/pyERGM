@@ -13,7 +13,15 @@ from scipy.stats import f
 from pyERGM.constants import ConvergenceCriterion, OptimizationResult, CovMatrixEstimationMethod, \
     DataBootstrapSplittingMethod
 from pyERGM.metrics import MetricsCollection
-from pyERGM.utils import covariance_matrix_estimation
+from pyERGM.utils import covariance_matrix_estimation, expand_net_dims
+
+__all__ = [
+    'ConvergenceTester',
+    'HotellingTester',
+    'ZeroGradNormTester',
+    'ObservedBootstrapTester',
+    'ModelBootstrapTester',
+]
 
 
 def _get_subsample_features(
@@ -247,7 +255,11 @@ class ObservedBootstrapTester(ConvergenceTester):
             stds_away_thr: float,
             observed_cov_mat_est_method: CovMatrixEstimationMethod,
     ):
-        if observed_networks.ndim == 3 and observed_networks.shape[-1] > 1:
+        # Normalize input to 3D using the existing utility for consistent 2D->3D conversion
+        observed_networks = expand_net_dims(observed_networks)
+
+        # Now check for multiple networks
+        if observed_networks.shape[-1] > 1:
             raise ValueError("ConvergenceCriterion.OBSERVED_BOOTSTRAP doesn't support multiple networks!")
         metrics_collection.validate_supports_observed_bootstrap()
 
@@ -263,7 +275,10 @@ class ObservedBootstrapTester(ConvergenceTester):
         observed_covariance = covariance_matrix_estimation(
             bootstrapped_features, bootstrapped_features.mean(axis=1), method=observed_cov_mat_est_method
         )
-        self._inv_observed_covariance = np.linalg.inv(observed_covariance)
+        if np.all(observed_covariance == 0):
+            raise RuntimeError("The observed covariance matrix is all-zeros (bootstrapped features are identical), "
+                               "the convergence test can never pass.")
+        self._inv_observed_covariance = np.linalg.pinv(observed_covariance)
 
         self._features_of_net_samples = None
 

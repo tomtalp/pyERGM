@@ -994,6 +994,62 @@ class TestERGM(unittest.TestCase):
         with self.assertRaises(ValueError):
             model.fit(data, edge_weights=-np.ones((n, n)))
 
+    def test_mask_shape_validation_undirected(self):
+        """Test mask shape validation for undirected graphs uses correct formula (n² - n) // 2."""
+        metrics = [NumberOfEdgesUndirected()]
+
+        # Test various graph sizes to verify formula (n² - n) // 2
+        test_sizes = [3, 4, 5, 6]
+        for n in test_sizes:
+            # Correct shape for undirected: (n² - n) // 2
+            expected_edges = (n ** 2 - n) // 2
+
+            # Valid 2D mask - should work
+            valid_mask_2d = np.ones((n, n), dtype=bool)
+            np.fill_diagonal(valid_mask_2d, False)
+            model_with_2d = ERGM(n_nodes=n, metrics_collection=metrics, is_directed=False, mask=valid_mask_2d)
+            self.assertIsNotNone(model_with_2d._mask)
+
+            # Valid 1D mask - should work
+            valid_mask_1d = np.ones((expected_edges, 1), dtype=bool)
+            model_with_1d = ERGM(n_nodes=n, metrics_collection=metrics, is_directed=False, mask=valid_mask_1d)
+            self.assertIsNotNone(model_with_1d._mask)
+
+            # Invalid shapes - should fail
+            # Wrong formula: n² - n//2 (the old buggy formula)
+            wrong_shape = (n ** 2 - n // 2, 1)
+            wrong_mask = np.ones(wrong_shape, dtype=bool)
+            with self.assertRaises(ValueError) as context:
+                ERGM(n_nodes=n, metrics_collection=metrics, is_directed=False, mask=wrong_mask)
+            self.assertIn("Invalid mask shape", str(context.exception))
+
+    def test_mask_shape_validation_directed(self):
+        """Test mask shape validation for directed graphs uses correct formula n² - n."""
+        metrics = [NumberOfEdgesDirected()]
+
+        # Test various graph sizes to verify formula n² - n
+        test_sizes = [3, 4, 5, 6]
+        for n in test_sizes:
+            # Correct shape for directed: n² - n
+            expected_edges = n ** 2 - n
+
+            # Valid 2D mask - should work
+            valid_mask_2d = np.ones((n, n), dtype=bool)
+            np.fill_diagonal(valid_mask_2d, False)
+            model_with_2d = ERGM(n_nodes=n, metrics_collection=metrics, is_directed=True, mask=valid_mask_2d)
+            self.assertIsNotNone(model_with_2d._mask)
+
+            # Valid 1D mask - should work
+            valid_mask_1d = np.ones((expected_edges, 1), dtype=bool)
+            model_with_1d = ERGM(n_nodes=n, metrics_collection=metrics, is_directed=True, mask=valid_mask_1d)
+            self.assertIsNotNone(model_with_1d._mask)
+
+            # Invalid shape - should fail
+            invalid_mask = np.ones((expected_edges + 5, 1), dtype=bool)
+            with self.assertRaises(ValueError) as context:
+                ERGM(n_nodes=n, metrics_collection=metrics, is_directed=True, mask=invalid_mask)
+            self.assertIn("Invalid mask shape", str(context.exception))
+
 
 class TestMPLENoneHandling(unittest.TestCase):
     """Tests for handling observed_networks=None in get_mple_prediction()"""

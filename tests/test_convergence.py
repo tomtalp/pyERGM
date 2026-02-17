@@ -179,6 +179,30 @@ class TestObservedBootstrapTester(unittest.TestCase):
                 observed_cov_mat_est_method=CovMatrixEstimationMethod.NAIVE,
             )
 
+    def test_accepts_2d_array_via_expand_net_dims(self):
+        """Should accept 2D arrays and expand them to 3D using expand_net_dims."""
+        observed_networks_2d = np.zeros((3, 3))  # 2D array
+        metrics_collection = MagicMock()
+        metrics_collection.metrics = []
+        metrics_collection.bootstrap_observed_features = MagicMock(
+            return_value=np.zeros((1, 5))  # Return bootstrapped features
+        )
+
+        # Should not raise - 2D array should be converted to 3D
+        tester = ObservedBootstrapTester(
+            observed_features=np.array([1.0]),
+            observed_networks=observed_networks_2d,
+            metrics_collection=metrics_collection,
+            data_splitting_method=DataBootstrapSplittingMethod.UNIFORM,
+            num_subsamples_data=10,
+            num_model_sub_samples=10,
+            model_subsample_size=10,
+            confidence=0.95,
+            stds_away_thr=1,
+            observed_cov_mat_est_method=CovMatrixEstimationMethod.NAIVE,
+        )
+        self.assertIsNotNone(tester)
+
 
 class TestModelBootstrapTester(unittest.TestCase):
     def test_smoke_test_with_synthetic_data(self):
@@ -203,6 +227,74 @@ class TestModelBootstrapTester(unittest.TestCase):
         self.assertIsInstance(result, OptimizationResult)
         self.assertIsNotNone(result.statistic)
         self.assertIsNotNone(result.threshold)
+
+    def test_convergence_when_threshold_below_limit(self):
+        """Test convergence is detected when empirical_threshold < stds_away_thr."""
+        np.random.seed(42)
+        num_features = 2
+        num_samples = 300
+        observed_features = np.array([5.0, 10.0])
+        # Generate features very close to observed (small variance)
+        sampled_features = observed_features[:, None] + np.random.randn(num_features, num_samples) * 0.05
+
+        tester = ModelBootstrapTester(
+            observed_features=observed_features,
+            num_model_sub_samples=5,
+            model_subsample_size=50,
+            confidence=0.95,
+            stds_away_thr=1.0,  # Low threshold for convergence
+            cov_mat_est_method=CovMatrixEstimationMethod.NAIVE,
+        )
+        tester.update(features_of_net_samples=sampled_features)
+        result = tester.test()
+        # With small variance and low threshold, should converge
+        self.assertTrue(result.success, "Should converge when features are close to observed")
+        self.assertLess(result.statistic, 1.0, "Mahalanobis distance should be below threshold")
+
+    def test_non_convergence_when_threshold_exceeds_limit(self):
+        """Test non-convergence when empirical_threshold >= stds_away_thr."""
+        np.random.seed(42)
+        num_features = 2
+        num_samples = 100
+        observed_features = np.array([5.0, 10.0])
+        # Generate features far from observed (large variance)
+        sampled_features = observed_features[:, None] + np.random.randn(num_features, num_samples) * 5.0
+
+        tester = ModelBootstrapTester(
+            observed_features=observed_features,
+            num_model_sub_samples=3,
+            model_subsample_size=10,
+            confidence=0.95,
+            stds_away_thr=0.5,  # Very tight threshold
+            cov_mat_est_method=CovMatrixEstimationMethod.NAIVE,
+        )
+        tester.update(features_of_net_samples=sampled_features)
+        result = tester.test()
+        # With large variance and tight threshold, should not converge
+        self.assertFalse(result.success, "Should not converge when features are far from observed")
+        self.assertGreaterEqual(result.statistic, 0.5, "Mahalanobis distance should exceed threshold")
+
+    def test_zero_covariance_edge_case(self):
+        """Test handling when covariance matrix is all zeros (should return infinite distance)."""
+        np.random.seed(42)
+        observed_features = np.array([5.0, 10.0])
+        # Generate features with zero variance (all identical)
+        sampled_features = np.tile(observed_features[:, None], (1, 50))
+
+        tester = ModelBootstrapTester(
+            observed_features=observed_features,
+            num_model_sub_samples=2,
+            model_subsample_size=25,
+            confidence=0.95,
+            stds_away_thr=1.0,
+            cov_mat_est_method=CovMatrixEstimationMethod.NAIVE,
+        )
+        tester.update(features_of_net_samples=sampled_features)
+        result = tester.test()
+        # With zero covariance, distance should be infinite (or very large)
+        self.assertFalse(result.success, "Should not converge with zero covariance")
+        # The Mahalanobis distance should be inf or a very large value
+        self.assertTrue(np.isnan(result.statistic),"Distance should be nan for zero covariance case")
 
 
 if __name__ == "__main__":

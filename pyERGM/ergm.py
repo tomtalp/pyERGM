@@ -100,14 +100,14 @@ class ERGM():
             if mask.shape == (self._n_nodes, self._n_nodes):
                 _mask = flatten_square_matrix_to_edge_list(mask, self._is_directed)
             elif ((mask.shape == (self._n_nodes ** 2 - self._n_nodes, 1) and self._is_directed) or
-                  (mask.shape == (self._n_nodes ** 2 - self._n_nodes // 2, 1) and not self._is_directed)
+                  (mask.shape == ((self._n_nodes ** 2 - self._n_nodes) // 2, 1) and not self._is_directed)
             ):
-                _mask = mask.copy()
+                _mask = mask.flatten()
             else:
                 raise ValueError(
                     f"Invalid mask shape. Expected: ({self._n_nodes}, {self._n_nodes}) or "
                     f"[({self._n_nodes ** 2 - self._n_nodes}, 1) for "
-                    f"directed models or ({self._n_nodes ** 2 - self._n_nodes // 2}, 1) for undirected models]. "
+                    f"directed models or ({(self._n_nodes ** 2 - self._n_nodes) // 2}, 1) for undirected models]. "
                     f"Received: {mask.shape}, the model is {'' if self._is_directed else 'un'}directed."
                 )
         return _mask
