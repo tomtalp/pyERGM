@@ -185,7 +185,7 @@ class TestObservedBootstrapTester(unittest.TestCase):
         metrics_collection = MagicMock()
         metrics_collection.metrics = []
         metrics_collection.bootstrap_observed_features = MagicMock(
-            return_value=np.zeros((1, 5))  # Return bootstrapped features
+            return_value=np.arange(5).reshape((1, 5))  # Return bootstrapped features
         )
 
         # Should not raise - 2D array should be converted to 3D
