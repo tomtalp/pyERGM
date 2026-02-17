@@ -1259,8 +1259,7 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
     def _get_flattened_edge_type_idx_assignment(self):
         # Reducing 1 because the type indexing in self._edge_type_idx_assignment is 1-based (0 is reserved for
         # non-exising edges).
-        return self._edge_type_idx_assignment[
-            ~np.eye(self._edge_type_idx_assignment.shape[0], dtype=bool)].flatten() - 1
+        return flatten_square_matrix_to_edge_list(self._edge_type_idx_assignment, is_directed=True) - 1
 
     def _get_metric_names(self):
         parameter_names = tuple()
@@ -1892,9 +1891,11 @@ class MetricsCollection:
                 change_score_i_j = self.calc_change_scores(zeros_net, (i, j))
                 net_with_i_j = zeros_net.copy()
                 net_with_i_j[i, j] = 1
-                Xs[idx, UPPER_IDX] = change_score_i_j
-                Xs[idx, LOWER_IDX] = self.calc_change_scores(zeros_net, (j, i))
-                Xs[idx, RECIPROCAL_IDX] = self.calc_change_scores(net_with_i_j, (j, i)) + change_score_i_j
+                Xs[idx, DyadStateIdx.UPPER_IDX.value] = change_score_i_j
+                Xs[idx, DyadStateIdx.LOWER_IDX.value] = self.calc_change_scores(zeros_net, (j, i))
+                Xs[idx, DyadStateIdx.RECIPROCAL_IDX.value] = (
+                        self.calc_change_scores(net_with_i_j, (j, i)) + change_score_i_j
+                )
 
                 idx += 1
         return Xs

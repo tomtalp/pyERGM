@@ -2,7 +2,7 @@
 Enum constants for ERGM configuration options.
 """
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, StrEnum
 from typing import Optional
 
 
@@ -78,3 +78,10 @@ class Reduction(StrEnum):
 class DataBootstrapSplittingMethod(StrEnum):
     """Splitting method for bootstrapping neurons"""
     UNIFORM = "uniform"
+
+class DyadStateIdx(Enum):
+    """Dyad states indexing convention"""
+    EMPTY_IDX = 0
+    UPPER_IDX = 1
+    LOWER_IDX = 2
+    RECIPROCAL_IDX = 3
