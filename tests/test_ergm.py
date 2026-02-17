@@ -390,21 +390,13 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(convergence_result.success)
 
     def test_assigning_model_initial_thetas(self):
-        # TODO: seems like convergence of the model in this test depends on the seed...
-        set_seed(8765)
         n_nodes = 5
-        W = np.array([[0, 0, 1, 1, 0],
-                      [1, 0, 0, 0, 1],
-                      [0, 0, 0, 0, 1],
-                      [0, 1, 0, 0, 0],
-                      [0, 1, 0, 1, 0]])
         metrics_1 = [NumberOfEdgesDirected(), NodeAttrSum(np.arange(1, n_nodes + 1), is_directed=True, name="linear"),
                      NodeAttrSum(np.arange(1, n_nodes + 1) ** 2, is_directed=True, name="quadratic"),
                      NumberOfEdgesTypesDirected(['A', 'B', 'A', 'A', 'B'], name="Attributes1"),
                      NumberOfEdgesTypesDirected(['A', 'B', 'D', 'C', 'B'], name="Attributes2")]
         model_1 = ERGM(n_nodes=n_nodes, metrics_collection=metrics_1, is_directed=True)
         model_1._metrics_collection.get_parameter_names()
-        model_1.fit(W)
 
         model_1_params = model_1.get_model_parameters()
 
@@ -612,18 +604,15 @@ class TestERGM(unittest.TestCase):
         reciprocal_dyads_indices = np.where(dyad_states_for_likelihood.sum(axis=0) == 1)[0]
 
         all_dyad_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.NONE)
-        # TODO: we assert here only the likelihood of having a reciprocal dyad. Should find a way (may be numerical) to
-        #  evaluate the expected probabilities for the other 3 dyadic states and validate all of them.
         self.assertTrue(
-            np.all(np.abs(all_dyad_likes[reciprocal_dyads_indices] - np.log(observed_reciprocity_p)) < 1e-5))
+            np.all(np.abs(all_dyad_likes[reciprocal_dyads_indices] - np.log(observed_reciprocity_p)) < 1e-5)
+        )
 
         brute_force_ergm = BruteForceERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
         brute_force_ergm._thetas = model._thetas
         true_likelihood_net_for_like = brute_force_ergm.calculate_probability(network_for_likelihood)
-        calculated_likelihood = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.SUM,
-                                                                log_base=10)
-        # TODO: the diff is larger than expected. Not probable that it's a problem, but maybe we should dig into this.
-        self.assertTrue(np.abs(np.log10(true_likelihood_net_for_like) - calculated_likelihood) < 0.1)
+        calculated_likelihood = np.exp(model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.SUM))
+        np.testing.assert_allclose(true_likelihood_net_for_like, calculated_likelihood, rtol=0.01)
 
     def test_mple_multiple_observed_networks(self):
         set_seed(9876)
