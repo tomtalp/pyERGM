@@ -20,6 +20,7 @@ class Sampler(ABC):
     metrics_collection : MetricsCollection
         Collection of metrics defining the ERGM model.
     """
+
     def __init__(self, thetas, metrics_collection: MetricsCollection):
         self.thetas = deepcopy(thetas)
         self.metrics_collection = metrics_collection
@@ -41,8 +42,6 @@ class NaiveMetropolisHastings(Sampler):
         ----------
         thetas : np.ndarray
             Coefficients of the ERGM
-            # TODO: should be a field of the class or passed to sample?
-        
         metrics_collection : MetricsCollection
             A MetricsCollection object that can calculate statistics of a network.
         """
@@ -61,11 +60,11 @@ class NaiveMetropolisHastings(Sampler):
         """
         self.thetas = deepcopy(thetas)
 
-    def _calculate_weighted_change_score(self, current_network, edge_flip_info: dict):
+    def _calculate_weighted_change_score(self, current_network, indices: tuple[int, int]):
         """
         Calculate g(proposed_network)-g(current_network) and then inner product with thetas.
         """
-        change_score = self.metrics_collection.calc_change_scores(current_network, edge_flip_info)
+        change_score = self.metrics_collection.calc_change_scores(current_network, indices)
         return np.dot(self.thetas, change_score)
 
     def _flip_network_edge(self, current_network, i, j):
@@ -127,13 +126,38 @@ class NaiveMetropolisHastings(Sampler):
         edge_influence = self._calc_edge_influence_on_features(net_for_change_scores)
         self._edge_proposal_dists[EdgeProposalMethod.FEATURES_INFLUENCE_SOFTMAX] = softmax(edge_influence)
 
-    def sample(self,
-               initial_state,
-               num_of_nets,
-               replace=True,
-               edge_proposal_method: EdgeProposalMethod = EdgeProposalMethod.UNIFORM,
-               burn_in: int | None = None,
-               steps_per_sample: int | None = None):
+    def _get_node_pair_flip_indices(
+            self,
+            num_flips: int,
+            net_size: int,
+            current_network: np.ndarray,
+            edge_proposal_method: EdgeProposalMethod,
+    ) -> npt.NDArray[int]:
+        if edge_proposal_method == EdgeProposalMethod.UNIFORM:
+            edges_to_flip = get_uniform_random_edges_to_flip(net_size, num_flips)
+        elif edge_proposal_method == EdgeProposalMethod.FEATURES_INFLUENCE_SUM:
+            if edge_proposal_method not in self._edge_proposal_dists.keys():
+                self._calc_proposal_dist_features_influence__sum(current_network)
+            edges_to_flip = get_custom_distribution_random_edges_to_flip(num_flips, self._edge_proposal_dists[
+                EdgeProposalMethod.FEATURES_INFLUENCE_SUM], self.metrics_collection.is_directed)
+        elif edge_proposal_method == EdgeProposalMethod.FEATURES_INFLUENCE_SOFTMAX:
+            if edge_proposal_method not in self._edge_proposal_dists.keys():
+                self._calc_proposal_dist_features_influence__softmax(current_network)
+            edges_to_flip = get_custom_distribution_random_edges_to_flip(num_flips, self._edge_proposal_dists[
+                EdgeProposalMethod.FEATURES_INFLUENCE_SOFTMAX], self.metrics_collection.is_directed)
+        else:
+            raise ValueError(f"Got an unsupported edge proposal method {edge_proposal_method}")
+        return edges_to_flip
+
+    def sample(
+            self,
+            initial_state,
+            num_of_nets,
+            replace=True,
+            edge_proposal_method: EdgeProposalMethod = EdgeProposalMethod.UNIFORM,
+            burn_in: int | None = None,
+            steps_per_sample: int | None = None,
+    ):
         """
         Sample networks using the Metropolis-Hastings algorithm.
 
@@ -174,47 +198,56 @@ class NaiveMetropolisHastings(Sampler):
             steps_per_sample = net_size ** 2
 
         num_flips = burn_in + (num_of_nets * steps_per_sample)
-        if edge_proposal_method == EdgeProposalMethod.UNIFORM:
-            edges_to_flip = get_uniform_random_edges_to_flip(net_size, num_flips)
-        elif edge_proposal_method == EdgeProposalMethod.FEATURES_INFLUENCE_SUM:
-            if edge_proposal_method not in self._edge_proposal_dists.keys():
-                self._calc_proposal_dist_features_influence__sum(current_network)
-            edges_to_flip = get_custom_distribution_random_edges_to_flip(num_flips, self._edge_proposal_dists[
-                EdgeProposalMethod.FEATURES_INFLUENCE_SUM], self.metrics_collection.is_directed)
-        elif edge_proposal_method == EdgeProposalMethod.FEATURES_INFLUENCE_SOFTMAX:
-            if edge_proposal_method not in self._edge_proposal_dists.keys():
-                self._calc_proposal_dist_features_influence__softmax(current_network)
-            edges_to_flip = get_custom_distribution_random_edges_to_flip(num_flips, self._edge_proposal_dists[
-                EdgeProposalMethod.FEATURES_INFLUENCE_SOFTMAX], self.metrics_collection.is_directed)
-        else:
-            raise ValueError(f"Got an unsupported edge proposal method {edge_proposal_method}")
 
-        random_nums_for_change_acceptance = np.random.rand(num_flips)
+        # Generate initial batch of edges and random numbers
+        edges_to_flip = self._get_node_pair_flip_indices(
+            num_flips=num_flips,
+            net_size=net_size,
+            current_network=current_network,
+            edge_proposal_method=edge_proposal_method,
+        )
+        random_nums_for_change_acceptance = np.random.rand(edges_to_flip.shape[1])
+        edges_batch_start = 0  # Iteration count when current batch started
 
         networks_count = 0
         mcmc_iter_count = 0
 
         t1 = time.time()
         while networks_count != num_of_nets:
+            # Calculate offset within current batch
+            offset_in_batch = mcmc_iter_count - edges_batch_start
+
+            # Check if we need a new batch of edges (handles case where non-replacement needs retries)
+            if offset_in_batch >= edges_to_flip.shape[1]:
+                edges_batch_start = mcmc_iter_count
+                remaining_networks = num_of_nets - networks_count
+                num_flips_needed = remaining_networks * steps_per_sample
+                edges_to_flip = self._get_node_pair_flip_indices(
+                    num_flips=num_flips_needed,
+                    net_size=net_size,
+                    current_network=current_network,
+                    edge_proposal_method=edge_proposal_method,
+                )
+                random_nums_for_change_acceptance = np.random.rand(edges_to_flip.shape[1])
+                offset_in_batch = 0
+
             # Edge flip:
-            random_edge_entry = edges_to_flip[:, mcmc_iter_count % edges_to_flip.shape[1]]
-            edge_flip_info = {
-                'edge': random_edge_entry,
-            }
+            random_edge_entry = (
+                int(edges_to_flip[0, offset_in_batch]),
+                int(edges_to_flip[1, offset_in_batch])
+            )
 
-            change_score = self._calculate_weighted_change_score(current_network, edge_flip_info)
+            change_score = self._calculate_weighted_change_score(current_network, random_edge_entry)
 
-            rand_num = random_nums_for_change_acceptance[mcmc_iter_count % edges_to_flip.shape[1]]
+            rand_num = random_nums_for_change_acceptance[offset_in_batch]
             perform_change = change_score >= 1 or rand_num <= min(1, np.exp(change_score))
             if perform_change:
-                self._flip_network_edge(current_network, edge_flip_info['edge'][0], edge_flip_info['edge'][1])
+                self._flip_network_edge(current_network, random_edge_entry[0], random_edge_entry[1])
 
             if mcmc_iter_count >= burn_in and (mcmc_iter_count - burn_in) % steps_per_sample == 0:
                 sampled_networks[:, :, networks_count] = current_network
 
                 if not replace:
-                    # TODO - Since we're flipping coins in the beginning, we're reusing them in case of the non-replacement (since we might need more coin flips that num of networks).
-                    #  Consider reflipping coins to get better "pseudorandom properties", in the case that we run out of pre-flipped coins
                     if np.unique(sampled_networks[:, :, :networks_count + 1], axis=2).shape[2] == networks_count + 1:
                         networks_count += 1
                     else:
@@ -223,7 +256,7 @@ class NaiveMetropolisHastings(Sampler):
                     networks_count += 1
                     t2 = time.time()
                     if networks_count % 100 == 0:
-                        logger.debug(f"Sampled {networks_count}/{num_of_nets} networks, time taken: {t2-t1:.2f}s")
+                        logger.debug(f"Sampled {networks_count}/{num_of_nets} networks, time taken: {t2 - t1:.2f}s")
 
             mcmc_iter_count += 1
         return sampled_networks

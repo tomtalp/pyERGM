@@ -40,9 +40,17 @@ A collection of metrics that handles the calculation of network statistics.
 
 ::: pyERGM.metrics.NumberOfEdgesDirected
 
-### NumberOfTriangles
+---
 
-::: pyERGM.metrics.NumberOfTriangles
+## Triangle Metrics
+
+### NumberOfTrianglesUndirected
+
+::: pyERGM.metrics.NumberOfTrianglesUndirected
+
+### NumberOfTrianglesDirected
+
+::: pyERGM.metrics.NumberOfTrianglesDirected
 
 ---
 

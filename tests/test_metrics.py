@@ -107,21 +107,9 @@ class TestNumberOfEdgesDirected(unittest.TestCase):
         self.assertTrue(np.allclose(Xs, np.ones(mask.sum())))
 
 
-class TestNumberOfTriangles(unittest.TestCase):
-    def test_validation(self):
-        metric = NumberOfTriangles()
-
-        W = np.array([
-            [0, 1, 0],
-            [1, 0, 1],
-            [1, 0, 0]
-        ])
-
-        with self.assertRaises(ValueError):
-            metric.calculate(W)
-
+class TestNumberOfTrianglesUndirected(unittest.TestCase):
     def test_num_of_triangles(self):
-        metric = NumberOfTriangles()
+        metric = NumberOfTrianglesUndirected()
         W = np.array([
             [0, 1, 1],
             [1, 0, 1],
@@ -146,7 +134,7 @@ class TestNumberOfTriangles(unittest.TestCase):
         self.assertEqual(total_num_triangles, calculated_number_of_triangles)
 
     def test_calc_change_score(self):
-        metric = NumberOfTriangles()
+        metric = NumberOfTrianglesUndirected()
 
         W = np.array([
             [0, 1, 1],
@@ -190,8 +178,115 @@ class TestNumberOfTriangles(unittest.TestCase):
             expected_triangles[i] = np.trace(np.linalg.matrix_power(cur_mat, 3)) / 6
             networks_sample[:, :, i] = cur_mat
 
-        res = NumberOfTriangles().calculate_for_sample(networks_sample)
+        res = NumberOfTrianglesUndirected().calculate_for_sample(networks_sample)
         self.assertTrue(np.all(res == expected_triangles))
+
+
+class TestNumberOfTrianglesDirected(unittest.TestCase):
+    def test_single_3cycle(self):
+        """Test counting a single directed 3-cycle: 0→1→2→0"""
+        metric = NumberOfTrianglesDirected()
+        W = np.array([
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 0]
+        ])
+
+        result = metric.calculate(W)
+        # tr(W³) = 3 (one cycle, counted 3 times from each starting node)
+        # Expected: 3 / 3 = 1
+        self.assertEqual(result, 1)
+
+    def test_no_cycles_dag(self):
+        """Test directed acyclic graph (no 3-cycles)"""
+        metric = NumberOfTrianglesDirected()
+        # Transitive tournament: 0→1→2→3
+        W = np.array([
+            [0, 1, 1, 1],
+            [0, 0, 1, 1],
+            [0, 0, 0, 1],
+            [0, 0, 0, 0]
+        ])
+
+        result = metric.calculate(W)
+        # No 3-cycles exist in a DAG
+        self.assertEqual(result, 0)
+
+    def test_complete_directed_tournament(self):
+        """Test complete directed tournament: all edges in one direction"""
+        metric = NumberOfTrianglesDirected()
+        # 0→1→2→3 with all edges in forward direction
+        W = np.array([
+            [0, 1, 1, 1],
+            [0, 0, 1, 1],
+            [0, 0, 0, 1],
+            [0, 0, 0, 0]
+        ])
+
+        result = metric.calculate(W)
+        # No 3-cycles (all transitive)
+        self.assertEqual(result, 0)
+
+    def test_two_separate_3cycles(self):
+        """Test network with multiple disjoint 3-cycles"""
+        metric = NumberOfTrianglesDirected()
+        # Two cycles: 0→1→2→0 and 3→4→5→3
+        W = np.zeros((6, 6))
+        # First cycle
+        W[0, 1] = W[1, 2] = W[2, 0] = 1
+        # Second cycle
+        W[3, 4] = W[4, 5] = W[5, 3] = 1
+
+        result = metric.calculate(W)
+        # Each cycle contributes 1
+        self.assertEqual(result, 2)
+
+    def test_calc_change_score_directed(self):
+        """Test change score calculation for directed networks"""
+        metric = NumberOfTrianglesDirected()
+
+        # Simple case: single 3-cycle 0→1→2→0
+        W = np.array([
+            [0, 1, 0],
+            [0, 0, 1],
+            [1, 0, 0]
+        ])
+
+        # Removing edge (0, 1): count nodes k where W[1,k] and W[k,0] exist
+        # W[1,:] = [0, 0, 1], W[:,0] = [0, 0, 1]
+        # Common: k=2 (W[1,2]=1 and W[2,0]=1)
+        # Count = 1, sign = -1 (edge exists), result = -1
+        result = metric.calc_change_score(W, (0, 1))
+        self.assertEqual(result, -1)
+
+        # Adding edge (1, 0) that doesn't add cycles.
+        # Count remains 1.
+        result = metric.calc_change_score(W, (1, 0))
+        self.assertEqual(result, 0)
+
+        # Removing and adding an existing edge to create a cycle.
+        W[2, 0] = 0
+        result = metric.calc_change_score(W, (2, 0))
+        self.assertEqual(result, 1)
+
+    def test_calculate_for_sample_directed(self):
+        """Test batch processing of directed networks"""
+        set_seed(678)
+        metric = NumberOfTrianglesDirected()
+
+        sample_size = 10
+        n = 5
+        networks_sample = np.zeros((n, n, sample_size))
+        expected_cycles = np.zeros(sample_size)
+
+        for i in range(sample_size):
+            # Generate random directed network
+            cur_mat = generate_erdos_renyi_matrix(n, 0.3, is_directed=True)
+            expected_cycles[i] = np.trace(np.linalg.matrix_power(cur_mat, 3)) / 3
+            networks_sample[:, :, i] = cur_mat
+
+        res = metric.calculate_for_sample(networks_sample)
+        np.testing.assert_array_equal(res, expected_cycles)
 
 
 class TestReciprocity(unittest.TestCase):
@@ -784,7 +879,7 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         result = metric.calculate(W)
 
         # Should have fewer features due to ignored index
-        n_features = metric._get_effective_feature_count()
+        n_features = metric.get_effective_feature_count()
         self.assertEqual(len(result), n_features)
         self.assertEqual(n_features, 3)
 
@@ -803,7 +898,7 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         metric._n_nodes = n
         metric.initialize_indices_to_ignore()
 
-        n_features = metric._get_effective_feature_count()
+        n_features = metric.get_effective_feature_count()
         self.assertEqual(n_features, 3)
 
         # Edge (0,1) is A->B which is type pair index 1 in full features.
@@ -997,7 +1092,7 @@ class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
         metric._n_nodes = n
         metric.initialize_indices_to_ignore()
 
-        n_features = metric._get_effective_feature_count()
+        n_features = metric.get_effective_feature_count()
         self.assertEqual(n_features, 2)
 
         # Calculate features
@@ -1030,7 +1125,7 @@ class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
         metric._n_nodes = n
         metric.initialize_indices_to_ignore()
 
-        n_features = metric._get_effective_feature_count()
+        n_features = metric.get_effective_feature_count()
         self.assertEqual(n_features, 2)
 
         # Edge (0,1) is A-B which is the ignored type pair (index 1).
@@ -1585,21 +1680,25 @@ class TestMetricsCollection(unittest.TestCase):
         n = 18
         receiver = InDegree()
 
-        collection = MetricsCollection([receiver], is_directed=True, n_nodes=n, do_copy_metrics=False)
-        self.assertEqual(receiver._get_effective_feature_count(), n)
+        with patch.object(MetricsCollection, '_copy_metrics', return_value=(receiver,)):
+            collection = MetricsCollection([receiver], is_directed=True, n_nodes=n)
+        self.assertEqual(receiver.get_effective_feature_count(), n)
 
         receiver = InDegree(indices_from_user=[0])
-        collection = MetricsCollection([receiver], is_directed=True, n_nodes=n, do_copy_metrics=False)
-        self.assertEqual(receiver._get_effective_feature_count(), n - 1)
+        with patch.object(MetricsCollection, '_copy_metrics', return_value=(receiver,)):
+            collection = MetricsCollection([receiver], is_directed=True, n_nodes=n)
+        self.assertEqual(receiver.get_effective_feature_count(), n - 1)
 
         sender = OutDegree()
 
-        collection = MetricsCollection([sender], is_directed=True, n_nodes=n, do_copy_metrics=False)
-        self.assertEqual(sender._get_effective_feature_count(), n)
+        with patch.object(MetricsCollection, '_copy_metrics', return_value=(sender,)):
+            collection = MetricsCollection([sender], is_directed=True, n_nodes=n)
+        self.assertEqual(sender.get_effective_feature_count(), n)
 
         sender = OutDegree(indices_from_user=[0])
-        collection = MetricsCollection([sender], is_directed=True, n_nodes=n, do_copy_metrics=False)
-        self.assertEqual(sender._get_effective_feature_count(), n - 1)
+        with patch.object(MetricsCollection, '_copy_metrics', return_value=(sender,)):
+            collection = MetricsCollection([sender], is_directed=True, n_nodes=n)
+        self.assertEqual(sender.get_effective_feature_count(), n - 1)
 
     def test_metrics_setup(self):
         metrics = [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()]
@@ -1761,8 +1860,9 @@ class TestMetricsCollection(unittest.TestCase):
         for name, scenario_data in test_scenarios.items():
             net_size = scenario_data.get("n", n)
 
-            collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True,
-                                           n_nodes=net_size, do_copy_metrics=False)
+            with patch.object(MetricsCollection, '_copy_metrics', return_value=tuple(scenario_data["metrics"])):
+                collection = MetricsCollection(scenario_data["metrics"], is_directed=True, fix_collinearity=True,
+                                               n_nodes=net_size)
 
             # Check the general number of features matches the expectation
             self.assertEqual(collection.num_of_features, scenario_data["expected_num_of_features"])
@@ -1781,7 +1881,7 @@ class TestMetricsCollection(unittest.TestCase):
 
     def test_calculate_statistics(self):
         # Test undirected graphs
-        metrics = [NumberOfEdgesUndirected(), NumberOfTriangles()]
+        metrics = [NumberOfEdgesUndirected(), NumberOfTrianglesUndirected()]
         collection = MetricsCollection(metrics, is_directed=False, n_nodes=3)
 
         W = np.array([
@@ -1811,7 +1911,7 @@ class TestMetricsCollection(unittest.TestCase):
 
     def test_get_num_of_features(self):
         n = 4
-        metrics = [NumberOfEdgesUndirected(), NumberOfTriangles()]
+        metrics = [NumberOfEdgesUndirected(), NumberOfTrianglesUndirected()]
         collection = MetricsCollection(metrics, is_directed=False, n_nodes=n)
         num_of_features = collection.num_of_features
 
@@ -1846,56 +1946,12 @@ class TestMetricsCollection(unittest.TestCase):
         ])
 
         flipped_indices = (2, 0)
-        edge_flip_info = {
-            'edge': flipped_indices
-        }
-        result = collection.calc_change_scores(W1, edge_flip_info=edge_flip_info)
+        result = collection.calc_change_scores(W1, indices=flipped_indices)
 
         # 1st is -1 because we lost an edge, and 3rd entry is -1 because node #2 lost it's reciprocity
         expected_result = np.array([-1, 0, -1, 0])
 
         self.assertTrue(np.all(result == expected_result))
-
-    def test_calculate_change_scores_all_edges(self):
-        types = ['A', 'B', 'A', 'B']
-        metrics = [NumberOfEdgesDirected(), NumberOfEdgesTypesDirected(types)]
-
-        W1 = np.array([
-            [0, 1, 0, 0],
-            [1, 0, 0, 1],
-            [1, 1, 0, 0],
-            [0, 0, 1, 0]
-        ])
-        n_nodes = W1.shape[0]
-
-        expected_full_change_score = np.array([
-            [-1, 0, -1, 0, 0],
-            [1, 1, 0, 0, 0],
-            [1, 0, 1, 0, 0],
-            [-1, 0, 0, -1, 0],
-            [1, 0, 0, 1, 0],
-            [-1, 0, 0, 0, -1],
-            [-1, -1, 0, 0, 0],
-            [-1, 0, -1, 0, 0],
-            [1, 0, 1, 0, 0],
-            [1, 0, 0, 1, 0],
-            [1, 0, 0, 0, 1],
-            [-1, 0, 0, -1, 0]
-        ])
-
-        collection = MetricsCollection(metrics, is_directed=True, n_nodes=n_nodes)
-
-        # The collinearity fixer is supposed to remove one attribute from the NumberOfEdgesTypesDirected metric
-        # self.assertEqual(len(collection.metrics[1]._indices_to_ignore), 1)
-        self.assertEqual(np.sum(collection.metrics[1]._indices_to_ignore), 1)
-
-        idx_to_ignore = np.where(collection.metrics[1]._indices_to_ignore)[0][0]
-
-        res = collection.calculate_change_scores_all_edges(W1)
-
-        # Deleting the 1+idx_to_ignore because the first entry is the NumberOfEdgesDirected metric
-        expected_full_change_score = np.delete(expected_full_change_score, 1 + idx_to_ignore, axis=1)
-        self.assertTrue(np.all(expected_full_change_score == res))
 
     def test_prepare_mple_data(self):
         types = ['A', 'B', 'A', 'B']
@@ -2440,7 +2496,7 @@ class TestNumberOfTrianglesMPLE(unittest.TestCase):
     def test_triangles_calculate_mple_regressors(self):
         """Test MPLE regressor computation for triangles."""
         n = 4
-        metric = NumberOfTriangles()
+        metric = NumberOfTrianglesUndirected()
         metric._n_nodes = n
 
         W = np.array([
@@ -2503,7 +2559,7 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(result, 0)
 
         # Test NumberOfTriangles
-        metric = NumberOfTriangles()
+        metric = NumberOfTrianglesUndirected()
         result = metric.calculate(W)
         self.assertEqual(result, 0)
 
@@ -2550,7 +2606,7 @@ class TestEdgeCases(unittest.TestCase):
         self.assertEqual(result, n * (n - 1) // 2)
 
         # Test NumberOfTriangles - complete graph of n nodes has C(n,3) triangles
-        metric = NumberOfTriangles()
+        metric = NumberOfTrianglesUndirected()
         result = metric.calculate(W)
         expected_triangles = n * (n - 1) * (n - 2) // 6
         self.assertEqual(result, expected_triangles)

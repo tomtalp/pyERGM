@@ -1,40 +1,14 @@
-import abc
-import enum
 from abc import ABC, abstractmethod
-from typing import Collection, Callable, Sequence, Any
+from typing import Sequence
 from copy import deepcopy
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import pdist, squareform
 from enum import Enum
-from collections import Counter
 
-from pyERGM.logging_config import logger
+from pyERGM.constants import OptimizationScheme
 from pyERGM.utils import *
 from pyERGM.cluster_utils import *
-
-
-def _find_unnamed_duplicate_metrics(metrics):
-    """
-    Find metrics that are duplicated (same class) and don't have user-provided names.
-
-    Parameters
-    ----------
-    metrics : list
-        List of Metric objects.
-
-    Returns
-    -------
-    list
-        List of (metric, class_name) tuples for metrics needing disambiguation.
-    """
-    class_counts = Counter(type(m).__name__ for m in metrics)
-    unnamed_duplicates = []
-    for metric in metrics:
-        class_name = type(metric).__name__
-        if class_counts[class_name] > 1 and metric._name is None:
-            unnamed_duplicates.append((metric, class_name))
-    return unnamed_duplicates
 
 
 class Metric(ABC):
@@ -46,6 +20,7 @@ class Metric(ABC):
     All concrete metric implementations must inherit from this class.
 
     """
+
     def __init__(self, name: str | None = None):
         # Each metric either expects directed or undirected graphs. This field should be initialized in the constructor
         # and should not change.
@@ -65,8 +40,9 @@ class Metric(ABC):
         """
         self._indices_to_ignore = np.array([False] * self._get_total_feature_count())
 
-        if hasattr(self, "_indices_from_user") and self._indices_from_user is not None:
-            self.update_indices_to_ignore(self._indices_from_user)
+        if hasattr(self, "_indices_from_user"):
+            if self._indices_from_user is not None:
+                self.update_indices_to_ignore(self._indices_from_user)
 
     def _handle_indices_to_ignore(self, res, axis=0):
         if self._indices_to_ignore is None:
@@ -98,7 +74,7 @@ class Metric(ABC):
             return result[0]
         return result[..., 0]
 
-    def _get_effective_feature_count(self):
+    def get_effective_feature_count(self):
         """
         How many features does this metric produce. Defaults to 1.
         """
@@ -117,6 +93,10 @@ class Metric(ABC):
         Returns the name prefix for parameter names (label if set, else empty).
         """
         return f"{self._name}_" if self._name is not None else ""
+
+    @property
+    def metric_name(self):
+        return self._get_name_prefix() + str(self)
 
     def update_indices_to_ignore(self, indices_to_ignore):
         """
@@ -168,6 +148,28 @@ class Metric(ABC):
             or (num_features, sample_size) for vector metrics.
         """
         pass
+
+    def calculate_bootstrapped_features(
+        self,
+        first_halves_to_use: np.ndarray,
+        second_halves_to_use: np.ndarray,
+        first_halves_indices: np.ndarray,
+        second_halves_indices: np.ndarray,
+    ) -> np.ndarray:
+        """
+        Calculate bootstrapped features for observed network analysis.
+
+        This method is used for bootstrap-based confidence interval estimation
+        and is only supported by specific metric implementations.
+
+        Raises
+        ------
+        NotImplementedError
+            If the metric does not support bootstrapping.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} does not support bootstrapping"
+        )
 
     def calculate_mple_regressors(
             self,
@@ -235,8 +237,8 @@ class Metric(ABC):
 
     def _get_metric_names(self):
         """
-        Get the names of the features that this metric produces. Defaults to the name of the metric if the metric creates a single feature, and multiple
-        names if the metric creates multiple features.
+        Get the names of the features that this metric produces. Defaults to the name of the metric if the metric
+        creates a single feature, and multiple names if the metric creates multiple features.
 
         Returns
         -------
@@ -244,16 +246,15 @@ class Metric(ABC):
             A tuple of strings, each string is the name of a parameter that this metric produces.
         """
         total_n_features = self._get_total_feature_count()
-        metric_name = self._get_name_prefix() + str(self)
         if total_n_features == 1:
 
-            return (metric_name,)
+            return (self.metric_name,)
         else:
             parameter_names = ()
             for i in range(total_n_features):
                 if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                     continue
-                parameter_names += (f"{metric_name}_{i + 1}",)
+                parameter_names += (f"{self.metric_name}_{i + 1}",)
             return parameter_names
 
     def _get_ignored_features(self):
@@ -285,6 +286,7 @@ class NumberOfEdges(Metric):
     This metric counts the total number of edges present in a network.
     Use NumberOfEdgesDirected or NumberOfEdgesUndirected for concrete implementations.
     """
+
     def __str__(self):
         raise NotImplementedError
 
@@ -303,7 +305,7 @@ class NumberOfEdges(Metric):
         )
 
     def calculate(self, W: np.ndarray, mask: npt.NDArray[bool] | None = None) -> float:
-        return self.calculate_for_sample(expand_net_dims(W), mask=mask)[0]
+        return float(self.calculate_for_sample(expand_net_dims(W), mask=mask)[0])
 
     @staticmethod
     @njit
@@ -371,6 +373,7 @@ class NumberOfEdgesUndirected(NumberOfEdges):
     In an undirected network, each edge is counted once (even though it appears
     twice in the adjacency matrix due to symmetry).
     """
+
     def __str__(self):
         return "num_edges_undirected"
 
@@ -390,6 +393,7 @@ class NumberOfEdgesDirected(NumberOfEdges):
     In a directed network, each directed edge (i -> j) is counted separately
     from its reverse (j -> i).
     """
+
     def __str__(self):
         return "num_edges_directed"
 
@@ -402,8 +406,57 @@ class NumberOfEdgesDirected(NumberOfEdges):
         return 1
 
 
-# TODO: change the name of this one to undirected and implement also a directed version?
 class NumberOfTriangles(Metric):
+    """
+    Abstract base class for counting triangles/3-cycles in a network.
+
+    A triangle (undirected) or 3-cycle (directed) is a set of three nodes
+    where they form a closed path. This is a measure of network clustering
+    and transitivity.
+
+    Use NumberOfTrianglesUndirected or NumberOfTrianglesDirected for concrete
+    implementations.
+
+    Notes
+    -----
+    The count is computed using matrix multiplication: tr(W^3) / divisor, where
+    W is the adjacency matrix. The divisor is 6 for undirected (each triangle
+    counted 6 times) or 3 for directed (each 3-cycle counted 3 times).
+    """
+
+    def __str__(self):
+        raise NotImplementedError
+
+    def __init__(self, name: str | None = None):
+        super().__init__(name=name)
+        self._is_dyadic_independent = False
+
+    @staticmethod
+    def _get_triangle_divisor() -> int:
+        """Return the divisor for normalizing triangle count."""
+        raise NotImplementedError
+
+    def calculate(self, W: np.ndarray):
+        return self.calculate_for_sample(expand_net_dims(W))[0]
+
+    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
+        # When edge (i,j) is toggled, affected triangles/3-cycles are those containing
+        # this edge. For each affected structure, we count 2-length paths from j to i
+        # (since the cycle must close: i→j→k→i). This equals the number of nodes k
+        # where both W[j,k] and W[k,i] exist, which is the (j,i)-th entry of W^2.
+        # If the edge is turned on, the change is positive; otherwise negative.
+
+        i, j = indices
+        sign = -1 if current_network[i, j] else 1
+        return sign * np.dot(current_network[j], current_network[:, i])
+
+    def calculate_for_sample(self, networks_sample: np.ndarray):
+        return np.einsum(
+            'ijk,jlk,lik->k', networks_sample, networks_sample, networks_sample
+        ) // (3 * self._get_triangle_divisor())
+
+
+class NumberOfTrianglesUndirected(NumberOfTriangles):
     """
     Metric for counting triangles in an undirected network.
 
@@ -412,36 +465,50 @@ class NumberOfTriangles(Metric):
 
     Notes
     -----
-    Currently only implemented for undirected networks. The count is computed
-    using matrix multiplication: tr(W^3) / 6, where W is the adjacency matrix.
+    The count is computed using matrix multiplication: tr(W^3) / 6, where W
+    is the adjacency matrix.
     """
+
     def __str__(self):
         return "num_triangles"
 
     def __init__(self, name: str | None = None):
         super().__init__(name=name)
         self._is_directed = False
-        self._is_dyadic_independent = False
 
-    def calculate(self, W: np.ndarray):
-        if not np.all(W.T == W):
-            raise ValueError("NumOfTriangles not implemented for directed graphs")
-        return self.calculate_for_sample(expand_net_dims(W))[0]
-
-    def calc_change_score(self, current_network: np.ndarray, indices: tuple):
-        # The triangles that are affected by the edge toggling are those that involve it, namely, if the (i,j)-th edge
-        # is toggled, the change in absolute value equals to the number of nodes k for which the edges (i,k) and (j,k)
-        # exist. This is equivalent to the number of 2-length paths from i to j, which is the (i,j)-th entry of W^2.
-        # If the edge is turned on, the change is positive, and otherwise negative.
-
-        sign = -1 if current_network[indices[0], indices[1]] else 1
-        return sign * np.dot(current_network[indices[0]], current_network[:, indices[1]])
-
-    def calculate_for_sample(self, networks_sample: np.ndarray):
-        return np.einsum('ijk,jlk,lik->k', networks_sample, networks_sample, networks_sample) // (3 * 2)
+    @staticmethod
+    def _get_triangle_divisor() -> int:
+        return 2
 
 
-class BaseDegreeVector(Metric, abc.ABC):
+class NumberOfTrianglesDirected(NumberOfTriangles):
+    """
+    Metric for counting directed 3-cycles in a directed network.
+
+    A directed 3-cycle is a set of three nodes i, j, k where edges form
+    a closed directed path: i→j→k→i. This is a measure of network
+    clustering in directed networks.
+
+    Notes
+    -----
+    The count is computed using matrix multiplication: tr(W^3) / 3, where W
+    is the adjacency matrix. Each directed 3-cycle is counted exactly 3 times
+    in the trace (once for each possible starting node in the cycle).
+    """
+
+    def __str__(self):
+        return "num_triangles_directed"
+
+    def __init__(self, name: str | None = None):
+        super().__init__(name=name)
+        self._is_directed = True
+
+    @staticmethod
+    def _get_triangle_divisor() -> int:
+        return 1
+
+
+class BaseDegreeVector(Metric, ABC):
     """
     Abstract base class for calculating degree vectors in networks.
 
@@ -476,14 +543,15 @@ class BaseDegreeVector(Metric, abc.ABC):
     ):
         super().__init__(name=name)
 
-        self._indices_from_user = np.array(indices_from_user, dtype=int).copy() if indices_from_user is not None else None
+        self._indices_from_user = np.array(indices_from_user,
+                                           dtype=int).copy() if indices_from_user is not None else None
         self._is_directed = is_directed
         self._is_dyadic_independent = True
         self.does_support_mask = True
 
         self._summation_axis = summation_axis
 
-    @abc.abstractmethod
+    @abstractmethod
     def _get_change_score_indices_from_summation_axis(
             self,
             edge_indices: tuple[int, int],
@@ -550,7 +618,7 @@ class BaseDegreeVector(Metric, abc.ABC):
         # model during optimization, so we must first calculate the degrees for all the nodes (thus the initialization
         # of a new instance, which makes sure that no indices are ignored), and then ignore the indices that will be
         # removed by the metric.
-        fresh_instance = self.__class__()  # No child class has a `is_directed` input to the constructor.
+        fresh_instance = self._create_fresh()  # type: ignore[attr-defined]
         degrees_first_halves = fresh_instance.calculate_for_sample(first_halves_to_use) * (
                 num_nodes_in_observed - 1) / (num_nodes_in_first_half - 1)
         fresh_instance._n_nodes = num_nodes_in_second_half
@@ -590,6 +658,11 @@ class InDegree(BaseDegreeVector):
             indices_from_user=indices_from_user,
             name=name,
         )
+
+    @classmethod
+    def _create_fresh(cls) -> "InDegree":
+        """Create a fresh instance for internal use (bootstrap calculations)."""
+        return cls()
 
     def _get_change_score_indices_from_summation_axis(
             self,
@@ -642,6 +715,11 @@ class OutDegree(BaseDegreeVector):
             name=name,
         )
 
+    @classmethod
+    def _create_fresh(cls) -> "OutDegree":
+        """Create a fresh instance for internal use (bootstrap calculations)."""
+        return cls()
+
     def _get_change_score_indices_from_summation_axis(
             self,
             edge_indices: tuple[int, int],
@@ -657,11 +735,12 @@ class OutDegree(BaseDegreeVector):
             observed_network: np.ndarray,
     ) -> None:
         num_neurons = num_edges_to_num_nodes(edge_indices_mask.size, is_directed=True)
-        out_deg_xs = np.repeat(np.eye(num_neurons), num_neurons-1, axis=0)
+        out_deg_xs = np.repeat(np.eye(num_neurons), num_neurons - 1, axis=0)
         out_deg_xs = self._handle_indices_to_ignore(out_deg_xs, axis=1)
         # See comment in InDegree.calculate_mple_regressors on loop performance.
         for masked_idx, non_masked_idx in enumerate(np.where(edge_indices_mask)[0]):
             Xs_out[masked_idx, feature_col_indices] = out_deg_xs[non_masked_idx]
+
 
 class UndirectedDegree(BaseDegreeVector):
     """
@@ -686,10 +765,15 @@ class UndirectedDegree(BaseDegreeVector):
     def __init__(self, indices_from_user=None, name: str | None = None):
         super().__init__(
             is_directed=False,
-            summation_axis=BaseDegreeVector.SummationAxis.ROWS, # it doesn't matter over which axis to sum
+            summation_axis=BaseDegreeVector.SummationAxis.ROWS,  # it doesn't matter over which axis to sum
             indices_from_user=indices_from_user,
             name=name,
         )
+
+    @classmethod
+    def _create_fresh(cls) -> "UndirectedDegree":
+        """Create a fresh instance for internal use (bootstrap calculations)."""
+        return cls()
 
     def _get_change_score_indices_from_summation_axis(
             self,
@@ -844,12 +928,11 @@ class ExWeightNumEdges(Metric):
 
     Parameters
     ----------
-    exogenous_attr : Collection
+    exogenous_attr : Sequence[Any]
         Exogenous attributes for each node in the network.
     """
 
-    # TODO: Collection doesn't necessarily support __getitem__, find a typing hint of a sized Iterable that does.
-    def __init__(self, exogenous_attr: Collection, name: str | None = None):
+    def __init__(self, exogenous_attr: Sequence[Any], name: str | None = None):
         super().__init__(name=name)
         self.exogenous_attr = exogenous_attr
         self.edge_weights = None
@@ -923,7 +1006,7 @@ class ExWeightNumEdges(Metric):
         else:
             up_triangle_indices = np.triu_indices(num_nodes, k=1)
             ex_weight_num_edges_xs = self.edge_weights[:, up_triangle_indices[0],
-                                             up_triangle_indices[1]].transpose()
+                                     up_triangle_indices[1]].transpose()
         # See comment in InDegree.calculate_mple_regressors on loop performance.
         for masked_idx, non_masked_idx in enumerate(np.where(edge_indices_mask)[0]):
             Xs_out[masked_idx, feature_col_indices] = ex_weight_num_edges_xs[non_masked_idx]
@@ -983,7 +1066,7 @@ class NumberOfEdgesTypes(Metric):
 
         self.does_support_mask = True
 
-        self._effective_feature_count = self._get_effective_feature_count()
+        self._effective_feature_count = self.get_effective_feature_count()
         self._indices_to_ignore_up_to_idx = np.cumsum(self._indices_to_ignore)
 
         self.indices_of_types = {}
@@ -1025,7 +1108,7 @@ class NumberOfEdgesTypes(Metric):
 
     def calculate_for_sample(self, networks_sample: np.ndarray, mask: npt.NDArray[bool] | None = None):
         sample_size = networks_sample.shape[2]
-        stats = np.zeros((self._get_effective_feature_count(), sample_size))
+        stats = np.zeros((self.get_effective_feature_count(), sample_size))
         mask = None if mask is None else reshape_flattened_off_diagonal_elements_to_square(mask, self._is_directed)
         for type_pair in self.sorted_type_pairs:
             type_pair_idx = self._sorted_type_pairs_indices[type_pair]
@@ -1046,14 +1129,12 @@ class NumberOfEdgesTypes(Metric):
             stats[effective_idx] += stat
         return stats / self._get_num_edges_in_mat_factor()
 
-    # TODO: when we finally make calculate_for_sample the mandatory abstract method in Metric and remove calculate
-    #  entirely or return the first matrix returned by calculate_for_sample, change this accordingly as well.
     def calculate(self, network: np.ndarray, mask: npt.NDArray[bool] | None = None):
         return self.calculate_for_sample(expand_net_dims(network), mask=mask)[..., -1]
 
     def update_indices_to_ignore(self, indices_to_ignore):
         super().update_indices_to_ignore(indices_to_ignore)
-        self._effective_feature_count = self._get_effective_feature_count()
+        self._effective_feature_count = self.get_effective_feature_count()
         self._indices_to_ignore_up_to_idx = np.cumsum(self._indices_to_ignore)
 
     def initialize_indices_to_ignore(self):
@@ -1152,14 +1233,12 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
     def _get_metric_names(self):
         parameter_names = tuple()
 
-        metric_name = self._get_name_prefix() + str(self)
-
         sorted_canonical_type_pairs = self._get_sorted_canonical_type_pairs()
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                 continue
             type_pair = str(sorted_canonical_type_pairs[i][0]) + "__" + str(sorted_canonical_type_pairs[i][1])
-            parameter_names += (f"{metric_name}_{type_pair}",)
+            parameter_names += (f"{self.metric_name}_{type_pair}",)
 
         return parameter_names
 
@@ -1167,13 +1246,12 @@ class NumberOfEdgesTypesUndirected(NumberOfEdgesTypes):
         if self._indices_to_ignore is None or not np.any(self._indices_to_ignore):
             return tuple()
 
-        metric_name = self._get_name_prefix() + str(self)
         ignored_features = ()
         sorted_canonical_type_pairs = self._get_sorted_canonical_type_pairs()
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                 type_pair = str(sorted_canonical_type_pairs[i][0]) + "__" + str(sorted_canonical_type_pairs[i][1])
-                ignored_features += (f"{metric_name}_{type_pair}",)
+                ignored_features += (f"{self.metric_name}_{type_pair}",)
 
         return ignored_features
 
@@ -1188,8 +1266,8 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
 
     Parameters
     ----------
-    exogenous_attr : Collection
-        A collection of attributes assigned to each node in a graph with n nodes.
+    exogenous_attr : Sequence[Any]
+        A sequence of attributes assigned to each node in a graph with n nodes.
 
     indices_from_user : list, optional
         List of indices to ignore in the metric calculation.
@@ -1218,19 +1296,16 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
     def _get_flattened_edge_type_idx_assignment(self):
         # Reducing 1 because the type indexing in self._edge_type_idx_assignment is 1-based (0 is reserved for
         # non-exising edges).
-        return self._edge_type_idx_assignment[
-            ~np.eye(self._edge_type_idx_assignment.shape[0], dtype=bool)].flatten() - 1
+        return flatten_square_matrix_to_edge_list(self._edge_type_idx_assignment, is_directed=True) - 1
 
     def _get_metric_names(self):
         parameter_names = tuple()
-
-        metric_name = self._get_name_prefix() + str(self)
 
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                 continue
             type_pair = str(self.sorted_type_pairs[i][0]) + "__" + str(self.sorted_type_pairs[i][1])
-            parameter_names += (f"{metric_name}_{type_pair}",)
+            parameter_names += (f"{self.metric_name}_{type_pair}",)
 
         return parameter_names
 
@@ -1238,12 +1313,11 @@ class NumberOfEdgesTypesDirected(NumberOfEdgesTypes):
         if self._indices_to_ignore is None or not np.any(self._indices_to_ignore):
             return tuple()
 
-        metric_name = self._get_name_prefix() + str(self)
         ignored_features = ()
         for i in range(self._get_total_feature_count()):
             if self._indices_to_ignore is not None and self._indices_to_ignore[i]:
                 type_pair = str(self.sorted_type_pairs[i][0]) + "__" + str(self.sorted_type_pairs[i][1])
-                ignored_features += (f"{metric_name}_{type_pair}",)
+                ignored_features += (f"{self.metric_name}_{type_pair}",)
 
         return ignored_features
 
@@ -1264,8 +1338,8 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
         Whether the network is directed.
     """
 
-    def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool, name: str | None = None):
-        # todo: decorator that checks inputs and returns np.ndarray if the inputs were valid, and an error otherwise
+    def __init__(self, exogenous_attr: pd.DataFrame | pd.Series | np.ndarray | list | tuple, is_directed: bool,
+                 name: str | None = None):
         if isinstance(exogenous_attr, (pd.DataFrame, pd.Series, list, tuple)):
             exogenous_attr = np.array(exogenous_attr)
         elif not isinstance(exogenous_attr, np.ndarray):
@@ -1295,7 +1369,7 @@ class SumDistancesConnectedNeurons(ExWeightNumEdges):
 
 
 class NodeAttrSum(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection, is_directed: bool, name: str | None = None):
+    def __init__(self, exogenous_attr: Sequence[Any], is_directed: bool, name: str | None = None):
         super().__init__(exogenous_attr, name=name)
         self._is_directed = is_directed
 
@@ -1316,7 +1390,7 @@ class NodeAttrSum(ExWeightNumEdges):
 
 
 class NodeAttrSumOut(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection, name: str | None = None):
+    def __init__(self, exogenous_attr: Sequence[Any], name: str | None = None):
         super().__init__(exogenous_attr, name=name)
         self._is_directed = True
 
@@ -1335,7 +1409,7 @@ class NodeAttrSumOut(ExWeightNumEdges):
 
 
 class NodeAttrSumIn(ExWeightNumEdges):
-    def __init__(self, exogenous_attr: Collection, name: str | None = None):
+    def __init__(self, exogenous_attr: Sequence[Any], name: str | None = None):
         super().__init__(exogenous_attr, name=name)
         self._is_directed = True
 
@@ -1352,6 +1426,7 @@ class NodeAttrSumIn(ExWeightNumEdges):
     def __str__(self):
         return "node_attribute_in"
 
+
 class MetricsCollection:
     """
     A collection of metrics for ERGM models.
@@ -1362,8 +1437,8 @@ class MetricsCollection:
 
     Parameters
     ----------
-    metrics : Collection[Metric]
-        Collection of Metric instances to include in the model.
+    metrics : Sequence[Metric]
+        Sequence of Metric instances to include in the model.
     is_directed : bool
         Whether the network is directed.
     n_nodes : int
@@ -1374,30 +1449,42 @@ class MetricsCollection:
         Number of random networks to sample for collinearity detection. Default is 1000.
     is_collinearity_distributed : bool, optional
         If True, distribute collinearity fixing computation. Default is False.
-    do_copy_metrics : bool, optional
-        If True, create deep copies of input metrics. Default is True.
     mask : np.ndarray, optional
         Boolean mask indicating which edges to consider (1D flattened). Default is None.
     **kwargs
         Additional keyword arguments for collinearity fixer configuration.
     """
 
-    def __init__(self,
-                 metrics: Collection[Metric],
-                 is_directed: bool,
-                 n_nodes: int,
-                 fix_collinearity=True,
-                 collinearity_fixer_sample_size=1000,
-                 is_collinearity_distributed=False,
-                 # TODO: For tests only, find a better solution
-                 do_copy_metrics=True,
-                 mask: npt.NDArray[bool] | None = None,
-                 **kwargs):
+    @staticmethod
+    def _copy_metrics(metrics: Sequence[Metric]) -> tuple:
+        """
+        Initialize metrics by creating deep copies to avoid modifying the originals.
+
+        Parameters
+        ----------
+        metrics : Sequence[Metric]
+            The metrics to initialize.
+
+        Returns
+        -------
+        tuple
+            A tuple of copied metrics.
+        """
+        return tuple([deepcopy(metric) for metric in metrics])
+
+    def __init__(
+            self,
+            metrics: Sequence[Metric],
+            is_directed: bool,
+            n_nodes: int,
+            fix_collinearity=True,
+            collinearity_fixer_sample_size=1000,
+            is_collinearity_distributed=False,
+            mask: npt.NDArray[bool] | None = None,
+            **kwargs
+    ):
         logger.debug("Initializing MetricsCollection")
-        if not do_copy_metrics:
-            self.metrics = tuple([metric for metric in metrics])
-        else:
-            self.metrics = tuple([deepcopy(metric) for metric in metrics])
+        self.metrics = MetricsCollection._copy_metrics(metrics)
 
         for m in self.metrics:
             m._n_nodes = n_nodes
@@ -1408,12 +1495,18 @@ class MetricsCollection:
         if len(set(metric_names)) < len(metric_names):
             raise ValueError(f"Got at least 2 metrics with the same name - {metric_names}")
 
+        self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
+
         self.is_directed = is_directed
         self.mask = None
         if mask is not None:
             if mask.ndim != 1:
                 raise ValueError(f"MetricsCollection expects flattened masks (1D). Got {mask.ndim}D")
-            self.mask = mask.copy()
+            self.mask = mask
+
+        if OptimizationScheme.MPLE != self.choose_optimization_scheme() and self.mask is not None:
+            raise NotImplementedError("Masking is currently supported only for edge independent models.")
+
         for x in self.metrics:
             if (x._is_directed is not None) and (x._is_directed != self.is_directed):
                 model_is_directed_str = "a directed" if self.is_directed else "an undirected"
@@ -1425,7 +1518,6 @@ class MetricsCollection:
                                  f"masks!")
         self.n_nodes = n_nodes
 
-        self._has_dyadic_dependent_metrics = any([not x._is_dyadic_independent for x in self.metrics])
         if is_collinearity_distributed and self._has_dyadic_dependent_metrics:
             raise ValueError(
                 "Distributed optimization is only supported for dyadic-independent models. "
@@ -1433,13 +1525,12 @@ class MetricsCollection:
                 f"{[str(m) for m in self.metrics if not m._is_dyadic_independent]}"
             )
 
-
         # Returns the number of features that are being calculated. Since a single metric might return more than one
         # feature, the length of the statistics vector might be larger than the amount of metrics. Since it also depends
         # on the network size, n is a mandatory parameters. That's why we're using the get_effective_feature_count
         # function
         self.num_of_features = self.calc_num_of_features()
-        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
+        self.features_per_metric = np.array([metric.get_effective_feature_count() for metric in self.metrics])
 
         if fix_collinearity:
             logger.debug("Starting collinearity fix")
@@ -1452,13 +1543,12 @@ class MetricsCollection:
 
         self.num_of_metrics = len(self.metrics)
         self.metric_names = tuple([str(metric) for metric in self.metrics])
-        
 
     def _delete_metric(self, metric: Metric):
         self.metrics = tuple([m for m in self.metrics if m != metric])
 
     def calc_num_of_features(self):
-        return sum([metric._get_effective_feature_count() for metric in self.metrics])
+        return sum([metric.get_effective_feature_count() for metric in self.metrics])
 
     def get_metric(self, metric_name: str) -> Metric:
         """
@@ -1466,17 +1556,21 @@ class MetricsCollection:
         """
         return self.metrics[self.metric_names.index(metric_name)]
 
-    def get_metric_by_feat_idx(self, idx: int):
+    def get_metric_by_feat_idx(self, idx: int) -> Metric:
         cum_sum_num_feats = 0
         for m in self.metrics:
-            cum_sum_num_feats += m._get_effective_feature_count()
+            cum_sum_num_feats += m.get_effective_feature_count()
             if cum_sum_num_feats > idx:
                 return m
+        raise ValueError(
+            f"Feature index {idx} out of bounds. "
+            f"Valid range: [0, {cum_sum_num_feats - 1}]"
+        )
 
     def get_feature_idx_within_metric(self, idx: int):
         cum_sum_num_feats = 0
         for m_idx in range(len(self.metrics)):
-            next_met_num_feats = self.metrics[m_idx]._get_effective_feature_count()
+            next_met_num_feats = self.metrics[m_idx].get_effective_feature_count()
             if cum_sum_num_feats + next_met_num_feats > idx:
                 # We want to return the index in the "full" array, namely regardless of ignored features. So, in case
                 # there are indices that are ignored, we must take the returned index from the array of non-ignored
@@ -1498,6 +1592,25 @@ class MetricsCollection:
             else:
                 cum_sum_num_feats += next_met_num_feats
 
+    def _metric_feature_iter(self):
+        """Iterate over metrics with feature index tracking.
+
+        Yields:
+            (metric, start_idx, n_features) for each metric in the collection
+
+        This helper eliminates duplication in the common pattern:
+            feature_idx = 0
+            for metric in self.metrics:
+                n_features = metric._get_effective_feature_count()
+                ...process metric...
+                feature_idx += n_features
+        """
+        feature_idx = 0
+        for metric in self.metrics:
+            n_features = metric.get_effective_feature_count()
+            yield metric, feature_idx, n_features
+            feature_idx += n_features
+
     def calc_statistics_for_binomial_tensor_local(self, tensor_size, p=0.5):
         sample = generate_binomial_tensor(self.n_nodes, tensor_size, p=p)
 
@@ -1512,16 +1625,14 @@ class MetricsCollection:
         return self.calculate_sample_statistics(sample)
 
     def calc_statistics_for_binomial_tensor_distributed(self, tensor_size, p=0.5, num_samples_per_job=1):
-        # TODO: currently, if tensor_size % num_samples_per_job != 0 the sample size will be larger than tensor_size
-        #  specified by the user (it is (tensor_size // num_samples_per_job + 1) * num_samples_per_job). We can pass
-        #  tensor_size as an additional argument to children jobs, and validate in
-        #  sample_statistics_distributed_calcs.py that we don't calculate for too many networks.
+        # Note - if tensor_size % num_samples_per_job != 0 the sample size will be larger than tensor_size specified by
+        # the user (it is (tensor_size // num_samples_per_job + 1) * num_samples_per_job)
         out_dir_path = (Path.cwd().parent / "OptimizationIntermediateCalculations").resolve()
         data_path = (out_dir_path / "data").resolve()
         os.makedirs(data_path, exist_ok=True)
 
         with open((data_path / 'metric_collection.pkl').resolve(), 'wb') as f:
-            pickle.dump(self, f)
+            pickle.dump(self, f)  # type: ignore[arg-type]
 
         cmd_line_for_bsub = (f'python ./sample_statistics_distributed_calcs.py '
                              f'--out_dir_path {out_dir_path} '
@@ -1553,7 +1664,7 @@ class MetricsCollection:
 
     def remove_feature_by_idx(self, idx: int):
         metric_of_feat = self.get_metric_by_feat_idx(idx)
-        is_trimmable = metric_of_feat._get_effective_feature_count() > 1
+        is_trimmable = metric_of_feat.get_effective_feature_count() > 1
         if not is_trimmable:
             logger.info(f"Removing the metric {str(metric_of_feat)} from the collection")
             self._delete_metric(metric=metric_of_feat)
@@ -1564,15 +1675,14 @@ class MetricsCollection:
         self.num_of_features = self.calc_num_of_features()
 
         # Re-calculate the number of features per metric after deleting a feature.
-        self.features_per_metric = np.array([metric._get_effective_feature_count() for metric in self.metrics])
+        self.features_per_metric = np.array([metric.get_effective_feature_count() for metric in self.metrics])
 
     def collinearity_fixer(self, sample_size=1000, nonzero_thr=10 ** -1, ratio_threshold=10 ** -6,
                            eigenvec_thr=10 ** -4, is_distributed=False, **kwargs):
         """
         Find collinearity between metrics in the collection.
 
-        Currently this is a naive version that only handles the very simple cases.
-        TODO: revisit the threshold and sample size
+        Currently, this is a naive version that only handles the very simple cases.
         """
         is_linearly_dependent = True
 
@@ -1623,12 +1733,12 @@ class MetricsCollection:
                 # collection.
                 i = 0
                 cur_metric = self.get_metric_by_feat_idx(removal_order[i])
-                is_trimmable = cur_metric._get_effective_feature_count() > 1
+                is_trimmable = cur_metric.get_effective_feature_count() > 1
                 while (not is_trimmable and i < removal_order.size - 1 and fraction_of_dependencies_involved[
                     removal_order[i]] > 0):
                     i += 1
                     cur_metric = self.get_metric_by_feat_idx(removal_order[i])
-                    is_trimmable = cur_metric._get_effective_feature_count() > 1
+                    is_trimmable = cur_metric.get_effective_feature_count() > 1
 
                 # If a trimmable metric was not found (i.e., all features that are involved in the dependency are of
                 # metrics with an effective number of features of 1), totally remove the metric that is involved in most
@@ -1653,33 +1763,21 @@ class MetricsCollection:
         statistics : np.ndarray
             An array of statistics
         """
-        statistics = np.zeros(self.num_of_features)
+        return self.calculate_sample_statistics(W)[:, 0]
 
-        feature_idx = 0
-        for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
-            statistics[feature_idx:feature_idx + n_features_from_metric] = metric.calculate(W)
-            feature_idx += n_features_from_metric
-
-        return statistics
-
-    def calc_change_scores(self, current_network: np.ndarray, edge_flip_info: dict) -> np.ndarray:
+    def calc_change_scores(self, current_network: np.ndarray, indices: tuple[int, int]) -> np.ndarray:
         """
         Calculates the vector of change scores, namely g(net_2) - g(net_1)
 
         NOTE - this function assumes that the size current_network and self.n_nodes are the same, and doesn't validate
-        it, due to runtime considerations. Currently, the only use of this function is within ERGM and
-        NaiveMetropolisHastings, so this is fine.
+        it, due to runtime considerations.
         """
         change_scores = np.zeros(self.num_of_features)
 
-        feature_idx = 0
-        for i, metric in enumerate(self.metrics):
-            n_features_from_metric = self.features_per_metric[i]
-            change_scores[feature_idx:feature_idx + n_features_from_metric] = (
-                metric.calc_change_score(current_network, edge_flip_info['edge'])
+        for metric, start_idx, n_features in self._metric_feature_iter():
+            change_scores[start_idx:start_idx + n_features] = (
+                metric.calc_change_score(current_network, indices)
             )
-            feature_idx += n_features_from_metric
 
         return change_scores
 
@@ -1698,67 +1796,23 @@ class MetricsCollection:
         -------
         an array of the statistics vector per sample (num_features X sample_size)
         """
-        if networks_sample.shape[0] != self.n_nodes:
+        networks_sample = expand_net_dims(networks_sample)
+        if networks_sample.shape[0] != self.n_nodes or networks_sample.shape[1] != self.n_nodes:
             raise ValueError(
                 f"Got a sample of networks of size {networks_sample.shape[0]}, but Metrics expect size {self.n_nodes}")
 
         num_of_samples = networks_sample.shape[2]
         features_of_net_samples = np.zeros((self.num_of_features, num_of_samples))
 
-        feature_idx = 0
-        for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
-
+        for metric, start_idx, n_features in self._metric_feature_iter():
             calc_for_sample_kwargs = {'networks_sample': networks_sample}
             if self.mask is not None:
                 calc_for_sample_kwargs |= {'mask': self.mask}
             features = metric.calculate_for_sample(**calc_for_sample_kwargs)
 
-            features_of_net_samples[feature_idx:feature_idx + n_features_from_metric] = features
-            feature_idx += n_features_from_metric
+            features_of_net_samples[start_idx:start_idx + n_features] = features
 
         return features_of_net_samples
-
-    def calculate_change_scores_all_edges(self, current_network: np.ndarray):
-        """
-        Calculates the vector of change scores for every edge in the network.
-
-        Parameters
-        ----------
-        current_network : np.ndarray
-            The network matrix of size (n, n).
-
-        Returns
-        -------
-        change_scores : np.ndarray
-            A matrix of size (n**2-n, num_of_features), where each row corresponds to the change scores of the i,j-th edges.
-        """
-        n_nodes = current_network.shape[0]
-        num_edges = n_nodes * n_nodes - n_nodes
-        change_scores = np.zeros((num_edges, self.num_of_features))
-
-        feature_idx = 0
-        for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
-
-            if hasattr(metric, "calculate_change_score_full_network"):
-                change_scores[:,
-                feature_idx:feature_idx + n_features_from_metric] = metric.calculate_change_score_full_network(
-                    current_network)
-            else:
-                edge_idx = 0
-                for i in range(n_nodes):
-                    for j in range(n_nodes):
-                        if i == j:
-                            continue
-                        indices = (i, j)
-                        change_scores[edge_idx,
-                        feature_idx:feature_idx + n_features_from_metric] = metric.calc_change_score(current_network, indices)
-                        edge_idx += 1
-
-            feature_idx += n_features_from_metric
-
-        return change_scores
 
     def _get_global_mask(self) -> npt.NDArray[bool]:
         """Return the global mask for edge indices, or a mask of all True if no mask is set."""
@@ -1767,14 +1821,14 @@ class MetricsCollection:
             full_net_size //= 2
         return self.mask if self.mask is not None else np.ones(full_net_size, dtype=bool)
 
+    @staticmethod
     def _validate_edge_indices_lims(
-            self,
             edge_indices_lims: tuple[int, int] | None,
             global_mask: npt.NDArray[bool],
     ) -> tuple[int, int]:
         """Validate and return edge index limits, defaulting to full range if None."""
         if edge_indices_lims is None:
-            return (0, global_mask.sum())
+            return 0, global_mask.sum()
         if (
                 edge_indices_lims[0] < 0 or edge_indices_lims[1] < 0 or
                 edge_indices_lims[0] > global_mask.sum() or edge_indices_lims[1] > global_mask.sum() or
@@ -1786,8 +1840,8 @@ class MetricsCollection:
                 f'{global_mask.sum()}. Got {edge_indices_lims}')
         return edge_indices_lims
 
+    @staticmethod
     def _get_masked_indices_slice(
-            self,
             edge_indices_lims: tuple[int, int],
             global_mask: npt.NDArray[bool],
     ) -> npt.NDArray[np.intp]:
@@ -1845,7 +1899,7 @@ class MetricsCollection:
 
         feature_idx = 0
         for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
+            n_features_from_metric = metric.get_effective_feature_count()
             metric.calculate_mple_regressors(
                 Xs_out=Xs,
                 feature_col_indices=np.arange(feature_idx, feature_idx + n_features_from_metric, dtype=int),
@@ -1875,12 +1929,14 @@ class MetricsCollection:
         zeros_net = np.zeros((self.n_nodes, self.n_nodes))
         for i in range(self.n_nodes - 1):
             for j in range(i + 1, self.n_nodes):
-                change_score_i_j = self.calc_change_scores(zeros_net, {'edge': (i, j)})
+                change_score_i_j = self.calc_change_scores(zeros_net, (i, j))
                 net_with_i_j = zeros_net.copy()
                 net_with_i_j[i, j] = 1
-                Xs[idx, UPPER_IDX] = change_score_i_j
-                Xs[idx, LOWER_IDX] = self.calc_change_scores(zeros_net, {'edge': (j, i)})
-                Xs[idx, RECIPROCAL_IDX] = self.calc_change_scores(net_with_i_j, {'edge': (j, i)}) + change_score_i_j
+                Xs[idx, DyadStateIdx.UPPER_IDX.value] = change_score_i_j
+                Xs[idx, DyadStateIdx.LOWER_IDX.value] = self.calc_change_scores(zeros_net, (j, i))
+                Xs[idx, DyadStateIdx.RECIPROCAL_IDX.value] = (
+                        self.calc_change_scores(net_with_i_j, (j, i)) + change_score_i_j
+                )
 
                 idx += 1
         return Xs
@@ -1893,29 +1949,46 @@ class MetricsCollection:
             ys += convert_connectivity_to_dyad_states(observed_networks[..., i])
         return ys / num_nets
 
-    def choose_optimization_scheme(self):
+    def choose_optimization_scheme(self) -> OptimizationScheme:
         """
         Automatically select the appropriate optimization scheme for the model.
 
         Returns
         -------
-        str
-            One of 'MPLE', 'MPLE_RECIPROCITY', or 'MCMLE' depending on the metrics.
+        OptimizationScheme
+            One of MPLE, MPLE_RECIPROCITY, or MCMLE depending on the metrics.
 
         Notes
         -----
-        - 'MPLE': Maximum Pseudo-Likelihood Estimation, for dyadic independent metrics
-        - 'MPLE_RECIPROCITY': Extended MPLE for models with only reciprocity dependence
-        - 'MCMLE': Monte Carlo Maximum Likelihood Estimation, for complex dependencies
+        - MPLE: Maximum Pseudo-Likelihood Estimation, for dyadic independent metrics
+        - MPLE_RECIPROCITY: Extended MPLE for models with only reciprocity dependence
+        - MCMLE: Monte Carlo Maximum Likelihood Estimation, for complex dependencies
         """
         if not self._has_dyadic_dependent_metrics:
-            return 'MPLE'
+            return OptimizationScheme.MPLE
         # The only edge dependence comes from reciprocal edges
         if not any(
                 [not x._is_dyadic_independent for x in self.metrics if
                  str(x) not in ['total_reciprocity', 'reciprocity']]):
-            return 'MPLE_RECIPROCITY'
-        return 'MCMLE'
+            return OptimizationScheme.MPLE_RECIPROCITY
+        return OptimizationScheme.MCMLE
+
+    def find_unnamed_duplicate_metrics(self) -> Sequence[tuple[Metric, str]]:
+        """
+        Find metrics that are duplicated (same class) and don't have user-provided names.
+
+        Returns
+        -------
+        Sequence[tuple[Metric, str]]
+            List of (metric, class_name) tuples for metrics needing disambiguation.
+        """
+        class_counts = Counter(type(m).__name__ for m in self.metrics)
+        unnamed_duplicates = []
+        for metric in self.metrics:
+            class_name = type(metric).__name__
+            if class_counts[class_name] > 1 and metric._name is None:
+                unnamed_duplicates.append((metric, class_name))
+        return unnamed_duplicates
 
     def get_parameter_names(self):
         """
@@ -1927,7 +2000,7 @@ class MetricsCollection:
         given random suffixes since the name already disambiguates them.
         """
         # Find metrics needing disambiguation (duplicates without user-provided names)
-        unnamed_duplicates = _find_unnamed_duplicate_metrics(self.metrics)
+        unnamed_duplicates = self.find_unnamed_duplicate_metrics()
 
         # Group by class name for ID generation
         class_instances = {}
@@ -1972,12 +2045,23 @@ class MetricsCollection:
 
         return parameter_names
 
-    def bootstrap_observed_features(self, observed_network: np.ndarray, num_subsamples: int = 1000,
-                                    splitting_method: str = 'uniform'):
+    def validate_supports_observed_bootstrap(self):
+        for metric in self.metrics:
+            if not hasattr(metric, "calculate_bootstrapped_features"):
+                raise ValueError(
+                    f"metric {metric.metric_name} does not have a calculate_bootstrapped_features method, the "
+                    f"model doesn't support observed_bootstrap as a convergence criterion.")
+
+    def bootstrap_observed_features(
+            self,
+            observed_network: np.ndarray,
+            num_subsamples: int = 1000,
+            splitting_method: DataBootstrapSplittingMethod = DataBootstrapSplittingMethod.UNIFORM
+    ):
+        self.validate_supports_observed_bootstrap()
         if observed_network.ndim == 3:
             observed_network = observed_network[..., 0]
-        observed_connectivity_matrix = observed_network[:self.n_nodes, :self.n_nodes]
-        observed_net_size = observed_connectivity_matrix.shape[0]
+        observed_net_size = observed_network.shape[0]
         second_half_size = observed_net_size // 2
         first_half_size = observed_net_size - second_half_size
         first_halves = np.zeros((first_half_size, first_half_size, num_subsamples))
@@ -1985,40 +2069,20 @@ class MetricsCollection:
         first_halves_indices = np.zeros((first_half_size, num_subsamples), dtype=int)
         second_halves_indices = np.zeros((second_half_size, num_subsamples), dtype=int)
         for i in range(num_subsamples):
-            # TODO: currently we simply split randomly into 2 halves, we want to support other methods for sampling half
-            #  of the neurons, and specifically sampling half of the neurons of each if there is a metric with types
-            #  involved.
-            #  NOTE! This will probably imposes to have another field in `Metric` indicating what is the preferred way
-            #  for bootstrapping sampling, and `MetricsCollection` will have to decide somehow what to do based on the
-            #  values of all metrics.
-            #  NOTE! If there are multiple type metrics, we will probably need to sample according to sub-types defined
-            #  as the Cartesian product of all types.
-            first_half_indices, second_half_indices = split_network_for_bootstrapping(observed_net_size,
-                                                                                      first_half_size,
-                                                                                      splitting_method=splitting_method)
-            first_halves[:, :, i] = observed_connectivity_matrix[first_half_indices, first_half_indices.T]
-            second_halves[:, :, i] = observed_connectivity_matrix[second_half_indices, second_half_indices.T]
+            first_half_indices, second_half_indices = split_network_for_bootstrapping(
+                observed_net_size, first_half_size, splitting_method=splitting_method
+            )
+            first_halves[:, :, i] = observed_network[first_half_indices, first_half_indices.T]
+            second_halves[:, :, i] = observed_network[second_half_indices, second_half_indices.T]
             first_halves_indices[:, i] = first_half_indices[:, 0]
             second_halves_indices[:, i] = second_half_indices[:, 0]
 
         bootstrapped_features = np.zeros((self.num_of_features, num_subsamples))
-        # TODO: the next code section is copied from `calculate_for_sample`. The difference is that here we use
-        #  `first_halves` and `second_halves` instead of `networks_sample` and a different callable for each metric.
-        #  Maybe is can be handled in a single method that gets a callable for metrics and **kwargs or something like
-        #  that.
 
-        feature_idx = 0
-        for metric in self.metrics:
-            n_features_from_metric = metric._get_effective_feature_count()
-
-            first_halves_to_use = first_halves
-            second_halves_to_use = second_halves
-
+        for metric, start_idx, n_features in self._metric_feature_iter():
             cur_metric_bootstrapped_features = metric.calculate_bootstrapped_features(
-                first_halves_to_use, second_halves_to_use,
-                first_halves_indices, second_halves_indices)
-
-            bootstrapped_features[feature_idx:feature_idx + n_features_from_metric] = cur_metric_bootstrapped_features
-            feature_idx += n_features_from_metric
+                first_halves, second_halves, first_halves_indices, second_halves_indices
+            )
+            bootstrapped_features[start_idx:start_idx + n_features] = cur_metric_bootstrapped_features
 
         return bootstrapped_features

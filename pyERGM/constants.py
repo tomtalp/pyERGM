@@ -2,8 +2,9 @@
 Enum constants for ERGM configuration options.
 """
 from dataclasses import dataclass
-from enum import StrEnum
+from enum import Enum, StrEnum
 from typing import Optional
+
 
 @dataclass
 class OptimizationResult:
@@ -50,7 +51,6 @@ class CovMatrixEstimationMethod(StrEnum):
 
 class ThetaInitMethod(StrEnum):
     """Method for initializing theta parameters."""
-    UNIFORM = "uniform"
     MPLE = "mple"
     USE_EXISTING = "use_existing"
 
@@ -73,3 +73,15 @@ class Reduction(StrEnum):
     SUM = "sum"
     MEAN = "mean"
     NONE = "none"
+
+
+class DataBootstrapSplittingMethod(StrEnum):
+    """Splitting method for bootstrapping neurons"""
+    UNIFORM = "uniform"
+
+class DyadStateIdx(Enum):
+    """Dyad states indexing convention"""
+    EMPTY_IDX = 0
+    UPPER_IDX = 1
+    LOWER_IDX = 2
+    RECIPROCAL_IDX = 3

@@ -1,13 +1,15 @@
 import unittest
 
-import numpy as np
 from scipy.stats import pearsonr
 
 from pyERGM.utils import *
-from pyERGM.metrics import MetricsCollection, NumberOfEdgesDirected, TotalReciprocity, OutDegree, InDegree
+from pyERGM.metrics import (
+    MetricsCollection, NumberOfEdgesDirected,
+    TotalReciprocity, OutDegree, InDegree
+)
 from pyERGM.datasets import sampson_matrix
 from pyERGM.ergm import ERGM
-from pyERGM.constants import SamplingMethod, CovMatrixEstimationMethod
+from pyERGM.constants import SamplingMethod, CovMatrixEstimationMethod, Reduction
 from scipy.linalg import eigh
 
 from matplotlib import pyplot as plt
@@ -476,3 +478,301 @@ class TestCovarianceMatrixEstimation(unittest.TestCase):
         self.assertTrue(np.abs(
             expected_covariance_multivariate_initial_seq_estimation - multivariate_initial_seq_estimation).max() <
                         10 ** -14)
+
+
+class SamplingWithoutReplacementTester(unittest.TestCase):
+    """Tests for sampling without replacement functionality."""
+
+    def test_sample_without_replacement_produces_unique_networks(self):
+        """Verify that replace=False produces only unique networks."""
+        set_seed(12345)
+        n_nodes = 5
+        sample_size = 20
+        prob_matrix = np.full((n_nodes, n_nodes), 0.5)
+        np.fill_diagonal(prob_matrix, 0)
+
+        sample = sample_from_independent_probabilities_matrix(
+            prob_matrix, sample_size, is_directed=True, replace=False
+        )
+
+        # Convert each network to hashable representation
+        hashes = set()
+        for i in range(sample_size):
+            net_hash = network_to_hashable(sample[:, :, i], is_directed=True)
+            hashes.add(net_hash)
+
+        self.assertEqual(len(hashes), sample_size, "Some networks are duplicates!")
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))
+
+    def test_sample_dyads_without_replacement_produces_unique_networks(self):
+        """Test uniqueness for dyadic (reciprocity) models."""
+        set_seed(12346)
+        num_dyads = 6  # 4 nodes
+        sample_size = 15
+
+        # Uniform distribution over dyadic states
+        dyads_distributions = np.full((num_dyads, 4), 0.25)
+
+        sample = sample_from_dyads_distribution(
+            dyads_distributions, sample_size=sample_size, replace=False
+        )
+
+        # Verify uniqueness
+        hashes = set()
+        for i in range(sample_size):
+            net_hash = network_to_hashable(sample[:, :, i], is_directed=True)
+            hashes.add(net_hash)
+
+        self.assertEqual(len(hashes), sample_size, "Some networks are duplicates!")
+        n_nodes = num_dyads_to_num_nodes(num_dyads)
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))
+
+    def test_sample_without_replacement_fails_gracefully_for_low_entropy(self):
+        """Verify that low-entropy models raise informative errors."""
+        set_seed(12347)
+        n_nodes = 4
+        sample_size = 50
+
+        # Very low entropy: almost all edges present
+        prob_matrix = np.full((n_nodes, n_nodes), 0.99)
+        np.fill_diagonal(prob_matrix, 0)
+
+        with self.assertRaises(RuntimeError) as context:
+            sample_from_independent_probabilities_matrix(
+                prob_matrix, sample_size, is_directed=True, replace=False
+            )
+        self.assertIn("duplication rate", str(context.exception))
+
+    def test_sample_without_replacement_with_masks(self):
+        """Test that masked edges are handled correctly."""
+        set_seed(12349)
+        n_nodes = 4
+        prob_matrix = np.full((n_nodes, n_nodes), 0.5)
+        np.fill_diagonal(prob_matrix, 0)
+        prob_matrix[0, 1] = np.nan  # Masked edge
+        prob_matrix[1, 0] = np.nan  # Masked edge
+
+        sample = sample_from_independent_probabilities_matrix(
+            prob_matrix, sample_size=10, is_directed=True, replace=False
+        )
+
+        # Verify masked edges are NaN in output
+        self.assertTrue(np.all(np.isnan(sample[0, 1, :])))
+        self.assertTrue(np.all(np.isnan(sample[1, 0, :])))
+
+        # Verify networks are unique (hash function handles NaN automatically)
+        hashes = set()
+        for i in range(10):
+            net_hash = network_to_hashable(sample[:, :, i], is_directed=True)
+            self.assertTrue(all(not np.isnan(x) for x in net_hash))
+            hashes.add(net_hash)
+
+        self.assertEqual(len(hashes), 10, "Some networks are duplicates!")
+
+    def test_sample_with_replacement_produces_expected_shape(self):
+        """Verify that replace=True still works correctly (backward compatibility)."""
+        set_seed(12350)
+        n_nodes = 5
+        sample_size = 20
+        prob_matrix = np.full((n_nodes, n_nodes), 0.5)
+        np.fill_diagonal(prob_matrix, 0)
+
+        sample = sample_from_independent_probabilities_matrix(
+            prob_matrix, sample_size, is_directed=True, replace=True
+        )
+
+        self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))
+
+    def test_network_to_hashable_consistency(self):
+        """Verify that identical networks produce identical hashes."""
+        set_seed(12351)
+        n_nodes = 4
+        network = np.random.binomial(1, 0.5, (n_nodes, n_nodes))
+        np.fill_diagonal(network, 0)
+
+        hash1 = network_to_hashable(network.copy(), is_directed=True)
+        hash2 = network_to_hashable(network.copy(), is_directed=True)
+
+        self.assertEqual(hash1, hash2)
+
+    def test_network_to_hashable_different_networks(self):
+        """Verify that different networks produce different hashes."""
+        set_seed(12352)
+        n_nodes = 4
+        network1 = np.random.binomial(1, 0.3, (n_nodes, n_nodes))
+        network2 = np.random.binomial(1, 0.3, (n_nodes, n_nodes))
+        np.fill_diagonal(network1, 0)
+        np.fill_diagonal(network2, 0)
+
+        # Make sure they're actually different
+        if np.allclose(network1, network2):
+            network2[0, 1] = 1 - network2[0, 1]
+
+        hash1 = network_to_hashable(network1, is_directed=True)
+        hash2 = network_to_hashable(network2, is_directed=True)
+
+        self.assertNotEqual(hash1, hash2)
+
+
+class TestEntropyCalculations(unittest.TestCase):
+    """
+    Tests for entropy calculation utility functions in utils.py.
+
+    Tests validate:
+    1. Direct utility functions: calc_entropy_independent_probability_matrix
+       - Uniform probability matrices with known ground truth
+       - Deterministic edges (p→0 or p→1)
+       - All Reduction modes (SUM, MEAN, NONE)
+       - Masked edges (NaN handling)
+
+    2. Dyadic distribution entropy: calc_entropy_dyads_dists
+       - Known dyadic distributions with ground truth values
+       - All Reduction modes (SUM, MEAN, NONE)
+
+    Note: ERGM model entropy integration tests are located in test_ergm.py (TestERGMEntropy).
+    Those tests validate ERGM.calc_model_entropy() using BruteForceERGM for exact ground truth.
+    """
+
+    def setUp(self):
+        set_seed(30976)
+
+    # ==================== Direct Probability Matrix Tests ====================
+
+    def test_entropy_independent_probability_matrix_with_known_values(self):
+        """Test entropy calculation for uniform probability matrices with known ground truth."""
+        test_cases = [
+            # (scenario_name, n_nodes, is_directed, p_value, expected_entropy)
+            ("3node_directed_p50", 3, True, 0.5, 6.0),  # 6 edges * 1.0 bit/edge
+            ("3node_undirected_p50", 3, False, 0.5, 3.0),  # 3 edges * 1.0 bit/edge
+            ("4node_directed_p10", 4, True, 0.1, 5.628),  # 12 edges * ~0.469 bits/edge
+            ("4node_directed_p90", 4, True, 0.9, 5.628),  # Symmetric around 0.5
+        ]
+
+        for scenario_name, n_nodes, is_directed, p_value, expected_entropy in test_cases:
+            with self.subTest(scenario=scenario_name):
+                # Create probability matrix with uniform probability
+                prob_mat = np.full((n_nodes, n_nodes), p_value)
+                np.fill_diagonal(prob_mat, 0)  # No self-loops
+
+                # Calculate entropy
+                entropy = calc_entropy_independent_probability_matrix(prob_mat, is_directed)
+
+                # Assert matches expected value
+                self.assertAlmostEqual(entropy, expected_entropy, places=3,
+                                      msg=f"Entropy mismatch for scenario: {scenario_name}")
+
+    def test_entropy_deterministic_edges(self):
+        """Test entropy for deterministic edges (p→0 or p→1)."""
+        test_cases = [
+            ("p_near_one", 1 - 1e-9),
+            ("p_near_zero", 1e-9),
+        ]
+
+        for scenario_name, p_value in test_cases:
+            with self.subTest(scenario=scenario_name):
+                n_nodes = 4
+                prob_mat = np.full((n_nodes, n_nodes), p_value)
+                np.fill_diagonal(prob_mat, 0)
+
+                entropy = calc_entropy_independent_probability_matrix(prob_mat, True)
+
+                # Entropy should be very small (limited by epsilon clipping to 1e-10)
+                self.assertLess(entropy, 1e-6,
+                               msg=f"Entropy not near zero for deterministic case: {scenario_name}")
+
+    def test_entropy_probability_matrix_with_reduction_modes(self):
+        """Test all Reduction modes for probability matrix entropy."""
+        test_cases = [
+            ("sum_reduction", Reduction.SUM, 6.0),
+            ("mean_reduction", Reduction.MEAN, 1.0),
+            ("none_reduction", Reduction.NONE, None),  # Array check
+        ]
+
+        n_nodes = 3
+        is_directed = True
+        prob_mat = np.full((n_nodes, n_nodes), 0.5)
+        np.fill_diagonal(prob_mat, 0)
+
+        for scenario_name, reduction, expected_value in test_cases:
+            with self.subTest(reduction_mode=scenario_name):
+                entropy = calc_entropy_independent_probability_matrix(prob_mat, is_directed, reduction=reduction)
+
+                if reduction == Reduction.NONE:
+                    # Should be array of per-edge entropies
+                    self.assertIsInstance(entropy, np.ndarray)
+                    self.assertEqual(entropy.shape, (6,))  # 3-node directed has 6 edges
+                    self.assertTrue(np.allclose(entropy, np.ones(6), atol=1e-5))
+                else:
+                    self.assertAlmostEqual(entropy, expected_value, places=5,
+                                          msg=f"Entropy reduction mismatch: {scenario_name}")
+
+    def test_entropy_with_masked_edges(self):
+        """Test entropy calculation correctly ignores NaN (masked) edges."""
+        n_nodes = 3
+        prob_mat = np.full((n_nodes, n_nodes), 0.5)
+        np.fill_diagonal(prob_mat, 0)
+        # Mask half the edges
+        prob_mat[0, 1] = np.nan
+        prob_mat[0, 2] = np.nan
+        prob_mat[1, 2] = np.nan
+
+        entropy = calc_entropy_independent_probability_matrix(prob_mat, True)
+
+        # Only 3 non-NaN edges, each with entropy 1.0 bit
+        self.assertAlmostEqual(entropy, 3.0, places=5,
+                              msg="Entropy should only count non-NaN edges")
+
+    # ==================== Dyadic Distribution Tests ====================
+
+    def test_entropy_dyadic_distribution_with_known_values(self):
+        """Test entropy calculation for dyadic state distributions with known ground truth."""
+        test_cases = [
+            # (scenario_name, dyad_distribution, num_dyads, expected_entropy)
+            ("uniform_4state", [0.25, 0.25, 0.25, 0.25], 3, 6.0),  # 3 dyads * 2.0 bits each
+            ("deterministic_empty", [1, 0, 0, 0], 3, 0.0),  # All empty dyads
+            ("mixed_distributions", None, 3, 3.0),  # Custom - set in test
+        ]
+
+        for scenario_name, dyad_dist, num_dyads, expected_entropy in test_cases:
+            with self.subTest(scenario=scenario_name):
+                if scenario_name == "mixed_distributions":
+                    # Create mixed dyadic distributions: [1,0,0,0], [0.5,0.5,0,0], [0.25,0.25,0.25,0.25]
+                    dyads = np.array([
+                        [1, 0, 0, 0],          # entropy ≈ 0
+                        [0.5, 0.5, 0, 0],      # entropy ≈ 1.0
+                        [0.25, 0.25, 0.25, 0.25]  # entropy ≈ 2.0
+                    ])
+                    expected = 3.0
+                else:
+                    # Create uniform dyadic distribution
+                    dyads = np.tile(dyad_dist, (num_dyads, 1))
+                    expected = expected_entropy
+
+                entropy = calc_entropy_dyads_dists(dyads)
+
+                self.assertAlmostEqual(entropy, expected, places=2,
+                                      msg=f"Dyadic entropy mismatch: {scenario_name}")
+
+    def test_entropy_dyadic_distribution_with_reduction_modes(self):
+        """Test all Reduction modes for dyadic distribution entropy."""
+        test_cases = [
+            ("sum_reduction", Reduction.SUM, 6.0),
+            ("mean_reduction", Reduction.MEAN, 2.0),
+            ("none_reduction", Reduction.NONE, None),
+        ]
+
+        num_dyads = 3
+        dyads = np.tile([0.25, 0.25, 0.25, 0.25], (num_dyads, 1))
+
+        for scenario_name, reduction, expected_value in test_cases:
+            with self.subTest(reduction_mode=scenario_name):
+                entropy = calc_entropy_dyads_dists(dyads, reduction=reduction)
+
+                if reduction == Reduction.NONE:
+                    self.assertIsInstance(entropy, np.ndarray)
+                    self.assertEqual(entropy.shape, (3,))
+                    self.assertTrue(np.allclose(entropy, np.ones(3) * 2.0, atol=1e-5))
+                else:
+                    self.assertAlmostEqual(entropy, expected_value, places=5,
+                                          msg=f"Dyadic entropy reduction mismatch: {scenario_name}")
+

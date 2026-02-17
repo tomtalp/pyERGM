@@ -2,10 +2,61 @@ import numpy as np
 from scipy.optimize import minimize, OptimizeResult
 from scipy.special import softmax
 import glob
+from pathlib import Path
 
-from pyERGM.logging_config import logger
 from pyERGM.metrics import *
 from pyERGM.constants import MPLEOptimizationMethod, Reduction
+
+
+class OptimizationIterationCallback:
+    """
+    Callback for logging optimization iterations and checkpointing.
+
+    Captures optimization state and logs progress at each iteration.
+    In distributed mode, checkpoints the current parameters and metrics collection.
+
+    Parameters
+    ----------
+    start_time : float
+        Timestamp when optimization started (from time.time()).
+    is_distributed : bool, optional
+        Whether optimization is distributed. Default is False.
+    metrics_collection : MetricsCollection, optional
+        Metrics collection to checkpoint. Required if is_distributed=True.
+    """
+
+    def __init__(self, start_time, is_distributed=False, metrics_collection=None):
+        self.iteration = 0
+        self.start_time = start_time
+        self.is_distributed = is_distributed
+        self.metrics_collection = metrics_collection
+
+    def __call__(self, intermediate_result: OptimizeResult):
+        """
+        Log iteration progress and optionally checkpoint.
+
+        Parameters
+        ----------
+        intermediate_result : OptimizeResult
+            Current optimization result from scipy.optimize.
+        """
+        self.iteration += 1
+        cur_time = time.time()
+        logger.info(f'iteration: {self.iteration}, time from start '
+                    f'training: {cur_time - self.start_time:.2f} '
+                    f'log10 likelihood: {-intermediate_result.fun / np.log(10):.4f}')
+
+        if self.is_distributed and self.metrics_collection is not None:
+            checkpoint_path_getter = lambda idx: (
+                Path.cwd().parent / "OptimizationIntermediateCalculations" / f"checkpoint_iter_{idx}.pkl"
+            ).resolve()
+            with open(checkpoint_path_getter(self.iteration), 'wb') as f:
+                pickle.dump({
+                    'metrics_collection': self.metrics_collection,
+                    'thetas': intermediate_result.x,
+                }, f)
+            if self.iteration > 1:
+                os.unlink(checkpoint_path_getter(self.iteration - 1))
 
 
 @njit
@@ -85,17 +136,8 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
         1 - trimmed_predictions)) / np.log(log_base)
     if sample_weights.size > 0:
         minus_binary_cross_entropy_per_edge = sample_weights * minus_binary_cross_entropy_per_edge
-    if reduction == Reduction.NONE:
-        return minus_binary_cross_entropy_per_edge
-    # The wrapping into a numpy array and reshape to 2D is necessary for numba to compile the function properly
-    # (returned types must be unified).
-    elif reduction == Reduction.SUM:
-        return np.array([minus_binary_cross_entropy_per_edge.sum()]).reshape(1, 1)
-    elif reduction == Reduction.MEAN:
-        return np.array([minus_binary_cross_entropy_per_edge.mean()]).reshape(1, 1)
-    else:
-        raise ValueError(f"{reduction} is an unsupported reduction method, options are 'none', 'sum', or 'mean'")
-
+    reduced = reduce_individual_elements(minus_binary_cross_entropy_per_edge.flatten(), reduction)
+    return reduced.reshape((reduced.size, 1))
 
 @njit
 def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np.ndarray, ys: np.ndarray,
@@ -333,20 +375,21 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
                                                               num_edges_per_job)[0]
 
 
-def mple_logistic_regression_optimization(metrics_collection: MetricsCollection, observed_networks: np.ndarray,
-                                          initial_thetas: np.ndarray | None = None,
-                                          is_distributed: bool = False,
-                                          optimization_method: MPLEOptimizationMethod = MPLEOptimizationMethod.L_BFGS_B,
-                                          sample_weights: np.ndarray | None = None,
-                                          **kwargs):
+def mple_logistic_regression_optimization(
+        metrics_collection: MetricsCollection,
+        observed_networks: np.ndarray,
+        initial_thetas: np.ndarray | None = None,
+        is_distributed: bool = False,
+        optimization_method: MPLEOptimizationMethod = MPLEOptimizationMethod.L_BFGS_B,
+        sample_weights: np.ndarray | None = None,
+        **kwargs,
+) -> tuple[np.ndarray, np.ndarray, bool]:
     """
     Optimize the parameters of a Logistic Regression model by maximizing the likelihood using scipy.optimize.minimize.
     Parameters
     ----------
     metrics_collection
         The `MetricsCollection` with relation to which the optimization is carried out.
-        # TODO: we can't add a type hint for this, due to circular import (utils can't import from metrics, as metrics
-            already imports from utils). This might suggest that this isn't the right place for this function.
     observed_networks
         The observed network used as data for the optimization, or an array of observed networks.
     initial_thetas
@@ -372,27 +415,13 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         Whether the optimization was successful
     """
 
-    # TODO: this code is duplicated, but the scoping of the nonlocal variables makes it not trivial to export out of
-    #  the scope of each function using it.
-    def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
-        nonlocal iteration
-        iteration += 1
-        cur_time = time.time()
-        logger.info(f'iteration: {iteration}, time from start '
-              f'training: {cur_time - start_time:.2f} '
-              f'log10 likelihood: {-intermediate_result.fun / np.log(10):.4f}')
-        if is_distributed:
-            checkpoint_path_getter = lambda idx: (
-                    Path.cwd().parent / "OptimizationIntermediateCalculations" / f"checkpoint_iter_{idx}.pkl"
-            ).resolve()
-            with open(checkpoint_path_getter(iteration), 'wb') as f:
-                pickle.dump({'metrics_collection': metrics_collection, 'thetas': intermediate_result.x, }, f)
-            if iteration > 1:
-                os.unlink(checkpoint_path_getter(iteration - 1))
-
-    iteration = 0
     start_time = time.time()
     logger.info("MPLE optimization started")
+    callback = OptimizationIterationCallback(
+        start_time=start_time,
+        is_distributed=is_distributed,
+        metrics_collection=metrics_collection if is_distributed else None
+    )
 
     observed_networks = expand_net_dims(observed_networks)
 
@@ -417,11 +446,11 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
         if optimization_method == MPLEOptimizationMethod.NEWTON_CG:
             res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, weights),
                            jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
-                           callback=_after_optim_iteration_callback, method=optimization_method)
+                           callback=callback, method=optimization_method)
         elif optimization_method == MPLEOptimizationMethod.L_BFGS_B:
             res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, weights),
                            jac=analytical_minus_log_like_grad_local, method=optimization_method,
-                           callback=_after_optim_iteration_callback)
+                           callback=callback)
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
@@ -432,12 +461,12 @@ def mple_logistic_regression_optimization(metrics_collection: MetricsCollection,
                                                             sample_weights=sample_weights)
         if optimization_method == MPLEOptimizationMethod.L_BFGS_B:
             res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path,),
-                           jac=True, callback=_after_optim_iteration_callback, method=optimization_method)
+                           jac=True, callback=callback, method=optimization_method)
         elif optimization_method == MPLEOptimizationMethod.NEWTON_CG:
             res = minimize(analytical_minus_log_likelihood_distributed, thetas, args=(data_path,),
                            jac=True,
                            hess=analytical_minus_log_likelihood_hessian_distributed,
-                           callback=_after_optim_iteration_callback, method=optimization_method)
+                           callback=callback, method=optimization_method)
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method} for distributed optimization. "
@@ -700,17 +729,9 @@ def mple_reciprocity_logistic_regression_optimization(
     success : bool
         Whether optimization converged successfully.
     """
-    def _after_optim_iteration_callback(intermediate_result: OptimizeResult):
-        nonlocal iteration
-        iteration += 1
-        cur_time = time.time()
-        logger.info(f'iteration: {iteration}, time from start '
-              f'training: {cur_time - start_time:.2f} '
-              f'log10 likelihood: {-intermediate_result.fun / np.log(10):.4f}')
-
-    iteration = 0
     start_time = time.time()
     logger.info("MPLE optimization started")
+    callback = OptimizationIterationCallback(start_time=start_time)
 
     observed_networks = expand_net_dims(observed_networks)
     Xs = metrics_collection.prepare_mple_reciprocity_regressors()
@@ -725,7 +746,7 @@ def mple_reciprocity_logistic_regression_optimization(
     if optimization_method == MPLEOptimizationMethod.L_BFGS_B:
         res = minimize(minus_log_likelihood_multi_class_logistic_regression, thetas, args=(Xs, ys),
                        jac=minus_log_likelihood_gradient_multi_class_logistic_regression, method=MPLEOptimizationMethod.L_BFGS_B,
-                       callback=_after_optim_iteration_callback)
+                       callback=callback)
     else:
         raise ValueError(
             f"Unsupported optimization method: {optimization_method}. Options are: {MPLEOptimizationMethod.L_BFGS_B}")
