@@ -1,5 +1,7 @@
 # pyERGM - A Python implementation for ERGM's
 
+[![codecov](https://codecov.io/gh/tomtalp/pyERGM/branch/main/graph/badge.svg)](https://codecov.io/gh/tomtalp/pyERGM)
+
 An exponential random graphs model (**ERGM**) is a statistical model that describes a distribution of random graphs. This package provides a simple and easy way to fit and sample from ERGMs.
 
 An ERGM defines a random variable $\mathbf{Y}$, which is simply a random graph on $n$ nodes. The probability of observing a specific graph $y\in \lbrace 0,1 \rbrace ^{n \times n}$ is given by -

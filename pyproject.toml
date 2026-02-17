@@ -34,6 +34,22 @@ docs = [
     "mkdocstrings[python]>=0.27",
     "griffe>=1.5",
 ]
+test = [
+    "coverage[toml]>=7.0",
+]
 
 [tool.setuptools.packages.find]
 include = ["pyERGM*"]
+
+[tool.coverage.run]
+source = ["pyERGM"]
+branch = true
+omit = ["tests/*", "*/site-packages/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+show_missing = true
