@@ -1277,3 +1277,203 @@ class TestSamplingWithoutReplacement(unittest.TestCase):
         )
 
         self.assertEqual(sample.shape, (n_nodes, n_nodes, sample_size))
+
+
+class TestERGMEntropy(unittest.TestCase):
+    """
+    Tests for ERGM entropy calculation methods.
+
+    Validates ERGM.calc_model_entropy() for MPLE and MPLE_RECIPROCITY models
+    by comparing against exact ground truth computed via BruteForceERGM exhaustive enumeration.
+    """
+
+    def test_mple_model_entropy_matches_brute_force(self):
+        """
+        Test MPLE model entropy against exact ground truth computed via BruteForceERGM.
+
+        This test:
+        1. Creates a simple MPLE model (NumberOfEdgesDirected only)
+        2. Fits it on a 4-node directed network
+        3. Computes exact entropy via BruteForceERGM exhaustive enumeration
+        4. Verifies model's entropy matches BruteForce computed value
+        """
+        set_seed(42)
+        n_nodes = 4
+
+        # Create and fit MPLE model
+        metrics = [NumberOfEdgesDirected()]
+        model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+
+        # Create a simple observed network for fitting
+        observed_net = np.array([
+            [0, 1, 1, 0],
+            [1, 0, 0, 1],
+            [0, 1, 0, 1],
+            [1, 0, 1, 0]
+        ])
+        model.fit(observed_net, optimization_scheme=OptimizationScheme.MPLE)
+
+        # Compute ground truth via BruteForceERGM
+        brute_force = BruteForceERGM(
+            n_nodes=n_nodes,
+            metrics_collection=metrics,
+            is_directed=True,
+            initial_thetas=model.get_model_parameters()
+        )
+        all_probs = brute_force._all_weights / brute_force._normalization_factor
+        # Filter out zero probabilities to avoid log(0)
+        nonzero_probs = all_probs[all_probs > 0]
+        exact_entropy = -np.sum(nonzero_probs * np.log2(nonzero_probs))
+
+        # Calculate model entropy
+        model_entropy = model.calc_model_entropy(reduction=Reduction.SUM)
+
+        # Assert match
+        self.assertAlmostEqual(model_entropy, exact_entropy, places=4,
+                              msg="MPLE entropy doesn't match BruteForce computed value")
+
+    def test_mple_model_entropy_reduction_modes(self):
+        """Test MPLE entropy with all reduction modes."""
+        set_seed(43)
+        n_nodes = 4
+        metrics = [NumberOfEdgesDirected()]
+        model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+
+        observed_net = np.array([
+            [0, 1, 0, 1],
+            [0, 0, 1, 0],
+            [1, 0, 0, 1],
+            [0, 1, 1, 0]
+        ])
+        model.fit(observed_net, optimization_scheme=OptimizationScheme.MPLE)
+
+        # Compute ground truth via BruteForceERGM
+        brute_force = BruteForceERGM(
+            n_nodes=n_nodes,
+            metrics_collection=metrics,
+            is_directed=True,
+            initial_thetas=model.get_model_parameters()
+        )
+        all_probs = brute_force._all_weights / brute_force._normalization_factor
+        # Filter out zero probabilities to avoid log(0)
+        nonzero_probs = all_probs[all_probs > 0]
+        exact_entropy = -np.sum(nonzero_probs * np.log2(nonzero_probs))
+
+        # Test SUM
+        entropy_sum = model.calc_model_entropy(reduction=Reduction.SUM)
+        self.assertAlmostEqual(entropy_sum, exact_entropy, 4)
+
+        # Test MEAN
+        entropy_mean = model.calc_model_entropy(reduction=Reduction.MEAN)
+        num_edges = 4 * 3  # n(n-1) for directed
+        self.assertAlmostEqual(entropy_mean, entropy_sum / num_edges, places=5,
+                              msg="MEAN should be SUM / num_edges")
+
+        # Test NONE
+        entropy_none = model.calc_model_entropy(reduction=Reduction.NONE)
+        self.assertIsInstance(entropy_none, np.ndarray)
+        self.assertEqual(entropy_none.shape, (num_edges,))
+        self.assertAlmostEqual(entropy_none.sum(), entropy_sum, places=4,
+                              msg="NONE values should sum to SUM")
+
+    def test_mple_reciprocity_model_entropy_matches_brute_force(self):
+        """
+        Test MPLE_RECIPROCITY model entropy against BruteForceERGM validation.
+        """
+        set_seed(44)
+        n_nodes = 4
+
+        # Create MPLE_RECIPROCITY model
+        metrics = [NumberOfEdgesDirected(), TotalReciprocity()]
+        model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+
+        # Create observed network
+        observed_net = np.array([
+            [0, 1, 0, 1],
+            [1, 0, 1, 0],
+            [0, 1, 0, 1],
+            [1, 0, 1, 0]
+        ])
+        model.fit(observed_net, optimization_scheme=OptimizationScheme.MPLE_RECIPROCITY)
+
+        # Compute ground truth via BruteForceERGM
+        brute_force = BruteForceERGM(
+            n_nodes=n_nodes,
+            metrics_collection=metrics,
+            is_directed=True,
+            initial_thetas=model.get_model_parameters()
+        )
+        all_probs = brute_force._all_weights / brute_force._normalization_factor
+        nonzero_probs = all_probs[all_probs > 0]
+        exact_entropy = -np.sum(nonzero_probs * np.log2(nonzero_probs))
+
+        # Calculate model entropy
+        model_entropy = model.calc_model_entropy(reduction=Reduction.SUM)
+
+        # Assert match
+        self.assertAlmostEqual(model_entropy, exact_entropy, places=4,
+                              msg="MPLE_RECIPROCITY entropy doesn't match BruteForce computed value")
+
+    def test_mple_reciprocity_entropy_reduction_modes(self):
+        """Test MPLE_RECIPROCITY entropy with all reduction modes."""
+        set_seed(45)
+        n_nodes = 4
+        metrics = [NumberOfEdgesDirected(), TotalReciprocity()]
+        model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+
+        observed_net = np.array([
+            [0, 1, 1, 0],
+            [1, 0, 0, 1],
+            [1, 0, 0, 1],
+            [0, 1, 1, 0]
+        ])
+        model.fit(observed_net, optimization_scheme=OptimizationScheme.MPLE_RECIPROCITY)
+
+        # Compute ground truth via BruteForceERGM
+        brute_force = BruteForceERGM(
+            n_nodes=n_nodes,
+            metrics_collection=metrics,
+            is_directed=True,
+            initial_thetas=model.get_model_parameters()
+        )
+        all_probs = brute_force._all_weights / brute_force._normalization_factor
+        nonzero_probs = all_probs[all_probs > 0]
+        exact_entropy = -np.sum(nonzero_probs * np.log2(nonzero_probs))
+
+        # Test SUM
+        entropy_sum = model.calc_model_entropy(reduction=Reduction.SUM)
+        self.assertAlmostEqual(entropy_sum, exact_entropy, places=4,
+                               msg="MPLE_RECIPROCITY entropy doesn't match BruteForce computed value")
+
+        # Test MEAN (should be sum / num_dyads)
+        entropy_mean = model.calc_model_entropy(reduction=Reduction.MEAN)
+        num_dyads = 4 * 3 // 2  # n(n-1)/2 dyads
+        self.assertAlmostEqual(entropy_mean, entropy_sum / num_dyads, places=5,
+                              msg="MEAN should be SUM / num_dyads")
+
+        # Test NONE
+        entropy_none = model.calc_model_entropy(reduction=Reduction.NONE)
+        self.assertIsInstance(entropy_none, np.ndarray)
+        self.assertEqual(entropy_none.shape, (num_dyads,),
+                        msg="NONE should return per-dyad distributions")
+
+    def test_mcmle_model_entropy_raises_not_implemented_error(self):
+        """
+        Test that MCMLE models correctly raise NotImplementedError for entropy calculation.
+
+        MCMLE models have dyadic-dependent terms (e.g., NumberOfTriangles)
+        that make exact entropy calculation intractable without sampling.
+        """
+        set_seed(46)
+        n_nodes = 5
+
+        # Create model with dyadic-dependent metric (triangles)
+        metrics = [NumberOfEdgesDirected(), NumberOfTrianglesDirected()]
+        model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
+
+        # Assert entropy calculation raises NotImplementedError
+        with self.assertRaises(NotImplementedError) as context:
+            model.calc_model_entropy()
+
+        self.assertIn("reciprocal", str(context.exception).lower(),
+                     msg="Error message should mention reciprocity limitation")

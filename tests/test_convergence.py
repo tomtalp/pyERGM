@@ -12,6 +12,7 @@ from pyERGM.convergence import (
 )
 from pyERGM.constants import ConvergenceCriterion, OptimizationResult, CovMatrixEstimationMethod, \
     DataBootstrapSplittingMethod
+from pyERGM.metrics import MetricsCollection
 
 
 class TestFactory(unittest.TestCase):
@@ -160,9 +161,9 @@ class TestObservedBootstrapTester(unittest.TestCase):
     def test_raises_for_missing_bootstrap_method(self):
         """Should raise when a metric lacks calculate_bootstrapped_features."""
         observed_networks = np.zeros((3, 3, 1))
-        mock_metric = MagicMock(spec=['metric_name'])  # no attributes at all
-        mock_metric.name = "bad_metric"
-        metrics_collection = MagicMock()
+        mock_metric = MagicMock(spec=['metric_name'])  # no calculate_bootstrapped_features
+        mock_metric.metric_name = "bad_metric"
+        metrics_collection = object.__new__(MetricsCollection)
         metrics_collection.metrics = [mock_metric]
         with self.assertRaises(ValueError, msg="calculate_bootstrapped_features"):
             ObservedBootstrapTester(

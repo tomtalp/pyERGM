@@ -249,11 +249,7 @@ class ObservedBootstrapTester(ConvergenceTester):
     ):
         if observed_networks.ndim == 3 and observed_networks.shape[-1] > 1:
             raise ValueError("ConvergenceCriterion.OBSERVED_BOOTSTRAP doesn't support multiple networks!")
-        for metric in metrics_collection.metrics:
-            if not hasattr(metric, "calculate_bootstrapped_features"):
-                raise ValueError(
-                    f"metric {metric.metric_name} does not have a calculate_bootstrapped_features method, the "
-                    f"model doesn't support observed_bootstrap as a convergence criterion.")
+        metrics_collection.validate_supports_observed_bootstrap()
 
         self._observed_features = observed_features
         self._num_model_sub_samples = num_model_sub_samples

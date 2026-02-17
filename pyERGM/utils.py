@@ -6,7 +6,6 @@ from typing import Sequence, Any
 import numpy as np
 from numpy import typing as npt
 from numba import njit
-from scipy.spatial.distance import mahalanobis
 import random
 
 from pyERGM.constants import DataBootstrapSplittingMethod, CovMatrixEstimationMethod, DyadStateIdx, Reduction
@@ -236,14 +235,14 @@ def get_greatest_convex_minorant(xs: np.ndarray, ys: np.ndarray):
         # y-y0 = m(x-x0) -> y = mx + (y0-m*x0)
         cur_wrapping_lines_slopes = np.diff(cur_proposed_minorant[cur_wrapping_indices]) / np.diff(
             xs[cur_wrapping_indices])
-        cur_wrapping_lines_intersepts = (cur_proposed_minorant[cur_wrapping_indices[:-1]] -
+        cur_wrapping_lines_intercepts = (cur_proposed_minorant[cur_wrapping_indices[:-1]] -
                                          cur_wrapping_lines_slopes * xs[cur_wrapping_indices[:-1]])
 
         # Update the values in problematic indices to lie on the corresponding wrapping line
         cur_assignment_problematic_idx_to_line = np.searchsorted(cur_wrapping_indices, cur_problematic_indices) - 1
         cur_proposed_minorant[cur_problematic_indices] = (
                 cur_wrapping_lines_slopes[cur_assignment_problematic_idx_to_line] * xs[cur_problematic_indices] +
-                cur_wrapping_lines_intersepts[cur_assignment_problematic_idx_to_line])
+                cur_wrapping_lines_intercepts[cur_assignment_problematic_idx_to_line])
 
         # Update the slopes and the indices where they decrease
         cur_spline_slopes = np.diff(cur_proposed_minorant) / x_diffs
@@ -835,6 +834,9 @@ def split_network_for_bootstrapping(
         indices = np.arange(net_size)
         np.random.shuffle(indices)
         first_part_indices = indices[:first_part_size].reshape((first_part_size, 1))
+    else:
+        raise ValueError(f"Received an invalid splitting method: {splitting_method}. "
+                         f"Supporting elements of DataBootstrapSplittingMethod")
 
     second_part_indices = np.setdiff1d(np.arange(net_size).astype(int), first_part_indices).reshape(
         (net_size - first_part_size, 1))
@@ -1113,7 +1115,8 @@ def calc_entropy_independent_probability_matrix(
         reduction: Reduction = Reduction.SUM,
         eps: float = 1e-10
 ) -> float | np.ndarray:
-    flat_no_diag_probs = flatten_square_matrix_to_edge_list(prob_mat, is_directed)[~np.isnan(flat_no_diag_probs)]
+    flat_no_diag_probs = flatten_square_matrix_to_edge_list(prob_mat, is_directed)
+    flat_no_diag_probs = flat_no_diag_probs[~np.isnan(flat_no_diag_probs)]
     flat_clipped_no_diag_probs = np.clip(flat_no_diag_probs, eps, 1 - eps)
 
     entropy_per_entry = -(

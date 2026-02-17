@@ -879,7 +879,7 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         result = metric.calculate(W)
 
         # Should have fewer features due to ignored index
-        n_features = metric._get_effective_feature_count()
+        n_features = metric.get_effective_feature_count()
         self.assertEqual(len(result), n_features)
         self.assertEqual(n_features, 3)
 
@@ -898,7 +898,7 @@ class TestNumberOfEdgesTypesDirected(unittest.TestCase):
         metric._n_nodes = n
         metric.initialize_indices_to_ignore()
 
-        n_features = metric._get_effective_feature_count()
+        n_features = metric.get_effective_feature_count()
         self.assertEqual(n_features, 3)
 
         # Edge (0,1) is A->B which is type pair index 1 in full features.
@@ -1092,7 +1092,7 @@ class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
         metric._n_nodes = n
         metric.initialize_indices_to_ignore()
 
-        n_features = metric._get_effective_feature_count()
+        n_features = metric.get_effective_feature_count()
         self.assertEqual(n_features, 2)
 
         # Calculate features
@@ -1125,7 +1125,7 @@ class TestNumberOfEdgesTypesUndirected(unittest.TestCase):
         metric._n_nodes = n
         metric.initialize_indices_to_ignore()
 
-        n_features = metric._get_effective_feature_count()
+        n_features = metric.get_effective_feature_count()
         self.assertEqual(n_features, 2)
 
         # Edge (0,1) is A-B which is the ignored type pair (index 1).
@@ -1682,23 +1682,23 @@ class TestMetricsCollection(unittest.TestCase):
 
         with patch.object(MetricsCollection, '_copy_metrics', return_value=(receiver,)):
             collection = MetricsCollection([receiver], is_directed=True, n_nodes=n)
-        self.assertEqual(receiver._get_effective_feature_count(), n)
+        self.assertEqual(receiver.get_effective_feature_count(), n)
 
         receiver = InDegree(indices_from_user=[0])
         with patch.object(MetricsCollection, '_copy_metrics', return_value=(receiver,)):
             collection = MetricsCollection([receiver], is_directed=True, n_nodes=n)
-        self.assertEqual(receiver._get_effective_feature_count(), n - 1)
+        self.assertEqual(receiver.get_effective_feature_count(), n - 1)
 
         sender = OutDegree()
 
         with patch.object(MetricsCollection, '_copy_metrics', return_value=(sender,)):
             collection = MetricsCollection([sender], is_directed=True, n_nodes=n)
-        self.assertEqual(sender._get_effective_feature_count(), n)
+        self.assertEqual(sender.get_effective_feature_count(), n)
 
         sender = OutDegree(indices_from_user=[0])
         with patch.object(MetricsCollection, '_copy_metrics', return_value=(sender,)):
             collection = MetricsCollection([sender], is_directed=True, n_nodes=n)
-        self.assertEqual(sender._get_effective_feature_count(), n - 1)
+        self.assertEqual(sender.get_effective_feature_count(), n - 1)
 
     def test_metrics_setup(self):
         metrics = [NumberOfEdgesDirected(), TotalReciprocity(), InDegree()]

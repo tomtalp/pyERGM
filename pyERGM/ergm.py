@@ -459,14 +459,12 @@ class ERGM():
         np.ndarray
             A single network of shape (n, n) to use as MCMC seed.
         """
+        reference_network = None
         match self._metrics_collection.choose_optimization_scheme():
             case OptimizationScheme.MPLE_RECIPROCITY:
                 dyad_dists = self.get_mple_reciprocity_prediction()
                 sample = sample_from_dyads_distribution(dyad_dists, 1)
-                return sample[:, :, 0]
-
-            case OptimizationScheme.MPLE:
-                reference_network = None
+                return sample[..., 0]
 
             case OptimizationScheme.MCMLE:
                 # For MCMLE: use ER(0.5) as a reference network. This is meant to allow edge-dependent statistics 
@@ -586,7 +584,7 @@ class ERGM():
             raise NotImplementedError("Currently supporting likelihood calculations for models that are synaptic "
                                       "independent or with reciprocal synapses dependent")
 
-    def calc_model_entropy(self, reduction: str = 'sum', eps: float = 1e-10):
+    def calc_model_entropy(self, reduction: Reduction = Reduction.SUM, eps: float = 1e-10):
         """
         Calculate the entropy of the fitted ERGM model.
 
@@ -596,8 +594,8 @@ class ERGM():
 
         Parameters
         ----------
-        reduction : str, optional
-            How to aggregate entropy: 'sum' (default) or 'mean'.
+        reduction : Reduction, optional
+            How to aggregate entropy. Default is Reduction.SUM.
         eps : float, optional
             Small constant to avoid log(0). Default is 1e-10.
 
