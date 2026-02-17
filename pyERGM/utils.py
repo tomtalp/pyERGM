@@ -1097,7 +1097,7 @@ def expand_net_dims(net: np.ndarray) -> np.ndarray:
     return net
 
 
-def _reduce_individual_elements(flat_array: np.ndarray, reduction: Reduction) -> np.ndarray | float:
+def reduce_individual_elements(flat_array: np.ndarray, reduction: Reduction) -> np.ndarray | float:
     match reduction:
         case Reduction.NONE:
             return flat_array
@@ -1123,7 +1123,7 @@ def calc_entropy_independent_probability_matrix(
             flat_clipped_no_diag_probs * np.log2(flat_clipped_no_diag_probs) +
             (1 - flat_clipped_no_diag_probs) * np.log2(1 - flat_clipped_no_diag_probs)
     )
-    return _reduce_individual_elements(entropy_per_entry, reduction)
+    return reduce_individual_elements(entropy_per_entry, reduction)
 
 
 def calc_entropy_dyads_dists(
@@ -1133,4 +1133,4 @@ def calc_entropy_dyads_dists(
 ) -> float | np.ndarray:
     clipped_dyads_dists = np.clip(dyads_distributions, a_min=eps, a_max=1 - eps)
     entropy_per_dyad = -(clipped_dyads_dists * np.log2(clipped_dyads_dists)).sum(axis=1)
-    return _reduce_individual_elements(entropy_per_dyad, reduction)
+    return reduce_individual_elements(entropy_per_dyad, reduction)

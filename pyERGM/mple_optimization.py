@@ -136,17 +136,8 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
         1 - trimmed_predictions)) / np.log(log_base)
     if sample_weights.size > 0:
         minus_binary_cross_entropy_per_edge = sample_weights * minus_binary_cross_entropy_per_edge
-    if reduction == Reduction.NONE:
-        return minus_binary_cross_entropy_per_edge
-    # The wrapping into a numpy array and reshape to 2D is necessary for numba to compile the function properly
-    # (returned types must be unified).
-    elif reduction == Reduction.SUM:
-        return np.array([minus_binary_cross_entropy_per_edge.sum()]).reshape(1, 1)
-    elif reduction == Reduction.MEAN:
-        return np.array([minus_binary_cross_entropy_per_edge.mean()]).reshape(1, 1)
-    else:
-        raise ValueError(f"{reduction} is an unsupported reduction method, options are 'none', 'sum', or 'mean'")
-
+    reduced = reduce_individual_elements(minus_binary_cross_entropy_per_edge.flatten(), reduction)
+    return reduced.reshape((reduced.size, 1))
 
 @njit
 def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np.ndarray, ys: np.ndarray,
