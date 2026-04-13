@@ -1,0 +1,2590 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+        <link rel="canonical" href="https://tomtalp.github.io/pyERGM/api/utils/">
+      
+      
+        <link rel="prev" href="../sampling/">
+      
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.5.39">
+    
+    
+      
+        <title>Utilities - pyERGM</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.8c3ca2c6.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#utilities-module" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="pyERGM" class="md-header__button md-logo" aria-label="pyERGM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            pyERGM
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Utilities
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+    
+    
+    
+    
+      <label class="md-header__button md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+      </label>
+      <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/tomtalp/pyERGM" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    pyERGM
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="pyERGM" class="md-nav__button md-logo" aria-label="pyERGM" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    pyERGM
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/tomtalp/pyERGM" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.6.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    pyERGM
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Home
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../overview/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Overview
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../fitting/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Fitting a model
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../evaluating/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Evaluating model performance
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    Metrics
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Metrics
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../metrics/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Introduction to graph metrics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../metrics_reference/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    List of metrics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../custom_metrics/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Creating custom metrics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_6" id="__nav_6_label" tabindex="0">
+            
+  
+  <span class="md-ellipsis">
+    API Reference
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            API Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../ergm/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    ERGM
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../metrics/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Metrics
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../sampling/" class="md-nav__link">
+        
+  
+  <span class="md-ellipsis">
+    Sampling
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  <span class="md-ellipsis">
+    Utilities
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  <span class="md-ellipsis">
+    Utilities
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#random-seed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Random Seed
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.set_seed" class="md-nav__link">
+    <span class="md-ellipsis">
+      set_seed
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network-conversion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Network Conversion
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.construct_adj_mat_from_int" class="md-nav__link">
+    <span class="md-ellipsis">
+      construct_adj_mat_from_int
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.construct_int_from_adj_mat" class="md-nav__link">
+    <span class="md-ellipsis">
+      construct_int_from_adj_mat
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#matrix-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      Matrix Operations
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.flatten_square_matrix_to_edge_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      flatten_square_matrix_to_edge_list
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.reshape_flattened_off_diagonal_elements_to_square" class="md-nav__link">
+    <span class="md-ellipsis">
+      reshape_flattened_off_diagonal_elements_to_square
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.expand_net_dims" class="md-nav__link">
+    <span class="md-ellipsis">
+      expand_net_dims
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#covariance-estimation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Covariance Estimation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.covariance_matrix_estimation" class="md-nav__link">
+    <span class="md-ellipsis">
+      covariance_matrix_estimation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sampling-utilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sampling Utilities
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.sample_from_independent_probabilities_matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      sample_from_independent_probabilities_matrix
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.sample_from_dyads_distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      sample_from_dyads_distribution
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entropy-and-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entropy and Information
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.calc_entropy_independent_probability_matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      calc_entropy_independent_probability_matrix
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.calc_entropy_dyads_dists" class="md-nav__link">
+    <span class="md-ellipsis">
+      calc_entropy_dyads_dists
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#random-seed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Random Seed
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.set_seed" class="md-nav__link">
+    <span class="md-ellipsis">
+      set_seed
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#network-conversion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Network Conversion
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.construct_adj_mat_from_int" class="md-nav__link">
+    <span class="md-ellipsis">
+      construct_adj_mat_from_int
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.construct_int_from_adj_mat" class="md-nav__link">
+    <span class="md-ellipsis">
+      construct_int_from_adj_mat
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#matrix-operations" class="md-nav__link">
+    <span class="md-ellipsis">
+      Matrix Operations
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.flatten_square_matrix_to_edge_list" class="md-nav__link">
+    <span class="md-ellipsis">
+      flatten_square_matrix_to_edge_list
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.reshape_flattened_off_diagonal_elements_to_square" class="md-nav__link">
+    <span class="md-ellipsis">
+      reshape_flattened_off_diagonal_elements_to_square
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.expand_net_dims" class="md-nav__link">
+    <span class="md-ellipsis">
+      expand_net_dims
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#covariance-estimation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Covariance Estimation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.covariance_matrix_estimation" class="md-nav__link">
+    <span class="md-ellipsis">
+      covariance_matrix_estimation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#sampling-utilities" class="md-nav__link">
+    <span class="md-ellipsis">
+      Sampling Utilities
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.sample_from_independent_probabilities_matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      sample_from_independent_probabilities_matrix
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.sample_from_dyads_distribution" class="md-nav__link">
+    <span class="md-ellipsis">
+      sample_from_dyads_distribution
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#entropy-and-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      Entropy and Information
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.calc_entropy_independent_probability_matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      calc_entropy_independent_probability_matrix
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#pyERGM.utils.calc_entropy_dyads_dists" class="md-nav__link">
+    <span class="md-ellipsis">
+      calc_entropy_dyads_dists
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+  
+  
+
+
+<h1 id="utilities-module">Utilities Module</h1>
+<p>Utility functions used throughout pyERGM.</p>
+<h2 id="random-seed">Random Seed</h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.set_seed" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">set_seed</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">set_seed</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Set random seed for reproducibility across all libraries.</p>
+<p>Sets seeds for numpy, Python's random module, and numba-jitted functions.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>seed</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Random seed value.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">25</span>
+<span class="normal">26</span>
+<span class="normal">27</span>
+<span class="normal">28</span>
+<span class="normal">29</span>
+<span class="normal">30</span>
+<span class="normal">31</span>
+<span class="normal">32</span>
+<span class="normal">33</span>
+<span class="normal">34</span>
+<span class="normal">35</span>
+<span class="normal">36</span>
+<span class="normal">37</span>
+<span class="normal">38</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">set_seed</span><span class="p">(</span><span class="n">seed</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Set random seed for reproducibility across all libraries.</span>
+
+<span class="sd">    Sets seeds for numpy, Python&#39;s random module, and numba-jitted functions.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    seed : int</span>
+<span class="sd">        Random seed value.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+    <span class="n">random</span><span class="o">.</span><span class="n">seed</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+    <span class="n">_numba_seed</span><span class="p">(</span><span class="n">seed</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div><h2 id="network-conversion">Network Conversion</h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.construct_adj_mat_from_int" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">construct_adj_mat_from_int</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">construct_adj_mat_from_int</span><span class="p">(</span><span class="n">int_code</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">num_nodes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Convert an integer to its corresponding adjacency matrix.</p>
+<p>Used for exhaustive enumeration in BruteForceERGM. Each integer represents
+a unique network configuration via binary encoding.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>int_code</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Integer encoding of the network (0 to 2^(n*(n-1)) for directed networks).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>num_nodes</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Number of nodes in the network.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>is_directed</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether the network is directed.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Adjacency matrix of shape (num_nodes, num_nodes).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">70</span>
+<span class="normal">71</span>
+<span class="normal">72</span>
+<span class="normal">73</span>
+<span class="normal">74</span>
+<span class="normal">75</span>
+<span class="normal">76</span>
+<span class="normal">77</span>
+<span class="normal">78</span>
+<span class="normal">79</span>
+<span class="normal">80</span>
+<span class="normal">81</span>
+<span class="normal">82</span>
+<span class="normal">83</span>
+<span class="normal">84</span>
+<span class="normal">85</span>
+<span class="normal">86</span>
+<span class="normal">87</span>
+<span class="normal">88</span>
+<span class="normal">89</span>
+<span class="normal">90</span>
+<span class="normal">91</span>
+<span class="normal">92</span>
+<span class="normal">93</span>
+<span class="normal">94</span>
+<span class="normal">95</span>
+<span class="normal">96</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">construct_adj_mat_from_int</span><span class="p">(</span><span class="n">int_code</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">num_nodes</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Convert an integer to its corresponding adjacency matrix.</span>
+
+<span class="sd">    Used for exhaustive enumeration in BruteForceERGM. Each integer represents</span>
+<span class="sd">    a unique network configuration via binary encoding.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    int_code : int</span>
+<span class="sd">        Integer encoding of the network (0 to 2^(n*(n-1)) for directed networks).</span>
+<span class="sd">    num_nodes : int</span>
+<span class="sd">        Number of nodes in the network.</span>
+<span class="sd">    is_directed : bool</span>
+<span class="sd">        Whether the network is directed.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    np.ndarray</span>
+<span class="sd">        Adjacency matrix of shape (num_nodes, num_nodes).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">num_pos_connects</span> <span class="o">=</span> <span class="n">num_nodes</span> <span class="o">*</span> <span class="p">(</span><span class="n">num_nodes</span> <span class="o">-</span> <span class="mi">1</span><span class="p">)</span>
+    <span class="k">if</span> <span class="ow">not</span> <span class="n">is_directed</span><span class="p">:</span>
+        <span class="n">num_pos_connects</span> <span class="o">//=</span> <span class="mi">2</span>
+    <span class="n">adj_mat_str</span> <span class="o">=</span> <span class="sa">f</span><span class="s1">&#39;</span><span class="si">{</span><span class="n">int_code</span><span class="si">:</span><span class="s1">0</span><span class="si">{</span><span class="n">num_pos_connects</span><span class="si">}</span><span class="s1">b</span><span class="si">}</span><span class="s1">&#39;</span>
+    <span class="n">mat_entries_arr</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">array</span><span class="p">(</span><span class="nb">list</span><span class="p">(</span><span class="n">adj_mat_str</span><span class="p">),</span> <span class="s1">&#39;uint8&#39;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">reshape_flattened_off_diagonal_elements_to_square</span><span class="p">(</span><span class="n">mat_entries_arr</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.construct_int_from_adj_mat" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">construct_int_from_adj_mat</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">construct_int_from_adj_mat</span><span class="p">(</span><span class="n">adj_mat</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Convert an adjacency matrix to its integer encoding.</p>
+<p>Inverse operation of construct_adj_mat_from_int.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>adj_mat</code>
+            </td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Adjacency matrix of shape (n, n).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>is_directed</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether the network is directed.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Integer encoding of the network.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If adjacency matrix dimensions are invalid.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 99</span>
+<span class="normal">100</span>
+<span class="normal">101</span>
+<span class="normal">102</span>
+<span class="normal">103</span>
+<span class="normal">104</span>
+<span class="normal">105</span>
+<span class="normal">106</span>
+<span class="normal">107</span>
+<span class="normal">108</span>
+<span class="normal">109</span>
+<span class="normal">110</span>
+<span class="normal">111</span>
+<span class="normal">112</span>
+<span class="normal">113</span>
+<span class="normal">114</span>
+<span class="normal">115</span>
+<span class="normal">116</span>
+<span class="normal">117</span>
+<span class="normal">118</span>
+<span class="normal">119</span>
+<span class="normal">120</span>
+<span class="normal">121</span>
+<span class="normal">122</span>
+<span class="normal">123</span>
+<span class="normal">124</span>
+<span class="normal">125</span>
+<span class="normal">126</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">construct_int_from_adj_mat</span><span class="p">(</span><span class="n">adj_mat</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">int</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Convert an adjacency matrix to its integer encoding.</span>
+
+<span class="sd">    Inverse operation of construct_adj_mat_from_int.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    adj_mat : np.ndarray</span>
+<span class="sd">        Adjacency matrix of shape (n, n).</span>
+<span class="sd">    is_directed : bool</span>
+<span class="sd">        Whether the network is directed.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    int</span>
+<span class="sd">        Integer encoding of the network.</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If adjacency matrix dimensions are invalid.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="nb">len</span><span class="p">(</span><span class="n">adj_mat</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span> <span class="o">!=</span> <span class="mi">2</span> <span class="ow">or</span> <span class="n">adj_mat</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="n">adj_mat</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;The dimensions of the given adjacency matrix </span><span class="si">{</span><span class="n">adj_mat</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2"> are not valid for an &quot;</span>
+                         <span class="sa">f</span><span class="s2">&quot;adjacency matrix (should be a 2D squared matrix)&quot;</span><span class="p">)</span>
+    <span class="n">adj_mat_no_diag</span> <span class="o">=</span> <span class="n">flatten_square_matrix_to_edge_list</span><span class="p">(</span><span class="n">adj_mat</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">)</span>
+    <span class="k">return</span> <span class="nb">round</span><span class="p">((</span><span class="n">adj_mat_no_diag</span> <span class="o">*</span> <span class="mi">2</span> <span class="o">**</span> <span class="n">np</span><span class="o">.</span><span class="n">arange</span><span class="p">(</span><span class="n">adj_mat_no_diag</span><span class="o">.</span><span class="n">size</span> <span class="o">-</span> <span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">,</span> <span class="o">-</span><span class="mi">1</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="n">np</span><span class="o">.</span><span class="n">ulonglong</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">())</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div><h2 id="matrix-operations">Matrix Operations</h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.flatten_square_matrix_to_edge_list" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">flatten_square_matrix_to_edge_list</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">flatten_square_matrix_to_edge_list</span><span class="p">(</span><span class="n">square_mat</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1022</span>
+<span class="normal">1023</span>
+<span class="normal">1024</span>
+<span class="normal">1025</span>
+<span class="normal">1026</span>
+<span class="normal">1027</span>
+<span class="normal">1028</span>
+<span class="normal">1029</span>
+<span class="normal">1030</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">flatten_square_matrix_to_edge_list</span><span class="p">(</span><span class="n">square_mat</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">square_mat</span><span class="o">.</span><span class="n">ndim</span> <span class="o">!=</span> <span class="mi">2</span> <span class="ow">or</span> <span class="n">square_mat</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span> <span class="o">!=</span> <span class="n">square_mat</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;The input must be a square matrix&quot;</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">is_directed</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">square_mat</span><span class="p">[</span><span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">eye</span><span class="p">(</span><span class="n">square_mat</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">],</span> <span class="n">dtype</span><span class="o">=</span><span class="nb">bool</span><span class="p">)]</span><span class="o">.</span><span class="n">flatten</span><span class="p">()</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">np</span><span class="o">.</span><span class="n">any</span><span class="p">(</span><span class="n">square_mat</span> <span class="o">!=</span> <span class="n">square_mat</span><span class="o">.</span><span class="n">T</span><span class="p">):</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Got an asymmetric matrix as an undirected network to flatten&quot;</span><span class="p">)</span>
+        <span class="k">return</span> <span class="n">square_mat</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">triu_indices_from</span><span class="p">(</span><span class="n">square_mat</span><span class="p">,</span> <span class="n">k</span><span class="o">=</span><span class="mi">1</span><span class="p">)]</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.reshape_flattened_off_diagonal_elements_to_square" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">reshape_flattened_off_diagonal_elements_to_square</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">reshape_flattened_off_diagonal_elements_to_square</span><span class="p">(</span><span class="n">flattened_array</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">flat_mask</span><span class="p">:</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1049</span>
+<span class="normal">1050</span>
+<span class="normal">1051</span>
+<span class="normal">1052</span>
+<span class="normal">1053</span>
+<span class="normal">1054</span>
+<span class="normal">1055</span>
+<span class="normal">1056</span>
+<span class="normal">1057</span>
+<span class="normal">1058</span>
+<span class="normal">1059</span>
+<span class="normal">1060</span>
+<span class="normal">1061</span>
+<span class="normal">1062</span>
+<span class="normal">1063</span>
+<span class="normal">1064</span>
+<span class="normal">1065</span>
+<span class="normal">1066</span>
+<span class="normal">1067</span>
+<span class="normal">1068</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">reshape_flattened_off_diagonal_elements_to_square</span><span class="p">(</span>
+        <span class="n">flattened_array</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+        <span class="n">flat_mask</span><span class="p">:</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">[</span><span class="nb">bool</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">flat_mask</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
+        <span class="k">if</span> <span class="n">flat_mask</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span> <span class="o">!=</span> <span class="n">flattened_array</span><span class="o">.</span><span class="n">size</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span>
+                <span class="sa">f</span><span class="s2">&quot;Received incompatible flattened_array and mask. flat_mask.sum(): &quot;</span>
+                <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">flat_mask</span><span class="o">.</span><span class="n">sum</span><span class="p">()</span><span class="si">}</span><span class="s2">, flattened_array.size: </span><span class="si">{</span><span class="n">flattened_array</span><span class="o">.</span><span class="n">size</span><span class="si">}</span><span class="s2">, but should be equal.&quot;</span>
+            <span class="p">)</span>
+        <span class="n">full_array</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">full</span><span class="p">(</span><span class="n">flat_mask</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="n">fill_value</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">nan</span><span class="p">)</span>
+        <span class="n">full_array</span><span class="p">[</span><span class="n">flat_mask</span><span class="p">]</span> <span class="o">=</span> <span class="n">flattened_array</span>
+        <span class="n">num_nodes</span> <span class="o">=</span> <span class="n">num_edges_to_num_nodes</span><span class="p">(</span><span class="n">flat_mask</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">)</span>
+    <span class="k">else</span><span class="p">:</span>
+        <span class="n">full_array</span> <span class="o">=</span> <span class="n">flattened_array</span>
+        <span class="n">num_nodes</span> <span class="o">=</span> <span class="n">num_edges_to_num_nodes</span><span class="p">(</span><span class="n">flattened_array</span><span class="o">.</span><span class="n">size</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">)</span>
+    <span class="n">reshaped</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">num_nodes</span><span class="p">,</span> <span class="n">num_nodes</span><span class="p">),</span> <span class="n">dtype</span><span class="o">=</span><span class="n">flattened_array</span><span class="o">.</span><span class="n">dtype</span><span class="p">)</span>
+    <span class="n">_set_off_diagonal_elements_from_array</span><span class="p">(</span><span class="n">reshaped</span><span class="p">,</span> <span class="n">full_array</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">reshaped</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.expand_net_dims" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">expand_net_dims</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">expand_net_dims</span><span class="p">(</span><span class="n">net</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Ensure network array has 3 dimensions (n, n, num_networks).</p>
+<p>Adds a singleton dimension if the input is 2D.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>net</code>
+            </td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Network array of shape (n, n) or (n, n, num_networks).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Network array of shape (n, n, num_networks).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="ValueError">ValueError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If array is not 2D or 3D.</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1071</span>
+<span class="normal">1072</span>
+<span class="normal">1073</span>
+<span class="normal">1074</span>
+<span class="normal">1075</span>
+<span class="normal">1076</span>
+<span class="normal">1077</span>
+<span class="normal">1078</span>
+<span class="normal">1079</span>
+<span class="normal">1080</span>
+<span class="normal">1081</span>
+<span class="normal">1082</span>
+<span class="normal">1083</span>
+<span class="normal">1084</span>
+<span class="normal">1085</span>
+<span class="normal">1086</span>
+<span class="normal">1087</span>
+<span class="normal">1088</span>
+<span class="normal">1089</span>
+<span class="normal">1090</span>
+<span class="normal">1091</span>
+<span class="normal">1092</span>
+<span class="normal">1093</span>
+<span class="normal">1094</span>
+<span class="normal">1095</span>
+<span class="normal">1096</span>
+<span class="normal">1097</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">expand_net_dims</span><span class="p">(</span><span class="n">net</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Ensure network array has 3 dimensions (n, n, num_networks).</span>
+
+<span class="sd">    Adds a singleton dimension if the input is 2D.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    net : np.ndarray</span>
+<span class="sd">        Network array of shape (n, n) or (n, n, num_networks).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    np.ndarray</span>
+<span class="sd">        Network array of shape (n, n, num_networks).</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    ValueError</span>
+<span class="sd">        If array is not 2D or 3D.</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">net</span><span class="o">.</span><span class="n">ndim</span> <span class="o">==</span> <span class="mi">2</span><span class="p">:</span>
+        <span class="c1"># a single network</span>
+        <span class="k">return</span> <span class="n">net</span><span class="p">[</span><span class="o">...</span><span class="p">,</span> <span class="n">np</span><span class="o">.</span><span class="n">newaxis</span><span class="p">]</span>
+    <span class="k">elif</span> <span class="n">net</span><span class="o">.</span><span class="n">ndim</span> <span class="o">!=</span> <span class="mi">3</span><span class="p">:</span>
+        <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="s2">&quot;Cannot expand dims to an array that is not 2 or 3 dimensional&quot;</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">net</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div><h2 id="covariance-estimation">Covariance Estimation</h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.covariance_matrix_estimation" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">covariance_matrix_estimation</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">covariance_matrix_estimation</span><span class="p">(</span><span class="n">features_of_net_samples</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">mean_features_of_net_samples</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">method</span><span class="p">:</span> <span class="n">CovMatrixEstimationMethod</span> <span class="o">=</span> <span class="n">CovMatrixEstimationMethod</span><span class="o">.</span><span class="n">NAIVE</span><span class="p">,</span> <span class="n">num_batches</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">25</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Approximate the covariance matrix of the model's features</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>features_of_net_samples</code>
+            </td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The calculated features of the networks that are used for the approximation. Of dimensions
+(num_features X sample_size)</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>mean_features_of_net_samples</code>
+            </td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The mean of the features across the samples (a vector of size num_features)</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>method</code>
+            </td>
+            <td>
+                  <code><span title="pyERGM.constants.CovMatrixEstimationMethod">CovMatrixEstimationMethod</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>the method to use for approximating the covariance matrix
+currently supported options are:
+    CovMatrixEstimationMethod.NAIVE
+        A naive estimation from the sample: E[gi*gj] - E[gi]E[gj]
+    CovMatrixEstimationMethod.BATCH
+        based on difference of means of sample batches from the total mean, as in Geyer's handbook of
+        MCMC (there it is stated for the univariate case, but the generalization is straight forward).
+    CovMatrixEstimationMethod.MULTIVARIATE_INITIAL_SEQUENCE
+        Following Dai and Jones 2017 - the first estimator in section 3.1 (denoted mIS).</p>
+              </div>
+            </td>
+            <td>
+                  <code><span title="pyERGM.constants.CovMatrixEstimationMethod.NAIVE">NAIVE</span></code>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>num_batches</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>The batch size for CovMatrixEstimationMethod.BATCH (default is 25).</p>
+              </div>
+            </td>
+            <td>
+                  <code>25</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code>The covariance matrix estimation (num_features X num_features).</code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">370</span>
+<span class="normal">371</span>
+<span class="normal">372</span>
+<span class="normal">373</span>
+<span class="normal">374</span>
+<span class="normal">375</span>
+<span class="normal">376</span>
+<span class="normal">377</span>
+<span class="normal">378</span>
+<span class="normal">379</span>
+<span class="normal">380</span>
+<span class="normal">381</span>
+<span class="normal">382</span>
+<span class="normal">383</span>
+<span class="normal">384</span>
+<span class="normal">385</span>
+<span class="normal">386</span>
+<span class="normal">387</span>
+<span class="normal">388</span>
+<span class="normal">389</span>
+<span class="normal">390</span>
+<span class="normal">391</span>
+<span class="normal">392</span>
+<span class="normal">393</span>
+<span class="normal">394</span>
+<span class="normal">395</span>
+<span class="normal">396</span>
+<span class="normal">397</span>
+<span class="normal">398</span>
+<span class="normal">399</span>
+<span class="normal">400</span>
+<span class="normal">401</span>
+<span class="normal">402</span>
+<span class="normal">403</span>
+<span class="normal">404</span>
+<span class="normal">405</span>
+<span class="normal">406</span>
+<span class="normal">407</span>
+<span class="normal">408</span>
+<span class="normal">409</span>
+<span class="normal">410</span>
+<span class="normal">411</span>
+<span class="normal">412</span>
+<span class="normal">413</span>
+<span class="normal">414</span>
+<span class="normal">415</span>
+<span class="normal">416</span>
+<span class="normal">417</span>
+<span class="normal">418</span>
+<span class="normal">419</span>
+<span class="normal">420</span>
+<span class="normal">421</span>
+<span class="normal">422</span>
+<span class="normal">423</span>
+<span class="normal">424</span>
+<span class="normal">425</span>
+<span class="normal">426</span>
+<span class="normal">427</span>
+<span class="normal">428</span>
+<span class="normal">429</span>
+<span class="normal">430</span>
+<span class="normal">431</span>
+<span class="normal">432</span>
+<span class="normal">433</span>
+<span class="normal">434</span>
+<span class="normal">435</span>
+<span class="normal">436</span>
+<span class="normal">437</span>
+<span class="normal">438</span>
+<span class="normal">439</span>
+<span class="normal">440</span>
+<span class="normal">441</span>
+<span class="normal">442</span>
+<span class="normal">443</span>
+<span class="normal">444</span>
+<span class="normal">445</span>
+<span class="normal">446</span>
+<span class="normal">447</span>
+<span class="normal">448</span>
+<span class="normal">449</span>
+<span class="normal">450</span>
+<span class="normal">451</span>
+<span class="normal">452</span>
+<span class="normal">453</span>
+<span class="normal">454</span>
+<span class="normal">455</span>
+<span class="normal">456</span>
+<span class="normal">457</span>
+<span class="normal">458</span>
+<span class="normal">459</span>
+<span class="normal">460</span>
+<span class="normal">461</span>
+<span class="normal">462</span>
+<span class="normal">463</span>
+<span class="normal">464</span>
+<span class="normal">465</span>
+<span class="normal">466</span>
+<span class="normal">467</span>
+<span class="normal">468</span>
+<span class="normal">469</span>
+<span class="normal">470</span>
+<span class="normal">471</span>
+<span class="normal">472</span>
+<span class="normal">473</span>
+<span class="normal">474</span>
+<span class="normal">475</span>
+<span class="normal">476</span>
+<span class="normal">477</span>
+<span class="normal">478</span>
+<span class="normal">479</span>
+<span class="normal">480</span>
+<span class="normal">481</span>
+<span class="normal">482</span>
+<span class="normal">483</span>
+<span class="normal">484</span>
+<span class="normal">485</span>
+<span class="normal">486</span>
+<span class="normal">487</span>
+<span class="normal">488</span>
+<span class="normal">489</span>
+<span class="normal">490</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="nd">@njit</span>
+<span class="k">def</span><span class="w"> </span><span class="nf">covariance_matrix_estimation</span><span class="p">(</span>
+        <span class="n">features_of_net_samples</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">mean_features_of_net_samples</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">method</span><span class="p">:</span> <span class="n">CovMatrixEstimationMethod</span> <span class="o">=</span> <span class="n">CovMatrixEstimationMethod</span><span class="o">.</span><span class="n">NAIVE</span><span class="p">,</span>
+        <span class="n">num_batches</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">25</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Approximate the covariance matrix of the model&#39;s features</span>
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    features_of_net_samples</span>
+<span class="sd">        The calculated features of the networks that are used for the approximation. Of dimensions</span>
+<span class="sd">        (num_features X sample_size)</span>
+<span class="sd">    mean_features_of_net_samples</span>
+<span class="sd">        The mean of the features across the samples (a vector of size num_features)</span>
+<span class="sd">    method</span>
+<span class="sd">        the method to use for approximating the covariance matrix</span>
+<span class="sd">        currently supported options are:</span>
+<span class="sd">            CovMatrixEstimationMethod.NAIVE</span>
+<span class="sd">                A naive estimation from the sample: E[gi*gj] - E[gi]E[gj]</span>
+<span class="sd">            CovMatrixEstimationMethod.BATCH</span>
+<span class="sd">                based on difference of means of sample batches from the total mean, as in Geyer&#39;s handbook of</span>
+<span class="sd">                MCMC (there it is stated for the univariate case, but the generalization is straight forward).</span>
+<span class="sd">            CovMatrixEstimationMethod.MULTIVARIATE_INITIAL_SEQUENCE</span>
+<span class="sd">                Following Dai and Jones 2017 - the first estimator in section 3.1 (denoted mIS).</span>
+<span class="sd">    num_batches:</span>
+<span class="sd">        The batch size for CovMatrixEstimationMethod.BATCH (default is 25).</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    The covariance matrix estimation (num_features X num_features).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="n">num_features</span> <span class="o">=</span> <span class="n">features_of_net_samples</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]</span>
+    <span class="n">sample_size</span> <span class="o">=</span> <span class="n">features_of_net_samples</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">1</span><span class="p">]</span>
+    <span class="k">match</span> <span class="n">method</span><span class="p">:</span>
+        <span class="k">case</span> <span class="n">CovMatrixEstimationMethod</span><span class="o">.</span><span class="n">NAIVE</span><span class="o">.</span><span class="n">value</span><span class="p">:</span>
+            <span class="c1"># An outer product of the means (E[gi]E[gj])</span>
+            <span class="n">cross_prod_mean_features</span> <span class="o">=</span> <span class="p">(</span><span class="n">mean_features_of_net_samples</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">num_features</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span> <span class="o">@</span>
+                                        <span class="n">mean_features_of_net_samples</span><span class="o">.</span><span class="n">T</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">num_features</span><span class="p">))</span>
+            <span class="c1"># A mean of the outer products of the sample (E[gi*gj])</span>
+            <span class="n">features_cross_prods</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">sample_size</span><span class="p">,</span> <span class="n">num_features</span><span class="p">,</span> <span class="n">num_features</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">sample_size</span><span class="p">):</span>
+                <span class="n">features_cross_prods</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">outer</span><span class="p">(</span><span class="n">features_of_net_samples</span><span class="p">[:,</span> <span class="n">i</span><span class="p">],</span> <span class="n">features_of_net_samples</span><span class="p">[:,</span> <span class="n">i</span><span class="p">])</span>
+            <span class="n">mean_features_cross_prod</span> <span class="o">=</span> <span class="n">features_cross_prods</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="o">/</span> <span class="n">sample_size</span>
+
+            <span class="k">return</span> <span class="n">mean_features_cross_prod</span> <span class="o">-</span> <span class="n">cross_prod_mean_features</span>
+
+        <span class="k">case</span> <span class="n">CovMatrixEstimationMethod</span><span class="o">.</span><span class="n">BATCH</span><span class="o">.</span><span class="n">value</span><span class="p">:</span>
+            <span class="k">while</span> <span class="n">sample_size</span> <span class="o">%</span> <span class="n">num_batches</span> <span class="o">!=</span> <span class="mi">0</span><span class="p">:</span>
+                <span class="n">num_batches</span> <span class="o">+=</span> <span class="mi">1</span>
+            <span class="n">batch_size</span> <span class="o">=</span> <span class="n">sample_size</span> <span class="o">//</span> <span class="n">num_batches</span>
+
+            <span class="c1"># Divide the sample into batches, and calculate the mean of each one of them</span>
+            <span class="n">batches_means</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">num_features</span><span class="p">,</span> <span class="n">num_batches</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_batches</span><span class="p">):</span>
+                <span class="n">batches_means</span><span class="p">[:,</span> <span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">features_of_net_samples</span><span class="p">[:,</span> <span class="n">i</span> <span class="o">*</span> <span class="n">batch_size</span><span class="p">:(</span><span class="n">i</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span> <span class="o">*</span> <span class="n">batch_size</span><span class="p">]</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span>
+                    <span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span> <span class="o">/</span> <span class="n">batch_size</span>
+
+            <span class="n">diff_of_global_mean</span> <span class="o">=</span> <span class="n">batches_means</span> <span class="o">-</span> <span class="n">mean_features_of_net_samples</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">num_features</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+            <span class="c1"># Average the outer products of the differences between batch means and the global mean and multiply by the</span>
+            <span class="c1"># batch size to compensate for the aggregation into batches</span>
+            <span class="n">diff_of_global_mean_outer_prods</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">num_batches</span><span class="p">,</span> <span class="n">num_features</span><span class="p">,</span> <span class="n">num_features</span><span class="p">))</span>
+            <span class="k">for</span> <span class="n">i</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="n">num_batches</span><span class="p">):</span>
+                <span class="n">diff_of_global_mean_outer_prods</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">outer</span><span class="p">(</span><span class="n">diff_of_global_mean</span><span class="p">[:,</span> <span class="n">i</span><span class="p">],</span> <span class="n">diff_of_global_mean</span><span class="p">[:,</span> <span class="n">i</span><span class="p">])</span>
+            <span class="n">batches_cov_mat_est</span> <span class="o">=</span> <span class="n">batch_size</span> <span class="o">*</span> <span class="n">diff_of_global_mean_outer_prods</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">0</span><span class="p">)</span> <span class="o">/</span> <span class="n">num_batches</span>
+
+            <span class="k">return</span> <span class="n">batches_cov_mat_est</span>
+
+        <span class="k">case</span> <span class="n">CovMatrixEstimationMethod</span><span class="o">.</span><span class="n">MULTIVARIATE_INITIAL_SEQUENCE</span><span class="o">.</span><span class="n">value</span><span class="p">:</span>
+            <span class="n">features_mean_diff</span> <span class="o">=</span> <span class="n">features_of_net_samples</span> <span class="o">-</span> <span class="n">mean_features_of_net_samples</span><span class="o">.</span><span class="n">reshape</span><span class="p">(</span><span class="n">num_features</span><span class="p">,</span> <span class="mi">1</span><span class="p">)</span>
+
+            <span class="c1"># In this method, we sum up capital gammas, and choose where to cut the tail (which corresponds to estimates</span>
+            <span class="c1"># of auto-correlations with large lags within the chain. Naturally, as the lag increases the estimation</span>
+            <span class="c1"># becomes worse, so the magic here is to determine where to cut). So we calculate the estimates one by one and</span>
+            <span class="c1"># evaluate the conditions for cutting.</span>
+            <span class="c1"># The first condition is to have an index where the estimation is positive-definite, namely all eigen-values</span>
+            <span class="c1"># are positive. As both gamma_0 (which is auto_corr_funcs[0]) and the capital gammas are symmetric, all</span>
+            <span class="c1"># the sum of them is allways symmetric, which ensures real eigen values, and we can simply calculate the</span>
+            <span class="c1"># eigen value with the smallest algebraic value to determine whether all of them are positive.</span>
+            <span class="n">is_positive</span> <span class="o">=</span> <span class="kc">False</span>
+            <span class="n">first_pos_def_idx</span> <span class="o">=</span> <span class="mi">0</span>
+            <span class="n">cur_pos_cov_mat_est</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">zeros</span><span class="p">((</span><span class="n">num_features</span><span class="p">,</span> <span class="n">num_features</span><span class="p">))</span>
+            <span class="n">gamma_hat_0</span> <span class="o">=</span> <span class="n">approximate_kth_auto_correlation_function</span><span class="p">(</span><span class="n">features_mean_diff</span><span class="p">,</span> <span class="mi">0</span><span class="p">)</span>
+            <span class="k">while</span> <span class="ow">not</span> <span class="n">is_positive</span><span class="p">:</span>
+                <span class="k">if</span> <span class="n">first_pos_def_idx</span> <span class="o">==</span> <span class="n">sample_size</span> <span class="o">//</span> <span class="mi">2</span><span class="p">:</span>
+                    <span class="k">raise</span> <span class="ne">RuntimeError</span><span class="p">(</span><span class="s2">&quot;Got a sample with no valid multivariate_initial_sequence covariance matrix &quot;</span>
+                                       <span class="s2">&quot;estimation (no possibility is positive-definite). Consider increasing sample size&quot;</span>
+                                       <span class="s2">&quot; or using a different covariance matrix estimation method.&quot;</span><span class="p">)</span>
+                <span class="n">cur_capital_gamma</span> <span class="o">=</span> <span class="n">calc_kth_capital_gamma</span><span class="p">(</span><span class="n">features_mean_diff</span><span class="p">,</span> <span class="n">first_pos_def_idx</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">first_pos_def_idx</span> <span class="o">==</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">cur_pos_cov_mat_est</span> <span class="o">=</span> <span class="o">-</span><span class="n">gamma_hat_0</span> <span class="o">+</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">cur_capital_gamma</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">cur_pos_cov_mat_est</span> <span class="o">+=</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">cur_capital_gamma</span>
+                <span class="n">cur_smallest_eigen_val</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">eigvalsh</span><span class="p">(</span><span class="n">cur_pos_cov_mat_est</span><span class="p">)[</span><span class="mi">0</span><span class="p">]</span>
+                <span class="k">if</span> <span class="n">cur_smallest_eigen_val</span> <span class="o">&gt;</span> <span class="mi">0</span><span class="p">:</span>
+                    <span class="n">is_positive</span> <span class="o">=</span> <span class="kc">True</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">first_pos_def_idx</span> <span class="o">+=</span> <span class="mi">1</span>
+
+            <span class="c1"># Now we find the farthest idx after first_pos_def_idx for which the sequence of determinants is strictly</span>
+            <span class="c1"># monotonically increasing.</span>
+            <span class="n">do_dets_increase</span> <span class="o">=</span> <span class="kc">True</span>
+            <span class="n">cutting_idx</span> <span class="o">=</span> <span class="n">first_pos_def_idx</span>
+            <span class="n">cur_det</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">det</span><span class="p">(</span><span class="n">cur_pos_cov_mat_est</span><span class="p">)</span>
+            <span class="k">while</span> <span class="n">do_dets_increase</span> <span class="ow">and</span> <span class="n">cutting_idx</span> <span class="o">&lt;</span> <span class="n">sample_size</span> <span class="o">//</span> <span class="mi">2</span><span class="p">:</span>
+                <span class="n">cur_capital_gamma</span> <span class="o">=</span> <span class="n">calc_kth_capital_gamma</span><span class="p">(</span><span class="n">features_mean_diff</span><span class="p">,</span> <span class="n">cutting_idx</span> <span class="o">+</span> <span class="mi">1</span><span class="p">)</span>
+                <span class="n">next_pos_cov_mat_est</span> <span class="o">=</span> <span class="n">cur_pos_cov_mat_est</span> <span class="o">+</span> <span class="mi">2</span> <span class="o">*</span> <span class="n">cur_capital_gamma</span>
+                <span class="n">next_det</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">linalg</span><span class="o">.</span><span class="n">det</span><span class="p">(</span><span class="n">next_pos_cov_mat_est</span><span class="p">)</span>
+                <span class="k">if</span> <span class="n">next_det</span> <span class="o">&lt;=</span> <span class="n">cur_det</span><span class="p">:</span>
+                    <span class="n">do_dets_increase</span> <span class="o">=</span> <span class="kc">False</span>
+                <span class="k">else</span><span class="p">:</span>
+                    <span class="n">cutting_idx</span> <span class="o">+=</span> <span class="mi">1</span>
+                    <span class="n">cur_pos_cov_mat_est</span> <span class="o">=</span> <span class="n">next_pos_cov_mat_est</span>
+                    <span class="n">cur_det</span> <span class="o">=</span> <span class="n">next_det</span>
+
+            <span class="k">return</span> <span class="n">cur_pos_cov_mat_est</span>
+
+        <span class="k">case</span><span class="w"> </span><span class="k">_</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="ne">ValueError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">method</span><span class="si">}</span><span class="s2"> is an unsupported method for covariance matrix estimation&quot;</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div><h2 id="sampling-utilities">Sampling Utilities</h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.sample_from_independent_probabilities_matrix" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">sample_from_independent_probabilities_matrix</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">sample_from_independent_probabilities_matrix</span><span class="p">(</span><span class="n">probability_matrix</span><span class="p">:</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">floating</span><span class="p">],</span> <span class="n">sample_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">replace</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">floating</span><span class="p">]</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j).</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>probability_matrix</code>
+            </td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Matrix where entry (i,j) is the probability of edge i→j.
+NaN values indicate masked (ignored) edges.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>sample_size</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Number of networks to sample.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>is_directed</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Whether the network is directed.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>replace</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If True (default), sample with replacement (networks may repeat).
+If False, sample without replacement (all networks unique).
+Uses adaptive batch sampling with uniqueness checking.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Sampled networks of shape (n, n, sample_size).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="RuntimeError">RuntimeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If replace=False and unable to generate enough unique networks
+(typically due to low model entropy).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<details class="note" open>
+  <summary>Notes</summary>
+  <p>When replace=False, uses adaptive batch sampling:
+- Samples in batches, keeps only unique networks
+- Adjusts batch size based on observed duplication rate
+- Stops if duplication rate becomes too high (&gt;95%)</p>
+<p>If the probability matrix contains np.nan values (that designate masked entries),
+the output sample will have np.nans in corresponding coordinates.
+(i.e., if np.isnan(probability_matrix[i, j]) then np.all(np.isnan(returned_sample[i, j, ...))).</p>
+</details>
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">774</span>
+<span class="normal">775</span>
+<span class="normal">776</span>
+<span class="normal">777</span>
+<span class="normal">778</span>
+<span class="normal">779</span>
+<span class="normal">780</span>
+<span class="normal">781</span>
+<span class="normal">782</span>
+<span class="normal">783</span>
+<span class="normal">784</span>
+<span class="normal">785</span>
+<span class="normal">786</span>
+<span class="normal">787</span>
+<span class="normal">788</span>
+<span class="normal">789</span>
+<span class="normal">790</span>
+<span class="normal">791</span>
+<span class="normal">792</span>
+<span class="normal">793</span>
+<span class="normal">794</span>
+<span class="normal">795</span>
+<span class="normal">796</span>
+<span class="normal">797</span>
+<span class="normal">798</span>
+<span class="normal">799</span>
+<span class="normal">800</span>
+<span class="normal">801</span>
+<span class="normal">802</span>
+<span class="normal">803</span>
+<span class="normal">804</span>
+<span class="normal">805</span>
+<span class="normal">806</span>
+<span class="normal">807</span>
+<span class="normal">808</span>
+<span class="normal">809</span>
+<span class="normal">810</span>
+<span class="normal">811</span>
+<span class="normal">812</span>
+<span class="normal">813</span>
+<span class="normal">814</span>
+<span class="normal">815</span>
+<span class="normal">816</span>
+<span class="normal">817</span>
+<span class="normal">818</span>
+<span class="normal">819</span>
+<span class="normal">820</span>
+<span class="normal">821</span>
+<span class="normal">822</span>
+<span class="normal">823</span>
+<span class="normal">824</span>
+<span class="normal">825</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">sample_from_independent_probabilities_matrix</span><span class="p">(</span>
+        <span class="n">probability_matrix</span><span class="p">:</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">floating</span><span class="p">],</span>
+        <span class="n">sample_size</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span>
+        <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+        <span class="n">replace</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">npt</span><span class="o">.</span><span class="n">NDArray</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">floating</span><span class="p">]:</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Sample connectivity matrices from a matrix representing the independent probability of an edge between nodes (i, j).</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    probability_matrix : np.ndarray</span>
+<span class="sd">        Matrix where entry (i,j) is the probability of edge i→j.</span>
+<span class="sd">        NaN values indicate masked (ignored) edges.</span>
+<span class="sd">    sample_size : int</span>
+<span class="sd">        Number of networks to sample.</span>
+<span class="sd">    is_directed : bool</span>
+<span class="sd">        Whether the network is directed.</span>
+<span class="sd">    replace : bool, optional</span>
+<span class="sd">        If True (default), sample with replacement (networks may repeat).</span>
+<span class="sd">        If False, sample without replacement (all networks unique).</span>
+<span class="sd">        Uses adaptive batch sampling with uniqueness checking.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    np.ndarray</span>
+<span class="sd">        Sampled networks of shape (n, n, sample_size).</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    RuntimeError</span>
+<span class="sd">        If replace=False and unable to generate enough unique networks</span>
+<span class="sd">        (typically due to low model entropy).</span>
+
+<span class="sd">    Notes</span>
+<span class="sd">    -----</span>
+<span class="sd">    When replace=False, uses adaptive batch sampling:</span>
+<span class="sd">    - Samples in batches, keeps only unique networks</span>
+<span class="sd">    - Adjusts batch size based on observed duplication rate</span>
+<span class="sd">    - Stops if duplication rate becomes too high (&gt;95%)</span>
+
+<span class="sd">    If the probability matrix contains np.nan values (that designate masked entries),</span>
+<span class="sd">    the output sample will have np.nans in corresponding coordinates.</span>
+<span class="sd">    (i.e., if np.isnan(probability_matrix[i, j]) then np.all(np.isnan(returned_sample[i, j, ...))).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">replace</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_sample_edges_with_replacement</span><span class="p">(</span><span class="n">probability_matrix</span><span class="p">,</span> <span class="n">sample_size</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">)</span>
+
+    <span class="c1"># Sampling without replacement</span>
+    <span class="k">return</span> <span class="n">_sample_unique_networks_adaptive</span><span class="p">(</span>
+        <span class="n">probability_matrix</span><span class="p">,</span> <span class="n">sample_size</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">,</span> <span class="n">is_dyadic</span><span class="o">=</span><span class="kc">False</span>
+    <span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.sample_from_dyads_distribution" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">sample_from_dyads_distribution</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">sample_from_dyads_distribution</span><span class="p">(</span><span class="n">dyads_distributions</span><span class="p">,</span> <span class="n">sample_size</span><span class="p">,</span> <span class="n">replace</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">)</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+        <p>Sample networks from dyadic state probability distributions.</p>
+<p>Used for exact sampling from MPLE_RECIPROCITY models.</p>
+
+
+<p><span class="doc-section-title">Parameters:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Type</th>
+          <th>Description</th>
+          <th>Default</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                <code>dyads_distributions</code>
+            </td>
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Probability distributions over dyadic states, shape (n_choose_2, 4).</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>sample_size</code>
+            </td>
+            <td>
+                  <code><span title="int">int</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Number of networks to sample.</p>
+              </div>
+            </td>
+            <td>
+                <em>required</em>
+            </td>
+          </tr>
+          <tr class="doc-section-item">
+            <td>
+                <code>replace</code>
+            </td>
+            <td>
+                  <code><span title="bool">bool</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If True (default), sample with replacement (networks may repeat).
+If False, sample without replacement (all networks unique).
+Uses adaptive batch sampling with uniqueness checking.</p>
+              </div>
+            </td>
+            <td>
+                  <code>True</code>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+    <p><span class="doc-section-title">Returns:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="numpy.ndarray">ndarray</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>Sampled networks of shape (n, n, sample_size).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+
+<p><span class="doc-section-title">Raises:</span></p>
+    <table>
+      <thead>
+        <tr>
+          <th>Type</th>
+          <th>Description</th>
+        </tr>
+      </thead>
+      <tbody>
+          <tr class="doc-section-item">
+            <td>
+                  <code><span title="RuntimeError">RuntimeError</span></code>
+            </td>
+            <td>
+              <div class="doc-md-description">
+                <p>If replace=False and unable to generate enough unique networks
+(typically due to low model entropy).</p>
+              </div>
+            </td>
+          </tr>
+      </tbody>
+    </table>
+
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal"> 969</span>
+<span class="normal"> 970</span>
+<span class="normal"> 971</span>
+<span class="normal"> 972</span>
+<span class="normal"> 973</span>
+<span class="normal"> 974</span>
+<span class="normal"> 975</span>
+<span class="normal"> 976</span>
+<span class="normal"> 977</span>
+<span class="normal"> 978</span>
+<span class="normal"> 979</span>
+<span class="normal"> 980</span>
+<span class="normal"> 981</span>
+<span class="normal"> 982</span>
+<span class="normal"> 983</span>
+<span class="normal"> 984</span>
+<span class="normal"> 985</span>
+<span class="normal"> 986</span>
+<span class="normal"> 987</span>
+<span class="normal"> 988</span>
+<span class="normal"> 989</span>
+<span class="normal"> 990</span>
+<span class="normal"> 991</span>
+<span class="normal"> 992</span>
+<span class="normal"> 993</span>
+<span class="normal"> 994</span>
+<span class="normal"> 995</span>
+<span class="normal"> 996</span>
+<span class="normal"> 997</span>
+<span class="normal"> 998</span>
+<span class="normal"> 999</span>
+<span class="normal">1000</span>
+<span class="normal">1001</span>
+<span class="normal">1002</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">sample_from_dyads_distribution</span><span class="p">(</span><span class="n">dyads_distributions</span><span class="p">,</span> <span class="n">sample_size</span><span class="p">,</span> <span class="n">replace</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">):</span>
+<span class="w">    </span><span class="sd">&quot;&quot;&quot;</span>
+<span class="sd">    Sample networks from dyadic state probability distributions.</span>
+
+<span class="sd">    Used for exact sampling from MPLE_RECIPROCITY models.</span>
+
+<span class="sd">    Parameters</span>
+<span class="sd">    ----------</span>
+<span class="sd">    dyads_distributions : np.ndarray</span>
+<span class="sd">        Probability distributions over dyadic states, shape (n_choose_2, 4).</span>
+<span class="sd">    sample_size : int</span>
+<span class="sd">        Number of networks to sample.</span>
+<span class="sd">    replace : bool, optional</span>
+<span class="sd">        If True (default), sample with replacement (networks may repeat).</span>
+<span class="sd">        If False, sample without replacement (all networks unique).</span>
+<span class="sd">        Uses adaptive batch sampling with uniqueness checking.</span>
+
+<span class="sd">    Returns</span>
+<span class="sd">    -------</span>
+<span class="sd">    np.ndarray</span>
+<span class="sd">        Sampled networks of shape (n, n, sample_size).</span>
+
+<span class="sd">    Raises</span>
+<span class="sd">    ------</span>
+<span class="sd">    RuntimeError</span>
+<span class="sd">        If replace=False and unable to generate enough unique networks</span>
+<span class="sd">        (typically due to low model entropy).</span>
+<span class="sd">    &quot;&quot;&quot;</span>
+    <span class="k">if</span> <span class="n">replace</span><span class="p">:</span>
+        <span class="k">return</span> <span class="n">_sample_dyads_with_replacement</span><span class="p">(</span><span class="n">dyads_distributions</span><span class="p">,</span> <span class="n">sample_size</span><span class="p">)</span>
+
+    <span class="k">return</span> <span class="n">_sample_unique_networks_adaptive</span><span class="p">(</span>
+        <span class="n">dyads_distributions</span><span class="p">,</span> <span class="n">sample_size</span><span class="p">,</span> <span class="n">is_directed</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">is_dyadic</span><span class="o">=</span><span class="kc">True</span>
+    <span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div><h2 id="entropy-and-information">Entropy and Information</h2>
+
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.calc_entropy_independent_probability_matrix" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">calc_entropy_independent_probability_matrix</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">calc_entropy_independent_probability_matrix</span><span class="p">(</span><span class="n">prob_mat</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span> <span class="n">reduction</span><span class="p">:</span> <span class="n">Reduction</span> <span class="o">=</span> <span class="n">Reduction</span><span class="o">.</span><span class="n">SUM</span><span class="p">,</span> <span class="n">eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-10</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1112</span>
+<span class="normal">1113</span>
+<span class="normal">1114</span>
+<span class="normal">1115</span>
+<span class="normal">1116</span>
+<span class="normal">1117</span>
+<span class="normal">1118</span>
+<span class="normal">1119</span>
+<span class="normal">1120</span>
+<span class="normal">1121</span>
+<span class="normal">1122</span>
+<span class="normal">1123</span>
+<span class="normal">1124</span>
+<span class="normal">1125</span>
+<span class="normal">1126</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">calc_entropy_independent_probability_matrix</span><span class="p">(</span>
+        <span class="n">prob_mat</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">is_directed</span><span class="p">:</span> <span class="nb">bool</span><span class="p">,</span>
+        <span class="n">reduction</span><span class="p">:</span> <span class="n">Reduction</span> <span class="o">=</span> <span class="n">Reduction</span><span class="o">.</span><span class="n">SUM</span><span class="p">,</span>
+        <span class="n">eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-10</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+    <span class="n">flat_no_diag_probs</span> <span class="o">=</span> <span class="n">flatten_square_matrix_to_edge_list</span><span class="p">(</span><span class="n">prob_mat</span><span class="p">,</span> <span class="n">is_directed</span><span class="p">)</span>
+    <span class="n">flat_no_diag_probs</span> <span class="o">=</span> <span class="n">flat_no_diag_probs</span><span class="p">[</span><span class="o">~</span><span class="n">np</span><span class="o">.</span><span class="n">isnan</span><span class="p">(</span><span class="n">flat_no_diag_probs</span><span class="p">)]</span>
+    <span class="n">flat_clipped_no_diag_probs</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">flat_no_diag_probs</span><span class="p">,</span> <span class="n">eps</span><span class="p">,</span> <span class="mi">1</span> <span class="o">-</span> <span class="n">eps</span><span class="p">)</span>
+
+    <span class="n">entropy_per_entry</span> <span class="o">=</span> <span class="o">-</span><span class="p">(</span>
+            <span class="n">flat_clipped_no_diag_probs</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="n">flat_clipped_no_diag_probs</span><span class="p">)</span> <span class="o">+</span>
+            <span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">flat_clipped_no_diag_probs</span><span class="p">)</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="mi">1</span> <span class="o">-</span> <span class="n">flat_clipped_no_diag_probs</span><span class="p">)</span>
+    <span class="p">)</span>
+    <span class="k">return</span> <span class="n">reduce_individual_elements</span><span class="p">(</span><span class="n">entropy_per_entry</span><span class="p">,</span> <span class="n">reduction</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+<div class="doc doc-object doc-function">
+
+
+<h2 id="pyERGM.utils.calc_entropy_dyads_dists" class="doc doc-heading">
+            <span class="doc doc-object-name doc-function-name">calc_entropy_dyads_dists</span>
+
+
+</h2>
+<div class="doc-signature highlight"><pre><span></span><code><span class="nf">calc_entropy_dyads_dists</span><span class="p">(</span><span class="n">dyads_distributions</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span> <span class="n">reduction</span><span class="p">:</span> <span class="n">Reduction</span> <span class="o">=</span> <span class="n">Reduction</span><span class="o">.</span><span class="n">SUM</span><span class="p">,</span> <span class="n">eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-10</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span>
+</code></pre></div>
+
+    <div class="doc doc-contents first">
+
+            <details class="quote">
+              <summary>Source code in <code>pyERGM/utils.py</code></summary>
+              <div class="highlight"><table class="highlighttable"><tr><td class="linenos"><div class="linenodiv"><pre><span></span><span class="normal">1129</span>
+<span class="normal">1130</span>
+<span class="normal">1131</span>
+<span class="normal">1132</span>
+<span class="normal">1133</span>
+<span class="normal">1134</span>
+<span class="normal">1135</span>
+<span class="normal">1136</span></pre></div></td><td class="code"><div><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">calc_entropy_dyads_dists</span><span class="p">(</span>
+        <span class="n">dyads_distributions</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>
+        <span class="n">reduction</span><span class="p">:</span> <span class="n">Reduction</span> <span class="o">=</span> <span class="n">Reduction</span><span class="o">.</span><span class="n">SUM</span><span class="p">,</span>
+        <span class="n">eps</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">1e-10</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">float</span> <span class="o">|</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">:</span>
+    <span class="n">clipped_dyads_dists</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">dyads_distributions</span><span class="p">,</span> <span class="n">a_min</span><span class="o">=</span><span class="n">eps</span><span class="p">,</span> <span class="n">a_max</span><span class="o">=</span><span class="mi">1</span> <span class="o">-</span> <span class="n">eps</span><span class="p">)</span>
+    <span class="n">entropy_per_dyad</span> <span class="o">=</span> <span class="o">-</span><span class="p">(</span><span class="n">clipped_dyads_dists</span> <span class="o">*</span> <span class="n">np</span><span class="o">.</span><span class="n">log2</span><span class="p">(</span><span class="n">clipped_dyads_dists</span><span class="p">))</span><span class="o">.</span><span class="n">sum</span><span class="p">(</span><span class="n">axis</span><span class="o">=</span><span class="mi">1</span><span class="p">)</span>
+    <span class="k">return</span> <span class="n">reduce_individual_elements</span><span class="p">(</span><span class="n">entropy_per_dyad</span><span class="p">,</span> <span class="n">reduction</span><span class="p">)</span>
+</code></pre></div></td></tr></table></div>
+            </details>
+    </div>
+
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    <script id="__config" type="application/json">{"base": "../..", "features": [], "search": "../../assets/javascripts/workers/search.6ce7567c.min.js", "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.525ec568.min.js"></script>
+      
+        <script src="../../javascripts/mathjax.js"></script>
+      
+        <script src="https://unpkg.com/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>
