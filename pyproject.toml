@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyERGM"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Exponential Random Graph Models in Python"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -16,11 +16,12 @@ classifiers = [
 ]
 
 dependencies = [
-    "numpy>=1.26",
+    "numpy>=2.0,<3",
     "scipy>=1.14",
     "matplotlib>=3.9",
     "seaborn>=0.13",
     "numba>=0.60",
+    "pandas>=2.2.2",
 ]
 
 [project.urls]
@@ -34,6 +35,9 @@ docs = [
     "mkdocstrings[python]>=0.27",
     "griffe>=1.5",
 ]
+
+[tool.setuptools.dynamic]
+version = {attr = "pyERGM.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["pyERGM*"]

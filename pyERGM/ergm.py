@@ -2,9 +2,10 @@ import numpy as np
 
 from pyERGM.sampling import NaiveMetropolisHastings
 from pyERGM.mple_optimization import *
-from pyERGM.utils import generate_erdos_renyi_matrix
+from pyERGM.utils import generate_erdos_renyi_matrix, set_seed
 from pyERGM.convergence import ConvergenceTester
 from pyERGM.constants import *
+from pyERGM.logging_config import set_log_level
 
 
 class ERGM():
@@ -15,7 +16,7 @@ class ERGM():
             is_directed: bool,
             *,
             initial_thetas: dict | None = None,
-            verbose=True,
+            verbose=False,
             fix_collinearity=True,
             collinearity_fixer_sample_size=1000,
             is_distributed_optimization=False,
@@ -42,13 +43,16 @@ class ERGM():
             Optional. The initial values of the coefficients of the ERGM. If not provided, they are randomly initialized.
 
         verbose : bool
-            Optional. Whether to print progress information. *Defaults to True*
+            Optional. Whether to print detailed progress information (sets the pyERGM log level to DEBUG). Otherwise,
+            only warnings and errors are printed, unless the log level is set otherwise via
+            `pyERGM.logging_config.set_log_level`. *Defaults to False*
 
         fix_collinearity : bool
             Optional. Whether to fix collinearity in the metrics. *Defaults to True*
 
         collinearity_fixer_sample_size : int
-            Optional. The number of networks to sample for fixing collinearity. *Defaults to 1000*
+            Optional. The number of networks to sample for fixing collinearity. If smaller than twice the number of
+            features, it is increased to twice the number of features. *Defaults to 1000*
 
         is_distributed_optimization : bool
             Optional. Whether to use distributed computing for optimization (requires LSF cluster). *Defaults to False*
@@ -57,7 +61,14 @@ class ERGM():
             Optional. Designating which entries should be taken into account for optimization and metric calculations.
             The shape can be either (n, n) or (n**2 - n, 1). The latter is the flattened version with no main diagonal
             of square mask.
+            Masking is supported only for dyadic independent models (i.e., models fitted with MPLE), and all the
+            metrics must support masks (e.g., `NumberOfEdgesDirected`, `InDegree`, `NumberOfEdgesTypesDirected`).
         """
+        if n_nodes < 2:
+            raise ValueError(f"A network must have at least 2 nodes, got n_nodes={n_nodes}")
+        if verbose:
+            set_log_level('DEBUG')
+
         self._n_nodes = n_nodes
         self._is_directed = is_directed
         self._is_distributed_optimization = is_distributed_optimization
@@ -112,6 +123,28 @@ class ERGM():
                 )
         return _mask
 
+    def _validate_networks(self, networks: np.ndarray):
+        """
+        Validate that the given network(s) are binary connectivity matrices with no self-loops, matching the model.
+        """
+        if networks.ndim not in (2, 3) or networks.shape[:2] != (self._n_nodes, self._n_nodes):
+            raise ValueError(
+                f"Expected a connectivity matrix of shape ({self._n_nodes}, {self._n_nodes}) or a stack of such "
+                f"matrices of shape ({self._n_nodes}, {self._n_nodes}, num_networks), as the model has "
+                f"n_nodes={self._n_nodes}. Got an array of shape {networks.shape}"
+            )
+        unique_values = np.unique(networks)
+        if not np.all(np.isin(unique_values, [0, 1])):
+            raise ValueError(
+                f"Connectivity matrices must be binary, containing only 0s and 1s. Found values: {unique_values}"
+            )
+        if np.any(np.diagonal(networks)):
+            raise ValueError(
+                "Connectivity matrices must not contain self-loops (non-zero entries on the main diagonal)"
+            )
+        if not self._is_directed and np.any(networks != np.swapaxes(networks, 0, 1)):
+            raise ValueError("Got an asymmetric connectivity matrix for an undirected model")
+
     def set_parameters_from_dict(self, params_dict: dict[str, float]):
         # Check for unnamed duplicate metrics - these can't be matched with a provided dict of parameters
         unnamed_duplicates = self._metrics_collection.find_unnamed_duplicate_metrics()
@@ -162,6 +195,7 @@ class ERGM():
         np.ndarray
             Statistics array of shape (num_features,).
         """
+        self._validate_networks(W)
         return self._metrics_collection.calculate_statistics(W)
 
     def calculate_sample_statistics(self, networks_sample: np.ndarray) -> np.ndarray:
@@ -178,6 +212,7 @@ class ERGM():
         np.ndarray
             Statistics array of shape (num_features, sample_size).
         """
+        self._validate_networks(networks_sample)
         return self._metrics_collection.calculate_sample_statistics(networks_sample)
 
     def generate_networks_for_sample(
@@ -189,6 +224,7 @@ class ERGM():
             mcmc_steps_per_sample=1000,
             sampling_method: SamplingMethod | None = None,
             edge_proposal_method=EdgeProposalMethod.UNIFORM,
+            seed: int | None = None,
     ):
         """
         Generate a sample of networks from the current ERGM model.
@@ -212,12 +248,17 @@ class ERGM():
             MPLE/MPLE_RECIPROCITY models use "exact", MCMLE models use "metropolis_hastings".
         edge_proposal_method : str, optional
             Edge proposal distribution for MCMC. Default is "uniform".
+        seed : int, optional
+            Random seed for reproducibility (see `pyERGM.utils.set_seed`). Default is None (no seeding).
 
         Returns
         -------
         np.ndarray
             Array of sampled networks with shape (n, n, sample_size).
         """
+        if seed is not None:
+            set_seed(seed)
+
         if burn_in is None:
             burn_in = 100 * (self._n_nodes ** 2)
 
@@ -537,7 +578,7 @@ class ERGM():
         Raises
         ------
         ValueError
-            If network dimensions are incorrect or network is non-binary.
+            If network dimensions are incorrect, or the network is non-binary or contains self-loops.
         NotImplementedError
             If model has dependencies other than reciprocity.
         """
@@ -545,8 +586,7 @@ class ERGM():
                 observed_network.shape[0] != self._n_nodes:
             raise ValueError(f"Got a connectivity data of dimensions {observed_network.shape}, "
                              f"expected: {(self._n_nodes, self._n_nodes)}")
-        if not np.all(np.unique(observed_network) == np.array([0, 1])):
-            raise ValueError("Got a non binary connectivity data! Should contain only zeros or ones")
+        self._validate_networks(observed_network)
         model_type = self._metrics_collection.choose_optimization_scheme()
         if model_type == OptimizationScheme.MPLE:
             mask = self._mask if self._mask is not None else ...
@@ -696,6 +736,7 @@ class ERGM():
             model_subsample_size: int = 1000,
             model_boot_cov_mat_est_method: CovMatrixEstimationMethod = CovMatrixEstimationMethod.NAIVE,
             mcmle_log_every: int = 50,
+            seed: int | None = None,
     ) -> OptimizationResult:
         """
         Fit an ERGM model to a given network with one of the two fitting methods - MPLE or MCMLE.
@@ -703,7 +744,8 @@ class ERGM():
         Parameters
         ----------
         observed_networks : np.ndarray
-            The observed network connectivity matrix, with shape (n, n) or (n, n, num_networks).
+            The observed network connectivity matrix, with shape (n, n) or (n, n, num_networks). Must be binary (0s and
+            1s), with no self-loops (a main diagonal of 0s), and symmetric for undirected models.
 
         lr : float
             Optional. The learning rate for the optimization. *Defaults to 0.1*
@@ -804,18 +846,17 @@ class ERGM():
         mcmle_log_every: int
             The gap (int optimization steps) between logs when optimizing with MCMLE. *Defaults to 50*.
 
-        Returns 
+        seed : int
+            Optional. Random seed for reproducibility (see `pyERGM.utils.set_seed`). *Defaults to None* (no seeding).
+
+        Returns
         -------
         OptimizationResult
         """
+        self._validate_networks(observed_networks)
 
-        # Validate that the input matrix is binary
-        unique_values = np.unique(observed_networks)
-        if not np.all(np.isin(unique_values, [0, 1])):
-            raise ValueError(
-                f"observed_networks must be a binary matrix containing only 0s and 1s. "
-                f"Found values: {unique_values}"
-            )
+        if seed is not None:
+            set_seed(seed)
 
         if optimization_scheme == OptimizationScheme.AUTO:
             optimization_scheme = self._metrics_collection.choose_optimization_scheme()
@@ -995,7 +1036,7 @@ class ERGM():
             Dictionary mapping parameter names to their fitted values (theta coefficients).
         """
         parameter_names = self._metrics_collection.get_parameter_names()
-        return dict(zip(parameter_names, self._thetas))
+        return dict(zip(parameter_names, self._thetas.tolist()))
 
     def get_ignored_features(self):
         """

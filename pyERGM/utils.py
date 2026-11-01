@@ -57,7 +57,6 @@ def generate_erdos_renyi_matrix(n_nodes: int, p: float, is_directed: bool) -> np
         Adjacency matrix of shape (n_nodes, n_nodes) with no self-loops.
     """
     matrix = generate_binomial_tensor(n_nodes, 1, p)[:, :, 0].astype(np.float64)
-    np.fill_diagonal(matrix, 0)
 
     if not is_directed:
         # Symmetrize: use upper triangle and mirror to lower
@@ -554,9 +553,12 @@ def get_edge_density_per_type_pairs(W: np.ndarray, types: Sequence[Any]):
 
 def generate_binomial_tensor(net_size, num_samples, p=0.5):
     """
-    Generate a tensor of size (net_size, net_size, num_samples) where each element is a binomial random variable
+    Generate a tensor of size (net_size, net_size, num_samples) where each off-diagonal element is a binomial random
+    variable, and the main diagonal is 0 (no self-loops).
     """
-    return np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)
+    tensor = np.random.binomial(1, p, (net_size, net_size, num_samples)).astype(np.int8)
+    tensor[np.arange(net_size), np.arange(net_size), :] = 0
+    return tensor
 
 
 def _sample_edges_with_replacement(
