@@ -1884,8 +1884,11 @@ class TestMetricsCollection(unittest.TestCase):
         n = 30
         # The sample size is increased to twice the number of features, so only a single feature is removed (the sum of
         # in-degrees equals the sum of out-degrees), rather than all features beyond the requested sample size.
-        collection = MetricsCollection([InDegree(), OutDegree()], is_directed=True, n_nodes=n, fix_collinearity=True,
-                                       collinearity_fixer_sample_size=10)
+        with patch.object(MetricsCollection, 'calc_statistics_for_binomial_tensor_local', autospec=True,
+                          side_effect=MetricsCollection.calc_statistics_for_binomial_tensor_local) as spy:
+            collection = MetricsCollection([InDegree(), OutDegree()], is_directed=True, n_nodes=n,
+                                           fix_collinearity=True, collinearity_fixer_sample_size=10)
+        self.assertEqual(spy.call_args.args[1], 2 * 2 * n)
         self.assertEqual(collection.num_of_features, 2 * n - 1)
 
     def test_calculate_statistics(self):

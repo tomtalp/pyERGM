@@ -582,10 +582,8 @@ class ERGM():
         NotImplementedError
             If model has dependencies other than reciprocity.
         """
-        if observed_network.ndim != 2 or observed_network.shape[0] != observed_network.shape[1] or \
-                observed_network.shape[0] != self._n_nodes:
-            raise ValueError(f"Got a connectivity data of dimensions {observed_network.shape}, "
-                             f"expected: {(self._n_nodes, self._n_nodes)}")
+        if observed_network.ndim != 2:
+            raise ValueError(f"Expected a single connectivity matrix of shape (n, n), got {observed_network.shape}")
         self._validate_networks(observed_network)
         model_type = self._metrics_collection.choose_optimization_scheme()
         if model_type == OptimizationScheme.MPLE:
