@@ -7,6 +7,7 @@ from pyERGM.utils import *
 from pyERGM.metrics import *
 from pyERGM.ergm import ERGM
 from pyERGM.datasets import sampson_matrix
+from mple_test_utils import ccc
 from pyERGM.constants import (
     OptimizationScheme, SamplingMethod, ConvergenceCriterion,
     Reduction, ThetaInitMethod
@@ -174,18 +175,6 @@ class BruteForceERGM(ERGM):
         self._thetas = res.x
         self._all_weights, self._normalization_factor = self._calc_all_weights()
         return res
-
-
-def ccc(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """
-    Concordance-Correlation-Coefficient
-    Measures the goodness of fit of data and predictions (closeness to the identity line)
-    Can be defined as 1 - mean_distance_from_identity/mean_distance_from_identity_assuming_independence
-    """
-    mean_true, mean_pred = np.mean(y_true), np.mean(y_pred)
-    var_true, var_pred = np.var(y_true), np.var(y_pred)
-    cov = np.mean((y_true - mean_true) * (y_pred - mean_pred))
-    return (2 * cov) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
 
 
 class TestERGM(unittest.TestCase):
