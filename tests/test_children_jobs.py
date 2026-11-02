@@ -11,6 +11,12 @@ from pyERGM.metrics import MetricsCollection, NumberOfEdgesDirected, InDegree
 from logistic_regression_distributed_calcs import main as logistic_regression_main
 from sample_statistics_distributed_calcs import main as sample_statistics_main
 from mple_data_distributed_paging import main as mple_data_paging_main
+from pyERGM.mple_optimization import (
+    calc_logistic_regression_predictions,
+    calc_logistic_regression_predictions_log_likelihood,
+    calc_logistic_regression_log_likelihood_grad,
+    calc_logistic_regression_log_likelihood_hessian,
+)
 
 
 class TestLogisticRegressionDistributedCalcs(unittest.TestCase):
@@ -43,47 +49,49 @@ class TestLogisticRegressionDistributedCalcs(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.temp_dir)
 
+    def _expected_outputs(self, sample_weights=None):
+        """Expected worker outputs, computed by the library functions on the worker's (float32) inputs."""
+        Xs = self.Xs_chunk.astype(np.float32)
+        ys = self.ys_chunk.astype(np.float32)
+        weights = np.empty(0, dtype=np.float32) if sample_weights is None else sample_weights.astype(np.float32)
+        predictions = calc_logistic_regression_predictions(Xs, self.thetas[:, None].astype(np.float32))
+        return {
+            'predictions': predictions,
+            'log_likelihood': calc_logistic_regression_predictions_log_likelihood(
+                predictions, ys, sample_weights=weights)[0][0],
+            'log_likelihood_gradient': calc_logistic_regression_log_likelihood_grad(
+                Xs, predictions, ys, sample_weights=weights),
+            'log_likelihood_hessian': calc_logistic_regression_log_likelihood_hessian(
+                Xs, predictions, sample_weights=weights),
+        }
+
     def _assert_logistic_regression_outputs(self, func_id=0):
         """Helper to verify all logistic regression outputs for a given func_id."""
-        thetas_col = self.thetas[:, None]
-        predictions = 1 / (1 + np.exp(-self.Xs_chunk @ thetas_col))
+        expected = self._expected_outputs()
 
-        # Check predictions
-        output_path = os.path.join(self.temp_dir, 'predictions', f'{func_id}.pkl')
-        if os.path.exists(output_path):
+        def load(func_name):
+            output_path = os.path.join(self.temp_dir, func_name, f'{func_id}.pkl')
+            if not os.path.exists(output_path):
+                return None
             with open(output_path, 'rb') as f:
-                actual = pickle.load(f)
-            np.testing.assert_array_almost_equal(actual, predictions, decimal=5)
+                return pickle.load(f)
 
-        # Check log likelihood
-        output_path = os.path.join(self.temp_dir, 'log_likelihood', f'{func_id}.pkl')
-        if os.path.exists(output_path):
-            with open(output_path, 'rb') as f:
-                actual = pickle.load(f)
-            eps = 1e-10
-            predictions_clipped = np.clip(predictions, eps, 1 - eps)
-            expected_ll = (self.ys_chunk * np.log(predictions_clipped) +
-                           (1 - self.ys_chunk) * np.log(1 - predictions_clipped)).sum()
-            np.testing.assert_almost_equal(actual, expected_ll, decimal=4)
+        actual = load('predictions')
+        if actual is not None:
+            np.testing.assert_array_almost_equal(actual, expected['predictions'], decimal=5)
 
-        # Check gradient
-        output_path = os.path.join(self.temp_dir, 'log_likelihood_gradient', f'{func_id}.pkl')
-        if os.path.exists(output_path):
-            with open(output_path, 'rb') as f:
-                actual = pickle.load(f)
-            residuals = self.ys_chunk - predictions
-            expected_gradient = self.Xs_chunk.T @ residuals
-            np.testing.assert_array_almost_equal(actual, expected_gradient, decimal=5)
+        actual = load('log_likelihood')
+        if actual is not None:
+            np.testing.assert_almost_equal(actual, expected['log_likelihood'], decimal=4)
+
+        actual = load('log_likelihood_gradient')
+        if actual is not None:
+            np.testing.assert_array_almost_equal(actual, expected['log_likelihood_gradient'], decimal=5)
             np.testing.assert_array_equal(actual.shape, (self.num_features, 1))
 
-        # Check hessian
-        output_path = os.path.join(self.temp_dir, 'log_likelihood_hessian', f'{func_id}.pkl')
-        if os.path.exists(output_path):
-            with open(output_path, 'rb') as f:
-                actual = pickle.load(f)
-            diag_values = predictions * (1 - predictions)
-            expected_hessian = self.Xs_chunk.T @ (diag_values * self.Xs_chunk)
-            np.testing.assert_array_almost_equal(actual, expected_hessian, decimal=5)
+        actual = load('log_likelihood_hessian')
+        if actual is not None:
+            np.testing.assert_array_almost_equal(actual, expected['log_likelihood_hessian'], decimal=5)
             np.testing.assert_array_equal(actual.shape, (self.num_features, self.num_features))
 
     @patch.dict(os.environ, {'LSB_JOBINDEX': '1'})
@@ -107,9 +115,7 @@ class TestLogisticRegressionDistributedCalcs(unittest.TestCase):
         with open(output_path, 'rb') as f:
             predictions = pickle.load(f)
 
-        # Calculate expected predictions manually
-        thetas_col = self.thetas[:, None]
-        expected_predictions = 1 / (1 + np.exp(-self.Xs_chunk @ thetas_col))
+        expected_predictions = self._expected_outputs()['predictions']
 
         np.testing.assert_array_almost_equal(predictions, expected_predictions, decimal=5)
 
@@ -134,13 +140,7 @@ class TestLogisticRegressionDistributedCalcs(unittest.TestCase):
         with open(output_path, 'rb') as f:
             log_likelihood = pickle.load(f)
 
-        # Calculate expected log likelihood manually
-        thetas_col = self.thetas[:, None]
-        predictions = 1 / (1 + np.exp(-self.Xs_chunk @ thetas_col))
-        eps = 1e-10
-        predictions_clipped = np.clip(predictions, eps, 1 - eps)
-        expected_ll = (self.ys_chunk * np.log(predictions_clipped) +
-                       (1 - self.ys_chunk) * np.log(1 - predictions_clipped)).sum()
+        expected_ll = self._expected_outputs()['log_likelihood']
 
         np.testing.assert_almost_equal(log_likelihood, expected_ll, decimal=4)
 
@@ -165,11 +165,7 @@ class TestLogisticRegressionDistributedCalcs(unittest.TestCase):
         with open(output_path, 'rb') as f:
             gradient = pickle.load(f)
 
-        # Calculate expected gradient manually
-        thetas_col = self.thetas[:, None]
-        predictions = 1 / (1 + np.exp(-self.Xs_chunk @ thetas_col))
-        residuals = self.ys_chunk - predictions
-        expected_gradient = self.Xs_chunk.T @ residuals
+        expected_gradient = self._expected_outputs()['log_likelihood_gradient']
 
         np.testing.assert_array_almost_equal(gradient, expected_gradient, decimal=5)
         np.testing.assert_array_equal(gradient.shape, (self.num_features, 1))
@@ -195,11 +191,7 @@ class TestLogisticRegressionDistributedCalcs(unittest.TestCase):
         with open(output_path, 'rb') as f:
             hessian = pickle.load(f)
 
-        # Calculate expected hessian manually
-        thetas_col = self.thetas[:, None]
-        predictions = 1 / (1 + np.exp(-self.Xs_chunk @ thetas_col))
-        diag_values = predictions * (1 - predictions)
-        expected_hessian = self.Xs_chunk.T @ (diag_values * self.Xs_chunk)
+        expected_hessian = self._expected_outputs()['log_likelihood_hessian']
 
         np.testing.assert_array_almost_equal(hessian, expected_hessian, decimal=5)
         np.testing.assert_array_equal(hessian.shape, (self.num_features, self.num_features))
@@ -251,11 +243,7 @@ class TestLogisticRegressionDistributedCalcs(unittest.TestCase):
         with open(output_path, 'rb') as f:
             gradient = pickle.load(f)
 
-        # Calculate expected weighted gradient
-        thetas_col = self.thetas[:, None]
-        predictions = 1 / (1 + np.exp(-self.Xs_chunk @ thetas_col))
-        residuals = self.weights_chunk * (self.ys_chunk - predictions)
-        expected_gradient = self.Xs_chunk.T @ residuals
+        expected_gradient = self._expected_outputs(sample_weights=self.weights_chunk)['log_likelihood_gradient']
 
         np.testing.assert_array_almost_equal(gradient, expected_gradient, decimal=5)
 
