@@ -15,7 +15,7 @@ from pyERGM.metrics import Metric
 
 class NumberOfBigIndegreeNodes(Metric):
     def __init__(self):
-        super().__init__(requires_graph=False)
+        super().__init__()
         self._is_directed = True
         self._is_dyadic_independent = True
 
@@ -52,8 +52,7 @@ Output -
 Let's break down the steps in the above example -
 
 1. We began by creating a new class `NumberOfBigIndegreeNodes` that inherits from the `Metric` class.
-2. The `__init__()` function deals with 3 important attributes of the metric - 
-    * `requires_graph=False` is passed to the parent class, and indicates that the metric does not require a `networkx` input graph to be passed to the `calculate` function. This implies that it expects a numpy adjacency matrix as input. *(this can also be observed by the type hint we wrote in `calculate`)*
+2. The `__init__()` function deals with 2 important attributes of the metric - 
     * `self._is_directed = True` indicates that the metric is designed to work with directed graphs.
     * `self._is_dyadic_independent = True` indicates that the metric is dyadic independent, meaning that the existence of an edge `i -> j` does not depend on the presence of any other edge in the graph.  The fact that this is a dyadic independent metric means that `MPLE` can be performed for ERGM's using this metric.
 3. The `calculate` function receives the input graph as a numpy adjacency matrix and calculates the number of nodes with in-degree greater than or equal to $\frac{n}{2}$ and returns a single scalar value.
@@ -68,7 +67,7 @@ from copy import deepcopy
 
 class MetricWithMultipleStatistics(Metric):
     def __init__(self, indices_to_ignore=None):
-        super().__init__(requires_graph=False)
+        super().__init__()
         self._is_directed = True
         self._is_dyadic_independent = True
         
@@ -96,7 +95,7 @@ As an example, let's create a directed metric that receives an exogenous type fo
 
 class NumberOfConnectionsBetweenSameType(Metric):
     def __init__(self, exogenous_types):
-        super().__init__(requires_graph=False)
+        super().__init__()
         self._is_directed = True
         self._is_dyadic_independent = True
         self._exogenous_types = exogenous_types
@@ -144,7 +143,7 @@ There are 3 nodes of the same type (nodes 1, 2, and 4 are all of type `1`), and 
 
 ## Additional settings and configurations
 ### Naming a metric
-A metric should be named in a way that is descriptive of what it calculates. The metric name is determined by implementing a `__str()__` function in the metric class. For example, the `NumberOfBigIndegreeNodes` metric could be named as follows - 
+A metric should be named in a way that is descriptive of what it calculates. The metric name is used for the names of the model parameters (e.g., the keys returned by `ERGM.get_model_parameters()`). By default, a metric is named after its class name (e.g., `NumberOfBigIndegreeNodes`). A custom name can be set by implementing a `__str__()` function in the metric class. For example, the `NumberOfBigIndegreeNodes` metric could be named as follows - 
 
 ```python
 class NumberOfBigIndegreeNodes(Metric):

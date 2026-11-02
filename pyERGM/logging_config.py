@@ -19,8 +19,8 @@ _handler.setFormatter(logging.Formatter(
 ))
 logger.addHandler(_handler)
 
-# Default level is INFO
-logger.setLevel(logging.INFO)
+# Default level is WARNING (setting `verbose=True` when constructing an ERGM sets it to DEBUG)
+logger.setLevel(logging.WARNING)
 
 
 def set_log_level(level: str | int) -> None:

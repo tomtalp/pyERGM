@@ -1879,6 +1879,18 @@ class TestMetricsCollection(unittest.TestCase):
                     self.assertTrue(metric not in [m for m in collection.metrics])
                     self.assertEqual(collection.num_of_metrics, len(collection.metrics))
 
+    def test_collinearity_fixer_sample_size_smaller_than_num_features(self):
+        set_seed(2349876)
+        n = 30
+        # The sample size is increased to twice the number of features, so only a single feature is removed (the sum of
+        # in-degrees equals the sum of out-degrees), rather than all features beyond the requested sample size.
+        with patch.object(MetricsCollection, 'calc_statistics_for_binomial_tensor_local', autospec=True,
+                          side_effect=MetricsCollection.calc_statistics_for_binomial_tensor_local) as spy:
+            collection = MetricsCollection([InDegree(), OutDegree()], is_directed=True, n_nodes=n,
+                                           fix_collinearity=True, collinearity_fixer_sample_size=10)
+        self.assertEqual(spy.call_args.args[1], 2 * 2 * n)
+        self.assertEqual(collection.num_of_features, 2 * n - 1)
+
     def test_calculate_statistics(self):
         # Test undirected graphs
         metrics = [NumberOfEdgesUndirected(), NumberOfTrianglesUndirected()]
@@ -2645,6 +2657,20 @@ class TestEdgeCases(unittest.TestCase):
 
 class TestMetricParameterNaming(unittest.TestCase):
     """Tests for metric parameter naming and disambiguation."""
+
+    def test_custom_metric_default_name(self):
+        """Test that a custom metric that doesn't implement __str__ is named after its class."""
+
+        class MyMetric(Metric):
+            def __init__(self):
+                super().__init__()
+                self._is_directed = True
+
+            def calculate_for_sample(self, networks_sample):
+                return networks_sample.sum(axis=(0, 1))
+
+        collection = MetricsCollection([MyMetric()], is_directed=True, n_nodes=4, fix_collinearity=False)
+        self.assertEqual(collection.get_parameter_names(), ("MyMetric",))
 
     def test_auto_disambiguation_without_name(self):
         """Test that duplicate metric classes are auto-disambiguated with random suffixes."""

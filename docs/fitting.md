@@ -5,9 +5,7 @@ The following example demonstrates how to fit a simple ERGM model from [Sampson'
 ```python
 from pyERGM.ergm import ERGM
 from pyERGM.metrics import *
-from pyERGM.datasets import load_sampson
-
-sampson_matrix = load_sampson()
+from pyERGM.datasets import sampson_matrix
 
 num_nodes = sampson_matrix.shape[0]
 is_directed = True
@@ -17,7 +15,17 @@ model = ERGM(num_nodes, metrics, is_directed=is_directed)
 model.fit(sampson_matrix)
 ```
 
-The above example fits a model from the Sampson's monastery data using the number of edges and total reciprocity as statistics. The graph is represented as an adjacency matrix.
+The above example fits a model from the Sampson's monastery data using the number of edges and total reciprocity as statistics. The graph is represented as a binary adjacency matrix (a `numpy` array of 0s and 1s, with no self-loops, i.e. a main diagonal of 0s), which is the only input format pyERGM accepts. Multiple observed networks can be passed as an array of shape `(n, n, num_networks)`.
+
+### Reproducibility
+Fitting and sampling involve randomness. For reproducible results, pass a `seed` to `fit` and to `generate_networks_for_sample` -
+
+```python
+model.fit(sampson_matrix, seed=42)
+sample = model.generate_networks_for_sample(sample_size=100, seed=42)
+```
+
+Alternatively, `pyERGM.utils.set_seed` can be called once, before constructing the model (constructing a model may also involve randomness, e.g., when fixing collinearity).
 
 ## ERGM
 ```python

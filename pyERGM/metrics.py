@@ -94,6 +94,10 @@ class Metric(ABC):
         """
         return f"{self._name}_" if self._name is not None else ""
 
+    def __str__(self):
+        # Default for metrics that don't override `__str__` (e.g., user-defined custom metrics).
+        return type(self).__name__
+
     @property
     def metric_name(self):
         return self._get_name_prefix() + str(self)
@@ -1505,7 +1509,11 @@ class MetricsCollection:
             self.mask = mask
 
         if OptimizationScheme.MPLE != self.choose_optimization_scheme() and self.mask is not None:
-            raise NotImplementedError("Masking is currently supported only for edge independent models.")
+            raise NotImplementedError(
+                "Masking is currently supported only for dyadic independent models, but got the dyadic dependent "
+                f"metrics: {[str(m) for m in self.metrics if not m._is_dyadic_independent]}. Remove them from the "
+                "model in order to use a mask."
+            )
 
         for x in self.metrics:
             if (x._is_directed is not None) and (x._is_directed != self.is_directed):
@@ -1618,9 +1626,6 @@ class MetricsCollection:
         if not self.is_directed:
             sample = np.round((sample + sample.transpose(1, 0, 2)) / 2)
 
-        # Make sure the main diagonal is 0
-        sample[np.arange(self.n_nodes, dtype=int), np.arange(self.n_nodes, dtype=int), :] = 0
-
         # Calculate the features of the sample
         return self.calculate_sample_statistics(sample)
 
@@ -1685,6 +1690,15 @@ class MetricsCollection:
         Currently, this is a naive version that only handles the very simple cases.
         """
         is_linearly_dependent = True
+
+        # Detecting collinearity requires the matrix of sampled features (num_of_features X sample_size) to be of full
+        # rank when there is no collinearity, so the sample size must exceed the number of features. A margin of 2x is
+        # taken for the matrix to be well conditioned, avoiding spurious detections due to small eigenvalues.
+        min_sample_size = 2 * self.num_of_features
+        if sample_size < min_sample_size:
+            logger.info(f"Increasing the collinearity fixer sample size from {sample_size} to {min_sample_size} (twice "
+                        f"the number of features)")
+            sample_size = min_sample_size
 
         # Sample networks from a maximum entropy distribution, for avoiding edge cases (such as a feature is 0 for
         # all networks in the sample).

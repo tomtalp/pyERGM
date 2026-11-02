@@ -1253,6 +1253,77 @@ class TestCalculateStatisticsAPI(unittest.TestCase):
         np.testing.assert_array_equal(stats_api, stats_internal)
 
 
+class TestInputValidation(unittest.TestCase):
+    """Tests for the validation of user provided networks"""
+
+    def setUp(self):
+        self.n_nodes = 10
+        self.model = ERGM(self.n_nodes, [NumberOfEdgesDirected()], is_directed=True)
+        self.W = generate_erdos_renyi_matrix(self.n_nodes, 0.3, is_directed=True)
+
+    def test_self_loops_raise(self):
+        W_with_self_loop = self.W.copy()
+        W_with_self_loop[2, 2] = 1
+        with self.assertRaisesRegex(ValueError, "self-loops"):
+            self.model.fit(W_with_self_loop)
+        with self.assertRaisesRegex(ValueError, "self-loops"):
+            self.model.calculate_statistics(W_with_self_loop)
+        with self.assertRaisesRegex(ValueError, "self-loops"):
+            self.model.calculate_sample_statistics(np.stack([self.W, W_with_self_loop], axis=-1))
+
+    def test_shape_mismatch_raises(self):
+        with self.assertRaisesRegex(ValueError, "shape"):
+            self.model.fit(generate_erdos_renyi_matrix(self.n_nodes + 1, 0.3, is_directed=True))
+        with self.assertRaisesRegex(ValueError, "shape"):
+            self.model.fit(self.W[:, :-1])
+
+    def test_non_binary_raises(self):
+        W_non_binary = self.W.copy()
+        W_non_binary[0, 1] = 2
+        with self.assertRaisesRegex(ValueError, "binary"):
+            self.model.fit(W_non_binary)
+
+    def test_asymmetric_undirected_raises(self):
+        model = ERGM(self.n_nodes, [NumberOfEdgesUndirected()], is_directed=False)
+        W_asymmetric = np.zeros((self.n_nodes, self.n_nodes))
+        W_asymmetric[0, 1] = 1
+        with self.assertRaisesRegex(ValueError, "asymmetric"):
+            model.fit(W_asymmetric)
+
+    def test_log_likelihood_of_empty_network(self):
+        self.model.fit(self.W)
+        probs = self.model.get_mple_prediction()
+        expected_log_like = np.log(1 - probs[~np.eye(self.n_nodes, dtype=bool)]).sum()
+        log_like = self.model.calc_model_log_likelihood(np.zeros((self.n_nodes, self.n_nodes)))
+        np.testing.assert_allclose(log_like, expected_log_like)
+
+    def test_too_few_nodes_raises(self):
+        with self.assertRaisesRegex(ValueError, "at least 2 nodes"):
+            ERGM(1, [NumberOfEdgesDirected()], is_directed=True)
+
+
+class TestSeed(unittest.TestCase):
+    """Tests for the seed parameter of fit and generate_networks_for_sample"""
+
+    def test_fit_and_sample_reproducible_with_seed(self):
+        n_nodes = 10
+        model = ERGM(n_nodes, [NumberOfEdgesDirected(), TotalReciprocity()], is_directed=True)
+        observed = generate_erdos_renyi_matrix(n_nodes, 0.3, is_directed=True)
+
+        model.fit(observed, seed=42)
+        params = model.get_model_parameters()
+        model.fit(observed, seed=42)
+        self.assertEqual(params, model.get_model_parameters())
+        self.assertTrue(all(type(v) is float for v in params.values()))
+
+        for sampling_method in [SamplingMethod.EXACT, SamplingMethod.METROPOLIS_HASTINGS]:
+            sample_kwargs = dict(sample_size=5, sampling_method=sampling_method, burn_in=100, mcmc_steps_per_sample=10)
+            np.testing.assert_array_equal(
+                model.generate_networks_for_sample(**sample_kwargs, seed=42),
+                model.generate_networks_for_sample(**sample_kwargs, seed=42),
+            )
+
+
 class TestSamplingWithoutReplacement(unittest.TestCase):
     """Tests for sampling without replacement in exact sampling."""
 
