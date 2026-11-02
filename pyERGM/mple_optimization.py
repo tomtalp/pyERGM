@@ -175,10 +175,11 @@ def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np
 def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions: np.ndarray,
                                                      sample_weights: np.ndarray = np.empty(0)):
     """
-    Calculate the Hessian matrix of log-likelihood.
+    Calculate the Hessian matrix of the log-likelihood.
 
     Computes the matrix of second partial derivatives of the log-likelihood
-    with respect to model parameters. Used in Newton-type optimization methods.
+    with respect to model parameters. It is negative semidefinite.
+    Used in Newton-type optimization methods.
 
     Parameters
     ----------
@@ -193,12 +194,12 @@ def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions:
     Returns
     -------
     np.ndarray
-        Hessian matrix of shape (num_features, num_features).
+        Hessian matrix of the log-likelihood, shape (num_features, num_features).
     """
     diag_values = predictions * (1 - predictions)
     if sample_weights.size > 0:
         diag_values = sample_weights * diag_values
-    return Xs.T @ (diag_values * Xs)
+    return -(Xs.T @ (diag_values * Xs))
 
 
 def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas: np.ndarray, ys: np.ndarray):
@@ -328,7 +329,7 @@ def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10, sample_weigh
 
 def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10, sample_weights=np.empty(0)):
     """
-    Compute negative log-likelihood Hessian for local optimization.
+    Compute the Hessian of the negative log-likelihood for local optimization.
 
     Parameters
     ----------
@@ -346,15 +347,15 @@ def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10, sam
     Returns
     -------
     np.ndarray
-        Negative Hessian matrix.
+        Hessian matrix of the negative log-likelihood (positive semidefinite).
     """
     pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
     return -calc_logistic_regression_log_likelihood_hessian(Xs, pred, sample_weights=sample_weights)
 
 
-def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_edges_per_job):
+def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path):
     """
-    Compute negative log-likelihood Hessian using distributed computation.
+    Compute the Hessian of the negative log-likelihood using distributed computation.
 
     Parameters
     ----------
@@ -362,17 +363,14 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
         Model parameters.
     data_path : Path
         Path to distributed data chunks.
-    num_edges_per_job : int
-        Number of edges per distributed job.
 
     Returns
     -------
     np.ndarray
-        Negative Hessian matrix.
+        Hessian matrix of the negative log-likelihood (positive semidefinite).
     """
     return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                              ('log_likelihood_hessian',),
-                                                              num_edges_per_job)[0]
+                                                              ('log_likelihood_hessian',))[0]
 
 
 def mple_logistic_regression_optimization(
