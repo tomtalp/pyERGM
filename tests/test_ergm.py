@@ -7,9 +7,10 @@ from pyERGM.utils import *
 from pyERGM.metrics import *
 from pyERGM.ergm import ERGM
 from pyERGM.datasets import sampson_matrix
+from mple_test_utils import ccc
 from pyERGM.constants import (
     OptimizationScheme, SamplingMethod, ConvergenceCriterion,
-    Reduction, ThetaInitMethod
+    Reduction, ThetaInitMethod, DyadStateIdx
 )
 import sys
 from scipy.linalg import eigh
@@ -119,7 +120,7 @@ class BruteForceERGM(ERGM):
         expected_features = self.all_features_by_all_nets @ all_probs
         return expected_features
 
-    def fit(self, observed_networks):
+    def fit(self, observed_networks, gtol=None):
         """
         Fit the model parameters to observed network(s) using exact likelihood.
 
@@ -130,6 +131,8 @@ class BruteForceERGM(ERGM):
         ----------
         observed_networks : np.ndarray
             Observed network(s) of shape (n, n) or (n, n, num_networks).
+        gtol : float, optional
+            Gradient tolerance passed to the optimizer. If None, scipy's default is used.
 
         Returns
         -------
@@ -170,22 +173,12 @@ class BruteForceERGM(ERGM):
         self.optimization_iter = 0
         logger.info("BruteForceERGM optimization started")
         self.optimization_start_time = time.time()
-        res = minimize(nll, self._thetas, args=(observed_networks,), jac=nll_grad, callback=after_iteration_callback)
+        options = None if gtol is None else {"gtol": gtol}
+        res = minimize(nll, self._thetas, args=(observed_networks,), jac=nll_grad, callback=after_iteration_callback,
+                       options=options)
         self._thetas = res.x
         self._all_weights, self._normalization_factor = self._calc_all_weights()
         return res
-
-
-def ccc(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """
-    Concordance-Correlation-Coefficient
-    Measures the goodness of fit of data and predictions (closeness to the identity line)
-    Can be defined as 1 - mean_distance_from_identity/mean_distance_from_identity_assuming_independence
-    """
-    mean_true, mean_pred = np.mean(y_true), np.mean(y_pred)
-    var_true, var_pred = np.var(y_true), np.var(y_pred)
-    cov = np.mean((y_true - mean_true) * (y_pred - mean_pred))
-    return (2 * cov) / (var_true + var_pred + (mean_true - mean_pred) ** 2)
 
 
 class TestERGM(unittest.TestCase):
@@ -321,7 +314,7 @@ class TestERGM(unittest.TestCase):
         real_densities_per_type = list(real_densities_per_type.values())
 
         for inferred_proba, real_density in zip(inferred_probas_per_type_pairs, real_densities_per_type):
-            self.assertAlmostEqual(inferred_proba, real_density, places=4)
+            self.assertAlmostEqual(inferred_proba, real_density, places=7)
 
     def test_MPLE_convergence_with_auto_LR_decay(self):
         n = 4
@@ -555,7 +548,7 @@ class TestERGM(unittest.TestCase):
         result = model.fit(observed_net)
         self.assertTrue(result.success)
 
-        self.assertTrue(np.abs(model._thetas - expected_theta) < 1e-5)
+        np.testing.assert_allclose(model._thetas, expected_theta, rtol=0, atol=1e-7)
 
         network_for_likelihood = np.array([
             [0, 1, 1, 1],
@@ -570,10 +563,10 @@ class TestERGM(unittest.TestCase):
         expected_individual_likes[np.diag_indices(network_for_likelihood.shape[0])] = 1
 
         all_edges_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.NONE)
-        self.assertTrue(np.all(np.abs(all_edges_likes - np.log(expected_individual_likes))) < 1e-5)
+        np.testing.assert_allclose(all_edges_likes, np.log(expected_individual_likes), rtol=0, atol=1e-7)
 
         log_like_sum = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.SUM, log_base=10)
-        self.assertTrue(np.abs(log_like_sum - np.log10(expected_individual_likes).sum()) < 1e-5)
+        np.testing.assert_allclose(log_like_sum, np.log10(expected_individual_likes).sum(), rtol=0, atol=1e-7)
 
         # Model with reciprocity
         metrics = [TotalReciprocity()]
@@ -584,14 +577,15 @@ class TestERGM(unittest.TestCase):
             [0, 0, 0, 0]
         ])
         observed_reciprocity_p = (observed_net * observed_net.T).sum() / (observed_net.size - observed_net.shape[0])
-        expected_theta = -0.5108286293551415  # mean over 4 optimizations of a network with a single reciprocal dyad
+        # The other three dyad states are equally likely, so P(mutual) = e^theta / (3 + e^theta) = observed_reciprocity_p.
+        expected_theta = np.log(3 * observed_reciprocity_p / (1 - observed_reciprocity_p))
 
         model = ERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
 
         result = model.fit(observed_net)
         self.assertTrue(result.success)
 
-        self.assertTrue(np.abs(model._thetas - expected_theta) < 1e-5)
+        np.testing.assert_allclose(model._thetas, expected_theta, rtol=0, atol=1e-7)
 
         network_for_likelihood = np.array([
             [0, 0, 0, 0],
@@ -601,18 +595,18 @@ class TestERGM(unittest.TestCase):
         ])
 
         dyad_states_for_likelihood = convert_connectivity_to_dyad_states(network_for_likelihood)
-        reciprocal_dyads_indices = np.where(dyad_states_for_likelihood.sum(axis=0) == 1)[0]
+        reciprocal_dyads_indices = np.where(dyad_states_for_likelihood[:, DyadStateIdx.RECIPROCAL_IDX.value] == 1)[0]
 
         all_dyad_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.NONE)
-        self.assertTrue(
-            np.all(np.abs(all_dyad_likes[reciprocal_dyads_indices] - np.log(observed_reciprocity_p)) < 1e-5)
-        )
+        np.testing.assert_allclose(all_dyad_likes[reciprocal_dyads_indices], np.log(observed_reciprocity_p),
+                                   rtol=0, atol=1e-7)
 
-        brute_force_ergm = BruteForceERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
-        brute_force_ergm._thetas = model._thetas
+        brute_force_ergm = BruteForceERGM(n_nodes=4, metrics_collection=metrics, is_directed=True,
+                                          initial_thetas=model.get_model_parameters())
         true_likelihood_net_for_like = brute_force_ergm.calculate_probability(network_for_likelihood)
         calculated_likelihood = np.exp(model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.SUM))
-        np.testing.assert_allclose(true_likelihood_net_for_like, calculated_likelihood, rtol=0.01)
+        # Measured relative disagreement: 1e-15 (the model is dyad-independent, so MPLE is exact).
+        np.testing.assert_allclose(true_likelihood_net_for_like, calculated_likelihood, rtol=1e-10)
 
     def test_mple_multiple_observed_networks(self):
         set_seed(9876)
@@ -622,12 +616,13 @@ class TestERGM(unittest.TestCase):
         sample_size = 100
         sample = base_brute_force_model.generate_networks_for_sample(sample_size=sample_size)
         reference_brute_force_model = BruteForceERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
-        reference_brute_force_model.fit(sample)
+        reference_result = reference_brute_force_model.fit(sample, gtol=1e-12)
 
         tested_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
         tested_model.fit(sample)
 
-        self.assertTrue(np.all(np.abs(tested_model._thetas - reference_brute_force_model._thetas) < 5e-5))
+        self.assertLess(np.abs(reference_result.jac).max(), 1e-8)
+        np.testing.assert_allclose(tested_model._thetas, reference_brute_force_model._thetas, rtol=0, atol=2e-6)
 
     def test_mple_reciprocity_multiple_observed_networks(self):
         set_seed(347865)
@@ -637,11 +632,12 @@ class TestERGM(unittest.TestCase):
         base_brute_force_model = BruteForceERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
         sample = base_brute_force_model.generate_networks_for_sample(sample_size=sample_size)
         reference_brute_force_model = BruteForceERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
-        reference_brute_force_model.fit(sample)
+        reference_result = reference_brute_force_model.fit(sample, gtol=1e-12)
         tested_model = ERGM(n_nodes=n_nodes, metrics_collection=metrics, is_directed=True)
         tested_model.fit(sample)
 
-        self.assertTrue(np.all(np.abs(tested_model._thetas - reference_brute_force_model._thetas) < 5e-5))
+        self.assertLess(np.abs(reference_result.jac).max(), 1e-8)
+        np.testing.assert_allclose(tested_model._thetas, reference_brute_force_model._thetas, rtol=0, atol=1e-6)
 
     def test_get_mple_reciprocity_prediction(self):
         set_seed(348976)
@@ -823,7 +819,7 @@ class TestERGM(unittest.TestCase):
         result_weighted = weighted_model.fit(data, edge_weights=weights)
         self.assertTrue(result_weighted.success)
 
-        np.testing.assert_allclose(masked_model._thetas, weighted_model._thetas, rtol=5e-3)
+        np.testing.assert_allclose(masked_model._thetas, weighted_model._thetas, rtol=2e-5)
 
     def test_edge_weights_mask_equivalence_undirected(self):
         """
@@ -863,7 +859,7 @@ class TestERGM(unittest.TestCase):
         result_weighted = weighted_model.fit(data, edge_weights=weights)
         self.assertTrue(result_weighted.success)
 
-        np.testing.assert_allclose(masked_model._thetas, weighted_model._thetas, rtol=1e-3)
+        np.testing.assert_allclose(masked_model._thetas, weighted_model._thetas, rtol=2e-5)
 
     def test_edge_weights_constant_weight_equivalence(self):
         """Model with all weights = c should produce the same thetas as unweighted model."""
@@ -886,7 +882,7 @@ class TestERGM(unittest.TestCase):
         result_w = weighted_model.fit(data, edge_weights=weights)
         self.assertTrue(result_w.success)
 
-        np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=1e-3)
+        np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=1e-8)
 
     def test_edge_weights_ones_equals_no_weights(self):
         """Model with all weights = 1 should produce exactly the same thetas as unweighted model."""
@@ -911,7 +907,7 @@ class TestERGM(unittest.TestCase):
         result_w = weighted_model.fit(data, edge_weights=weights)
         self.assertTrue(result_w.success)
 
-        np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=5e-5)
+        np.testing.assert_allclose(unweighted_model._thetas, weighted_model._thetas, rtol=1e-8)
 
     def test_edge_weights_half_weight_equals_half_edges(self):
         """
@@ -975,7 +971,7 @@ class TestERGM(unittest.TestCase):
         self.assertTrue(result2.success)
         theta2 = model1._thetas[model1._metrics_collection.metrics[0]._sorted_type_pairs_indices[("A", "B")]]
 
-        np.testing.assert_allclose(theta1, theta2, rtol=1e-6)
+        np.testing.assert_allclose(theta1, theta2, rtol=1e-10)
 
     def test_edge_weights_validation(self):
         """Test that invalid edge weights raise appropriate errors."""

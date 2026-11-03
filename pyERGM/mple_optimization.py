@@ -7,6 +7,51 @@ from pathlib import Path
 from pyERGM.metrics import *
 from pyERGM.constants import MPLEOptimizationMethod, Reduction
 
+# The objectives are sums over dyads, so |f| is about n_dyads * entropy, and scipy's default relative ftol (2.2e-9)
+# stops ill-conditioned fits far from the optimum while reporting success. ftol=1e-15 stops at the rounding floor of
+# f. gtol is explicit, because scipy's default 1e-5 stops before the f-test's floor. Not used by the distributed path,
+# because its workers compute in float32 (see `mple_logistic_regression_optimization`).
+_MPLE_LBFGSB_OPTIONS = {"ftol": 1e-15, "gtol": 1e-6}
+
+
+def _feature_scales(Xs: np.ndarray) -> np.ndarray:
+    """
+    Root-mean-square of each feature over all rows of `Xs`, as an array of shape (F,). All-zero features get
+    scale 1. `Xs` is not copied.
+
+    `Xs` is either 2-D, (rows, F), as in plain MPLE, or 3-D, (dyads, 4 dyad states, F), as in MPLE-reciprocity.
+    """
+    if not (Xs.ndim == 2 or (Xs.ndim == 3 and Xs.shape[1] == 4)):
+        raise ValueError(f"Expected Xs of shape (rows, F) or (dyads, 4, F), got shape {Xs.shape}")
+    X2 = Xs.reshape(-1, Xs.shape[-1])
+    s = np.sqrt(np.einsum('ij,ij->j', X2, X2) / X2.shape[0])
+    s[s == 0] = 1.0
+    return s
+
+
+def _minimize_in_scaled_coordinates(fun, jac, x0, args, method, callback, hess=None, options=None) -> OptimizeResult:
+    """
+    Run `scipy.optimize.minimize` in coordinates theta' = theta * s, where s = `_feature_scales(args[0])`.
+
+    The optimizer sees f'(theta') = f(theta'/s), its gradient grad_f(theta'/s) / s and, if `hess` is given, its
+    Hessian H(theta'/s) / (s s^T). This makes the features comparable in magnitude, which the optimizers' stopping
+    rules and conditioning depend on, and avoids saturated starting points when features are large.
+    `x0` is given in theta units. The returned `res.x` and `res.jac` are mapped back to theta coordinates.
+    The callback receives theta' (its `x` is in scaled coordinates).
+    """
+    s = _feature_scales(args[0])
+    kwargs = {}
+    if hess is not None:
+        kwargs["hess"] = lambda x, *a: hess(x / s, *a) / np.outer(s, s)
+    if options is not None:
+        kwargs["options"] = options
+    res = minimize(lambda x, *a: fun(x / s, *a), x0 * s, args=args,
+                   jac=lambda x, *a: jac(x / s, *a) / s,
+                   method=method, callback=callback, **kwargs)
+    res.x = res.x / s
+    res.jac = res.jac * s
+    return res
+
 
 class OptimizationIterationCallback:
     """
@@ -117,7 +162,7 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
         Observed labels of shape (num_samples, 1). Can be binary (0/1) or fractional
         probabilities when averaging over multiple observed networks.
     eps : float, optional
-        Small constant to avoid log(0). Default is 1e-10.
+        Small constant to avoid log(0). Default is 1e-10; the effective clip is at least the dtype's eps.
     reduction : str, optional
         How to aggregate the log-likelihood: 'sum' (default), 'mean', or 'none'.
     log_base : float, optional
@@ -131,7 +176,9 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
     np.ndarray or float
         Log-likelihood value(s). Shape depends on reduction parameter.
     """
-    trimmed_predictions = np.clip(predictions, eps, 1 - eps)
+    # In float32, 1 - 1e-10 rounds to 1.0, so the clip must be at least the dtype's eps; float64 is unaffected.
+    eps_eff = max(eps, float(np.finfo(predictions.dtype).eps))
+    trimmed_predictions = np.clip(predictions, eps_eff, 1 - eps_eff)
     minus_binary_cross_entropy_per_edge = (ys * np.log(trimmed_predictions) + (1 - ys) * np.log(
         1 - trimmed_predictions)) / np.log(log_base)
     if sample_weights.size > 0:
@@ -175,10 +222,11 @@ def calc_logistic_regression_log_likelihood_grad(Xs: np.ndarray, predictions: np
 def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions: np.ndarray,
                                                      sample_weights: np.ndarray = np.empty(0)):
     """
-    Calculate the Hessian matrix of log-likelihood.
+    Calculate the Hessian matrix of the log-likelihood.
 
     Computes the matrix of second partial derivatives of the log-likelihood
-    with respect to model parameters. Used in Newton-type optimization methods.
+    with respect to model parameters. It is negative semidefinite.
+    Used in Newton-type optimization methods.
 
     Parameters
     ----------
@@ -193,12 +241,12 @@ def calc_logistic_regression_log_likelihood_hessian(Xs: np.ndarray, predictions:
     Returns
     -------
     np.ndarray
-        Hessian matrix of shape (num_features, num_features).
+        Hessian matrix of the log-likelihood, shape (num_features, num_features).
     """
     diag_values = predictions * (1 - predictions)
     if sample_weights.size > 0:
         diag_values = sample_weights * diag_values
-    return Xs.T @ (diag_values * Xs)
+    return -(Xs.T @ (diag_values * Xs))
 
 
 def calc_logistic_regression_log_likelihood_from_x_thetas(Xs: np.ndarray, thetas: np.ndarray, ys: np.ndarray):
@@ -328,7 +376,7 @@ def analytical_minus_log_like_grad_local(thetas, Xs, ys, eps=1e-10, sample_weigh
 
 def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10, sample_weights=np.empty(0)):
     """
-    Compute negative log-likelihood Hessian for local optimization.
+    Compute the Hessian of the negative log-likelihood for local optimization.
 
     Parameters
     ----------
@@ -346,15 +394,15 @@ def analytical_minus_log_likelihood_hessian_local(thetas, Xs, ys, eps=1e-10, sam
     Returns
     -------
     np.ndarray
-        Negative Hessian matrix.
+        Hessian matrix of the negative log-likelihood (positive semidefinite).
     """
     pred = np.clip(calc_logistic_regression_predictions(Xs, thetas.reshape(thetas.size, 1)), eps, 1 - eps)
     return -calc_logistic_regression_log_likelihood_hessian(Xs, pred, sample_weights=sample_weights)
 
 
-def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_edges_per_job):
+def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path):
     """
-    Compute negative log-likelihood Hessian using distributed computation.
+    Compute the Hessian of the negative log-likelihood using distributed computation.
 
     Parameters
     ----------
@@ -362,17 +410,14 @@ def analytical_minus_log_likelihood_hessian_distributed(thetas, data_path, num_e
         Model parameters.
     data_path : Path
         Path to distributed data chunks.
-    num_edges_per_job : int
-        Number of edges per distributed job.
 
     Returns
     -------
     np.ndarray
-        Negative Hessian matrix.
+        Hessian matrix of the negative log-likelihood (positive semidefinite).
     """
     return -distributed_logistic_regression_optimization_step(data_path, thetas.reshape(thetas.size, 1),
-                                                              ('log_likelihood_hessian',),
-                                                              num_edges_per_job)[0]
+                                                              ('log_likelihood_hessian',))[0]
 
 
 def mple_logistic_regression_optimization(
@@ -393,9 +438,11 @@ def mple_logistic_regression_optimization(
     observed_networks
         The observed network used as data for the optimization, or an array of observed networks.
     initial_thetas
-        The initial vector of parameters. If `None`, the initial state is randomly sampled from (0,1)
+        The initial vector of parameters. If `None`, the optimization starts from zeros.
     is_distributed
         Whether the calculations are carried locally or distributed over many compute nodes of an IBM LSF cluster.
+        The distributed path is in beta: its workers compute in float32, it uses scipy's default tolerances and no
+        feature rescaling. Rescale features with large values yourself; ill-conditioned fits can stop early.
     optimization_method
         The optimization method to use. Currently only 'L-BFGS-B' and 'Newton-CG' are supported.
     sample_weights
@@ -427,7 +474,7 @@ def mple_logistic_regression_optimization(
 
     num_features = metrics_collection.calc_num_of_features()
     if initial_thetas is None:
-        thetas = np.random.rand(num_features)
+        thetas = np.zeros(num_features)
     else:
         thetas = initial_thetas.copy()
 
@@ -444,13 +491,15 @@ def mple_logistic_regression_optimization(
             weights = np.empty(0)
 
         if optimization_method == MPLEOptimizationMethod.NEWTON_CG:
-            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, weights),
-                           jac=analytical_minus_log_like_grad_local, hess=analytical_minus_log_likelihood_hessian_local,
-                           callback=callback, method=optimization_method)
+            res = _minimize_in_scaled_coordinates(
+                analytical_minus_log_likelihood_local, analytical_minus_log_like_grad_local, thetas,
+                args=(Xs, ys, 1e-10, weights), method=optimization_method, callback=callback,
+                hess=analytical_minus_log_likelihood_hessian_local)
         elif optimization_method == MPLEOptimizationMethod.L_BFGS_B:
-            res = minimize(analytical_minus_log_likelihood_local, thetas, args=(Xs, ys, 1e-10, weights),
-                           jac=analytical_minus_log_like_grad_local, method=optimization_method,
-                           callback=callback)
+            res = _minimize_in_scaled_coordinates(
+                analytical_minus_log_likelihood_local, analytical_minus_log_like_grad_local, thetas,
+                args=(Xs, ys, 1e-10, weights), method=optimization_method, callback=callback,
+                options=dict(_MPLE_LBFGSB_OPTIONS))
         else:
             raise ValueError(
                 f"Unsupported optimization method: {optimization_method}. Options are: Newton-CG, L-BFGS-B")
@@ -478,6 +527,8 @@ def mple_logistic_regression_optimization(
         shutil.rmtree((data_path.parent / 'mple_data_paged_chunks').resolve())
 
     logger.debug(f"Optimization result: {res}")
+    if not res.success:
+        logger.warning(f"MPLE optimization did not report convergence: {res.message}")
 
     return res.x, pred, res.success
 
@@ -716,7 +767,7 @@ def mple_reciprocity_logistic_regression_optimization(
     observed_networks : np.ndarray
         Observed network(s) of shape (n, n) or (n, n, num_networks).
     initial_thetas : np.ndarray, optional
-        Initial parameter values. If None, randomly initialized from [0, 1].
+        Initial parameter values. If None, the optimization starts from zeros.
     optimization_method : str, optional
         Optimization method. Currently only 'L-BFGS-B' is supported. Default is 'L-BFGS-B'.
 
@@ -739,17 +790,20 @@ def mple_reciprocity_logistic_regression_optimization(
 
     num_features = metrics_collection.calc_num_of_features()
     if initial_thetas is None:
-        thetas = np.random.rand(num_features)
+        thetas = np.zeros(num_features)
     else:
         thetas = initial_thetas.copy()
 
     if optimization_method == MPLEOptimizationMethod.L_BFGS_B:
-        res = minimize(minus_log_likelihood_multi_class_logistic_regression, thetas, args=(Xs, ys),
-                       jac=minus_log_likelihood_gradient_multi_class_logistic_regression, method=MPLEOptimizationMethod.L_BFGS_B,
-                       callback=callback)
+        res = _minimize_in_scaled_coordinates(
+            minus_log_likelihood_multi_class_logistic_regression,
+            minus_log_likelihood_gradient_multi_class_logistic_regression, thetas, args=(Xs, ys),
+            method=MPLEOptimizationMethod.L_BFGS_B, callback=callback, options=dict(_MPLE_LBFGSB_OPTIONS))
     else:
         raise ValueError(
             f"Unsupported optimization method: {optimization_method}. Options are: {MPLEOptimizationMethod.L_BFGS_B}")
     pred = predict_multi_class_logistic_regression(Xs, res.x)
     logger.debug(f"Optimization result: {res}")
+    if not res.success:
+        logger.warning(f"MPLE optimization did not report convergence: {res.message}")
     return res.x, pred, res.success
