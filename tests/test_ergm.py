@@ -597,11 +597,12 @@ class TestERGM(unittest.TestCase):
             np.all(np.abs(all_dyad_likes[reciprocal_dyads_indices] - np.log(observed_reciprocity_p)) < 1e-5)
         )
 
-        brute_force_ergm = BruteForceERGM(n_nodes=4, metrics_collection=metrics, is_directed=True)
-        brute_force_ergm._thetas = model._thetas
+        brute_force_ergm = BruteForceERGM(n_nodes=4, metrics_collection=metrics, is_directed=True,
+                                          initial_thetas=model.get_model_parameters())
         true_likelihood_net_for_like = brute_force_ergm.calculate_probability(network_for_likelihood)
         calculated_likelihood = np.exp(model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.SUM))
-        np.testing.assert_allclose(true_likelihood_net_for_like, calculated_likelihood, rtol=0.01)
+        # Measured relative disagreement: 1e-15 (the model is dyad-independent, so MPLE is exact).
+        np.testing.assert_allclose(true_likelihood_net_for_like, calculated_likelihood, rtol=1e-10)
 
     def test_mple_multiple_observed_networks(self):
         set_seed(9876)
