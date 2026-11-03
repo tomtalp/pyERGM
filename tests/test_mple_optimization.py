@@ -8,7 +8,7 @@ from scipy.optimize import OptimizeResult, minimize
 from scipy.special import expit
 
 import pyERGM.mple_optimization as mo
-from pyERGM.constants import MPLEOptimizationMethod
+from pyERGM.constants import MPLEOptimizationMethod, OptimizationScheme
 from pyERGM.ergm import ERGM
 from pyERGM.metrics import (
     NodeAttrSum,
@@ -26,9 +26,14 @@ from pyERGM.mple_optimization import (
     calc_logistic_regression_log_likelihood_hessian,
     calc_logistic_regression_predictions,
     calc_logistic_regression_predictions_log_likelihood,
+    minus_log_likelihood_gradient_multi_class_logistic_regression,
+    minus_log_likelihood_multi_class_logistic_regression,
     mple_logistic_regression_optimization,
     mple_reciprocity_logistic_regression_optimization,
 )
+from mple_test_utils import ccc
+
+HARDLY_REPRODUCIBLE_GT_MODEL = Path(__file__).parent / "data" / "hardly_reproducible_gt_model.npz"
 
 
 def _hessian_test_data():
@@ -303,7 +308,7 @@ class TestRescalingInvariance(unittest.TestCase):
                    NodeAttrSum(node_attr, is_directed=True),
                    NumberOfEdgesTypesDirected(types, indices_from_user=[0])])
 
-    def _check_units_invariance(self, reciprocity, sample_size):
+    def _check_units_invariance(self, reciprocity, sample_size, **fit_kwargs):
         rng = np.random.default_rng(12345)
         positions_um = rng.uniform(0, 1000, size=(self.N_NODES, 3))
         node_attr = rng.normal(0, 100, size=self.N_NODES)
@@ -322,24 +327,96 @@ class TestRescalingInvariance(unittest.TestCase):
 
         fit_um = ERGM(self.N_NODES, metrics_um, is_directed=True)
         fit_m = ERGM(self.N_NODES, metrics_m, is_directed=True)
-        result_um = fit_um.fit(observed_networks, seed=1)
-        result_m = fit_m.fit(observed_networks, seed=1)
+        result_um = fit_um.fit(observed_networks, seed=1, **fit_kwargs)
+        result_m = fit_m.fit(observed_networks, seed=1, **fit_kwargs)
         self.assertTrue(result_um.success)
         self.assertTrue(result_m.success)
 
         distance_coef_idx = self.DISTANCE_COEF_IDX + int(reciprocity)
         expected_thetas_m = fit_um._thetas.copy()
         expected_thetas_m[distance_coef_idx] *= 1e6
-        # Measured max relative disagreement: 6e-12 (plain), 2e-15 (reciprocity); rtol is >100x above that.
+        # Measured max relative disagreement: 6e-12 (plain), 3e-15 (plain Newton-CG), 2e-15 (reciprocity); rtol is >100x
+        # above that.
         np.testing.assert_allclose(fit_m._thetas, expected_thetas_m, rtol=1e-9)
 
     def test_plain_mple_units_invariance(self):
         """Plain MPLE: fitting with positions in meters equals the micrometer fit with the distance coef x 1e6."""
         self._check_units_invariance(reciprocity=False, sample_size=8)
 
+    def test_plain_mple_newton_cg_units_invariance(self):
+        """Same as the plain test, with Newton-CG, whose Hessian is rescaled as well."""
+        self._check_units_invariance(reciprocity=False, sample_size=8,
+                                     mple_optimization_method=MPLEOptimizationMethod.NEWTON_CG)
+
     def test_reciprocity_units_invariance(self):
         """Same as the plain test, for the MPLE-reciprocity path."""
         self._check_units_invariance(reciprocity=True, sample_size=16)
+
+
+class TestHardlyReproducibleGTModel(unittest.TestCase):
+    """
+    A directed model whose GT is recovered only by a fit that reaches the optimum tightly: 100 nodes,
+    1024 observed networks sampled from GT, stored in tests/data/hardly_reproducible_gt_model.npz.
+
+    127 features:
+    - number of edges (1);
+    - total reciprocity (1), so the fit uses the MPLE-reciprocity scheme;
+    - sum of distances between connected nodes, positions in [0, 1]^3 (1);
+    - sum of a node attribute in [0, 1] over connected pairs (1);
+    - number of edges between each ordered pair of 10 node types, first pair dropped (99);
+    - number of edges between each ordered pair of 5 node types, first pair dropped (24).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        with np.load(HARDLY_REPRODUCIBLE_GT_MODEL) as data:
+            cls.gt = data["gt_thetas"]
+            cls.positions, cls.node_attributes = data["positions"], data["node_attributes"]
+            cls.types_10, cls.types_5 = data["types_10"], data["types_5"]
+            shape = tuple(data["networks_shape"])
+            cls.networks = np.unpackbits(data["networks_packed"])[:np.prod(shape)].reshape(shape).astype(float)
+        cls.n_nodes = shape[0]
+
+    @classmethod
+    def _metrics(cls):
+        return [
+            NumberOfEdgesDirected(),
+            TotalReciprocity(),
+            SumDistancesConnectedNeurons(cls.positions, is_directed=True),
+            NodeAttrSum(cls.node_attributes, is_directed=True),
+            NumberOfEdgesTypesDirected(cls.types_10, indices_from_user=[0]),
+            NumberOfEdgesTypesDirected(cls.types_5, indices_from_user=[0]),
+        ]
+
+    def _assert_fit_quality(self, theta, min_ccc, max_grad):
+        """
+        Check a fit against the ground truth (GT) the networks were sampled from, with three checks.
+
+        GT is not the MLE: with a finite sample, the maximizer of the pseudo-likelihood differs from GT, so
+        the fit is expected to be close to GT (CCC), not equal to it.
+
+        f(fit) <= f(GT) is a weak sanity check: a fit that stopped short of the optimum can still be better
+        than GT.
+
+        max|grad f(fit)| is the check that detects a fit that stopped short: at the optimum the gradient
+        vanishes, whatever `success` was reported.
+        """
+        mc = ERGM(self.n_nodes, self._metrics(), is_directed=True, fix_collinearity=False)._metrics_collection
+        Xs, ys = mc.prepare_mple_reciprocity_regressors(), mc.prepare_mple_reciprocity_labels(self.networks)
+        self.assertGreaterEqual(ccc(self.gt, theta), min_ccc)
+        self.assertLessEqual(minus_log_likelihood_multi_class_logistic_regression(theta, Xs, ys),
+                             minus_log_likelihood_multi_class_logistic_regression(self.gt, Xs, ys))
+        grad = minus_log_likelihood_gradient_multi_class_logistic_regression(theta, Xs, ys)
+        self.assertLessEqual(np.max(np.abs(grad)), max_grad)
+
+    def test_fit_quality(self):
+        """The default reciprocity MPLE fit succeeds, is close to GT and is stationary."""
+        model = ERGM(n_nodes=self.n_nodes, metrics_collection=self._metrics(), is_directed=True,
+                     fix_collinearity=False)
+        self.assertEqual(model._metrics_collection.choose_optimization_scheme(), OptimizationScheme.MPLE_RECIPROCITY)
+        result = model.fit(self.networks, seed=1)
+        self.assertTrue(result.success)
+        self._assert_fit_quality(model._thetas, min_ccc=0.99, max_grad=5e-4)
 
 
 class TestLogLikelihoodClip(unittest.TestCase):
