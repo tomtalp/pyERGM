@@ -16,6 +16,8 @@ def main():
     out_dir_path = args.out_dir_path
     funcs_to_calc = args.functions.split(',')
     thetas = np.fromstring(args.thetas, sep=',')
+    # float32 is a known limitation of this beta path: the gradient floors at ~1e-4, so the strict tolerances are
+    # not used, and the log-likelihood clip depends on the dtype.
     thetas = thetas[:, None].astype(np.float32)
     func_id = int(os.environ['LSB_JOBINDEX']) - 1
 

@@ -162,7 +162,7 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
         Observed labels of shape (num_samples, 1). Can be binary (0/1) or fractional
         probabilities when averaging over multiple observed networks.
     eps : float, optional
-        Small constant to avoid log(0). Default is 1e-10.
+        Small constant to avoid log(0). Default is 1e-10; the effective clip is at least the dtype's eps.
     reduction : str, optional
         How to aggregate the log-likelihood: 'sum' (default), 'mean', or 'none'.
     log_base : float, optional
@@ -176,7 +176,9 @@ def calc_logistic_regression_predictions_log_likelihood(predictions: np.ndarray,
     np.ndarray or float
         Log-likelihood value(s). Shape depends on reduction parameter.
     """
-    trimmed_predictions = np.clip(predictions, eps, 1 - eps)
+    # In float32, 1 - 1e-10 rounds to 1.0, so the clip must be at least the dtype's eps; float64 is unaffected.
+    eps_eff = max(eps, float(np.finfo(predictions.dtype).eps))
+    trimmed_predictions = np.clip(predictions, eps_eff, 1 - eps_eff)
     minus_binary_cross_entropy_per_edge = (ys * np.log(trimmed_predictions) + (1 - ys) * np.log(
         1 - trimmed_predictions)) / np.log(log_base)
     if sample_weights.size > 0:

@@ -25,6 +25,7 @@ from pyERGM.mple_optimization import (
     calc_logistic_regression_log_likelihood_grad,
     calc_logistic_regression_log_likelihood_hessian,
     calc_logistic_regression_predictions,
+    calc_logistic_regression_predictions_log_likelihood,
     mple_logistic_regression_optimization,
     mple_reciprocity_logistic_regression_optimization,
 )
@@ -339,6 +340,47 @@ class TestRescalingInvariance(unittest.TestCase):
     def test_reciprocity_units_invariance(self):
         """Same as the plain test, for the MPLE-reciprocity path."""
         self._check_units_invariance(reciprocity=True, sample_size=16)
+
+
+class TestLogLikelihoodClip(unittest.TestCase):
+    """The log-likelihood clip depends on the dtype, so float32 workers cannot produce NaN or -inf."""
+
+    def test_float32_saturated_predictions_are_finite(self):
+        """A float32 sigmoid saturated at exactly 1.0 still gives a finite log-likelihood, for y = 1 and y < 1."""
+        Xs = np.ones((3, 1), np.float32)
+        thetas = np.array([[40.]], np.float32)
+        pred = calc_logistic_regression_predictions(Xs, thetas)
+        self.assertEqual(pred[0, 0], 1.0)
+        for y in (1.0, 0.999):
+            ys = np.full((3, 1), y, np.float32)
+            self.assertTrue(np.isfinite(calc_logistic_regression_predictions_log_likelihood(pred, ys)[0][0]))
+
+    def _clip_bounds(self, dtype, **kwargs):
+        """The (a_min, a_max) that the log-likelihood passes to np.clip."""
+        pred = np.full((3, 1), 0.5, dtype)
+        ys = np.ones((3, 1), dtype)
+        with patch("pyERGM.mple_optimization.np.clip", wraps=np.clip) as spy:
+            calc_logistic_regression_predictions_log_likelihood(pred, ys, **kwargs)
+        spy.assert_called_once()
+        return spy.call_args.args[1], spy.call_args.args[2]
+
+    def test_float64_default_eps_is_kept(self):
+        """float64 with the default eps=1e-10: eps is above the dtype's eps, so it is the clip."""
+        self.assertEqual(self._clip_bounds(np.float64), (1e-10, 1 - 1e-10))
+
+    def test_float32_larger_eps_is_kept(self):
+        """float32 with eps=1e-3: eps is above the dtype's eps, so it is the clip."""
+        self.assertEqual(self._clip_bounds(np.float32, eps=1e-3), (1e-3, 1 - 1e-3))
+
+    def test_float32_default_eps_is_replaced_by_dtype_eps(self):
+        """float32 with the default eps=1e-10: eps is below the dtype's eps, so the dtype's eps is the clip."""
+        e = float(np.finfo(np.float32).eps)
+        self.assertEqual(self._clip_bounds(np.float32), (e, 1 - e))
+
+    def test_float64_zero_eps_is_replaced_by_dtype_eps(self):
+        """float64 with eps=0: eps is below the dtype's eps, so the dtype's eps is the clip."""
+        e = float(np.finfo(np.float64).eps)
+        self.assertEqual(self._clip_bounds(np.float64, eps=0), (e, 1 - e))
 
 
 if __name__ == "__main__":
