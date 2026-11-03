@@ -10,7 +10,7 @@ from pyERGM.datasets import sampson_matrix
 from mple_test_utils import ccc
 from pyERGM.constants import (
     OptimizationScheme, SamplingMethod, ConvergenceCriterion,
-    Reduction, ThetaInitMethod
+    Reduction, ThetaInitMethod, DyadStateIdx
 )
 import sys
 from scipy.linalg import eigh
@@ -559,7 +559,7 @@ class TestERGM(unittest.TestCase):
         expected_individual_likes[np.diag_indices(network_for_likelihood.shape[0])] = 1
 
         all_edges_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.NONE)
-        self.assertTrue(np.all(np.abs(all_edges_likes - np.log(expected_individual_likes))) < 1e-5)
+        np.testing.assert_allclose(all_edges_likes, np.log(expected_individual_likes), rtol=0, atol=1e-5)
 
         log_like_sum = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.SUM, log_base=10)
         self.assertTrue(np.abs(log_like_sum - np.log10(expected_individual_likes).sum()) < 1e-5)
@@ -590,12 +590,11 @@ class TestERGM(unittest.TestCase):
         ])
 
         dyad_states_for_likelihood = convert_connectivity_to_dyad_states(network_for_likelihood)
-        reciprocal_dyads_indices = np.where(dyad_states_for_likelihood.sum(axis=0) == 1)[0]
+        reciprocal_dyads_indices = np.where(dyad_states_for_likelihood[:, DyadStateIdx.RECIPROCAL_IDX.value] == 1)[0]
 
         all_dyad_likes = model.calc_model_log_likelihood(network_for_likelihood, reduction=Reduction.NONE)
-        self.assertTrue(
-            np.all(np.abs(all_dyad_likes[reciprocal_dyads_indices] - np.log(observed_reciprocity_p)) < 1e-5)
-        )
+        np.testing.assert_allclose(all_dyad_likes[reciprocal_dyads_indices], np.log(observed_reciprocity_p),
+                                   rtol=0, atol=1e-5)
 
         brute_force_ergm = BruteForceERGM(n_nodes=4, metrics_collection=metrics, is_directed=True,
                                           initial_thetas=model.get_model_parameters())
